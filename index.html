@@ -110,7 +110,6 @@ const html = htm.bind(h);
 
 /* ═══════ Data & filters ═══════ */
 const SAAVN_BASES = [
-  "https://saavn.dev/api",
   "https://saavn.sumit.co/api",
   "https://jiosaavn-api-sigma.vercel.app/api",
 ];
@@ -122,7 +121,7 @@ const ITUNES_TERMS = {
   bolly: ["Arijit Singh","Pritam songs","Shreya Ghoshal hindi","A R Rahman hindi","Amit Trivedi","Vishal Shekhar","Sonu Nigam hindi","Atif Aslam hindi","Jubin Nautiyal","Mohit Chauhan","Sachin Jigar","Badshah hindi"],
   telugu: ["Sid Sriram telugu","Devi Sri Prasad hits","Thaman S telugu","Anirudh telugu songs","Mickey J Meyer telugu","Gopi Sundar telugu","M M Keeravani telugu","Armaan Malik telugu","Anurag Kulkarni","telugu hit songs","Kaala Bhairava","Mangli telugu"],
 };
-const ITUNES_LANG_OK = { bolly:["bollywood","hindi"], telugu:["telugu","tollywood"] };
+const ITUNES_LANG_OK = { bolly:["bollywood","hindi","india","world","soundtrack"], telugu:["telugu","tollywood","india","world","soundtrack"] };
 const EXCLUDE_RX = /(remix|mashup|lo-?fi|slowed|reverb|medley|unplugged|acoustic|cover|karaoke|instrumental|\bbgm\b|jukebox|revisited|reprise|redux|\bclub\b|\bdj\b|mix\b|8d\b|sped up|lounge|female version|male version)/i;
 
 /* ═══════ Small utils ═══════ */
@@ -269,18 +268,19 @@ function jsonp(url){
   });
 }
 const itunesSearch = (term, limit) => {
-  const url = `https://itunes.apple.com/search?term=${encodeURIComponent(term)}&media=music&entity=song&country=IN&limit=${limit||40}`;
-  return fetch(url).then(r=>r.json()).catch(()=> jsonp(url));
+  const url = `https://itunes.apple.com/search?term=${encodeURIComponent(term)}&media=music&entity=song&country=IN&limit=${limit||50}`;
+  return fetch(url)
+    .then(r => { if (!r.ok) throw new Error("http "+r.status); return r.json(); })
+    .catch(()=> jsonp(url));
 };
 async function loadFromItunes(langs){
   const jobs = [];
-  for (const lang of langs) for (const t of shuffle(ITUNES_TERMS[lang]).slice(0,8)) jobs.push({t,lang});
-  const settled = await Promise.allSettled(jobs.map(j=>itunesSearch(j.t)));
+  const perLang = Math.max(4, Math.ceil(8/langs.length));
+  for (const lang of langs) for (const t of shuffle(ITUNES_TERMS[lang]).slice(0,perLang)) jobs.push({t,lang});
   const seen = new Set(); const pool = [];
-  settled.forEach((res, idx) => {
-    if (res.status!=="fulfilled" || !res.value || !res.value.results) return;
-    const lang = jobs[idx].lang;
-    for (const s of res.value.results){
+  const collect = (data, lang) => {
+    if (!data || !Array.isArray(data.results)) return;
+    for (const s of data.results){
       if (!s.previewUrl || !s.trackName) continue;
       if (EXCLUDE_RX.test(s.trackName)) continue;
       const g = (s.primaryGenreName||"").toLowerCase();
@@ -290,21 +290,37 @@ async function loadFromItunes(langs){
       const key = stripParens(s.trackName).toLowerCase();
       if (seen.has(key)) continue;
       seen.add(key);
-      pool.push(sanitizeTrack({
+      const t = sanitizeTrack({
         title:s.trackName, artist:s.artistName||"Unknown artist", album:s.collectionName||"",
         art:s.artworkUrl100 ? s.artworkUrl100.replace("100x100","400x400") : null,
         stream:s.previewUrl, duration:30, year, lang,
-      }));
+      });
+      if (t) pool.push(t);
     }
-  });
-  return pool.filter(Boolean);
+  };
+  // Waves of 3 with a pause between them — iTunes 403s bursts of parallel requests
+  for (let i=0; i<jobs.length; i+=3){
+    const wave = jobs.slice(i, i+3);
+    const settled = await Promise.allSettled(wave.map(j=>itunesSearch(j.t)));
+    settled.forEach((res, k) => { if (res.status==="fulfilled") collect(res.value, wave[k].lang); });
+    if (pool.length >= 40) break;
+    if (i+3 < jobs.length) await new Promise(r=>setTimeout(r, 400));
+  }
+  return pool;
 }
 async function buildCrate(mix){
   const langs = mix==="both" ? ["bolly","telugu"] : [mix];
-  let pool = await loadFromSaavn(langs);
+  let pool = [];
+  try { pool = await loadFromSaavn(langs); } catch(e){}
   let source = "saavn";
-  if (pool.length < 10){ pool = await loadFromItunes(langs); source = "itunes"; }
-  if (pool.length < 10) return null;
+  if (pool.length < 10){
+    let extra = [];
+    try { extra = await loadFromItunes(langs); } catch(e){}
+    const have = new Set(pool.map(t=>stripParens(t.title).toLowerCase()));
+    for (const t of extra) if (!have.has(stripParens(t.title).toLowerCase())) pool.push(t);
+    if (extra.length > pool.length/2) source = "itunes";
+  }
+  if (pool.length < 8) return null;
   const played = new Set(lsGet(LS_PLAYED) || []);
   const fresh = pool.filter(t => !played.has(stripParens(t.title).toLowerCase()));
   if (fresh.length >= 15) pool = fresh;
@@ -437,7 +453,7 @@ function App(){
     setLoading(true); setError("");
     const crate = await buildCrate(S.mix);
     setLoading(false);
-    if (!crate){ setError("Couldn't load enough songs. Check your connection and try again."); return; }
+    if (!crate){ setError("Couldn't load enough songs — the music sources may be briefly busy. Wait a moment and try again."); return; }
     setPhase("ready"); setNote(""); setSnip({ end:0, lastSecs:S.snippetLen, playSecs:0 });
     setState(st=>({ ...st, screen:"game",
       players: st.players.map(p=>({ ...p, score:0 })),
