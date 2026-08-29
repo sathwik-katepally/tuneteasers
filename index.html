@@ -110,9 +110,8 @@ const html = htm.bind(h);
 
 /* ═══════ Data & filters ═══════ */
 const SAAVN_BASES = [
+  "https://saavn-api.nandanvarma.com/api",
   "https://saavn.dev/api",
-  "https://saavn.sumit.co/api",
-  "https://jiosaavn-api-sigma.vercel.app/api",
 ];
 const SAAVN_QUERIES = {
   bolly: ["bollywood hits","hindi hit songs","Arijit Singh hits","Pritam hits","best of bollywood","hindi songs 2010s","hindi songs 2020s","Shreya Ghoshal hindi","A R Rahman hindi","hindi romantic hits","hindi dance hits","Atif Aslam hits"],
@@ -159,6 +158,7 @@ function sanitizeTrack(t){
     duration: parseInt(t.duration)||200,
     year: parseInt(t.year)||0,
     lang: t.lang==="telugu" ? "telugu" : "bolly",
+    hook: !!t.hook, // true when the stream is a mid-song preview clip, not the intro
   };
 }
 function loadPersisted(){
@@ -182,7 +182,7 @@ function loadPersisted(){
         turn: Math.min(Math.max(0, parseInt(raw.game.turn)||0), s.players.length-1),
         round: Math.max(1, parseInt(raw.game.round)||1),
         totalSongs: queue.length,
-        source: raw.game.source==="itunes" ? "itunes" : "saavn",
+        source: ["saavn","catalog","live"].includes(raw.game.source) ? raw.game.source : "catalog",
       };
       s.screen = "game"; // auto-resume: refresh drops you right back in
     }
@@ -197,7 +197,10 @@ function markPlayed(title){
   lsSet(LS_PLAYED, l);
 }
 
-/* ═══════ Song loading ═══════ */
+/* ═══════ Song loading ═══════
+   Primary: JioSaavn mirror (full songs, snippets start at the intro).
+   Fallback 1: catalog.json baked into the site (rebuilt weekly by CI, 30s hook clips).
+   Fallback 2: live iTunes search, throttled to stay under Apple's rate limit. */
 let saavnBase = null;
 async function saavnFetch(path){
   const bases = saavnBase ? [saavnBase] : SAAVN_BASES;
@@ -256,6 +259,15 @@ async function loadFromSaavn(langs){
   }
   return pool.filter(Boolean);
 }
+async function loadCatalog(langs){
+  try {
+    const r = await fetch("./catalog.json", { cache:"no-cache" });
+    if (!r.ok) return [];
+    const j = await r.json();
+    const tracks = (Array.isArray(j.tracks) ? j.tracks : []).map(t=>sanitizeTrack({ ...t, hook:true })).filter(Boolean);
+    return tracks.filter(t => langs.includes(t.lang));
+  } catch(e){ return []; }
+}
 function jsonp(url){
   return new Promise((resolve,reject)=>{
     const cb = "cb_"+Math.random().toString(36).slice(2);
@@ -274,7 +286,9 @@ const itunesSearch = (term, limit) => {
 };
 async function loadFromItunes(langs){
   const jobs = [];
-  for (const lang of langs) for (const t of shuffle(ITUNES_TERMS[lang]).slice(0,8)) jobs.push({t,lang});
+  // Keep the request count low: iTunes rate-limits around 20 searches/min per IP,
+  // and a failed attempt needs headroom for the user to retry within a minute.
+  for (const lang of langs) for (const t of shuffle(ITUNES_TERMS[lang]).slice(0, langs.length>1 ? 5 : 8)) jobs.push({t,lang});
   const settled = await Promise.allSettled(jobs.map(j=>itunesSearch(j.t)));
   const seen = new Set(); const pool = [];
   settled.forEach((res, idx) => {
@@ -293,7 +307,7 @@ async function loadFromItunes(langs){
       pool.push(sanitizeTrack({
         title:s.trackName, artist:s.artistName||"Unknown artist", album:s.collectionName||"",
         art:s.artworkUrl100 ? s.artworkUrl100.replace("100x100","400x400") : null,
-        stream:s.previewUrl, duration:30, year, lang,
+        stream:s.previewUrl, duration:30, year, lang, hook:true,
       }));
     }
   });
@@ -301,9 +315,21 @@ async function loadFromItunes(langs){
 }
 async function buildCrate(mix){
   const langs = mix==="both" ? ["bolly","telugu"] : [mix];
+  const key = t => stripParens(t.title).toLowerCase();
   let pool = await loadFromSaavn(langs);
   let source = "saavn";
-  if (pool.length < 10){ pool = await loadFromItunes(langs); source = "itunes"; }
+  if (pool.length < 10){
+    const keys = new Set(pool.map(key));
+    const backup = (await loadCatalog(langs)).filter(t=>!keys.has(key(t)));
+    if (!pool.length) source = "catalog";
+    pool = pool.concat(backup);
+  }
+  if (pool.length < 10){
+    const keys = new Set(pool.map(key));
+    const live = (await loadFromItunes(langs)).filter(t=>!keys.has(key(t)));
+    if (!pool.length) source = "live";
+    pool = pool.concat(live);
+  }
   if (pool.length < 10) return null;
   const played = new Set(lsGet(LS_PLAYED) || []);
   const fresh = pool.filter(t => !played.has(stripParens(t.title).toLowerCase()));
@@ -536,7 +562,7 @@ function App(){
             <${Chip} on=${S.sound==="inst"} onClick=${()=>upSettings({sound:"inst"})}>🎻 Music only<//>
             <${Chip} on=${S.sound==="full"} onClick=${()=>upSettings({sound:"full"})}>🎤 With vocals<//>
           </div>
-          ${S.sound==="inst" && html`<div class="sub" style="font-size:12px;margin-top:8px">Snippets play the song's opening hook — usually pure music — with vocals muffled on top.</div>`}
+          ${S.sound==="inst" && html`<div class="sub" style="font-size:12px;margin-top:8px">Snippets play with vocals muffled, so the melody does the teasing.</div>`}
         </div>
         <div class="card">
           <div class="label">SNIPPET LENGTH</div>
@@ -604,7 +630,6 @@ function App(){
       ${phase==="ready" && html`
         <p class="center sub" style="margin-bottom:14px">Everyone quiet — ${cur.name}, hit play when ready.</p>
         <button class="btn btn-gold" onClick=${()=>playSnippet(S.snippetLen, "fresh")}>▶ Play ${S.snippetLen}-second snippet</button>
-        ${g.source==="itunes" && S.sound==="inst" && html`<div class="notice">Backup catalog in use — snippets start at the song's hook, not the intro.</div>`}
         <div class="gap"></div>
         <button class="btn btn-ghost" onClick=${()=>nextRound(null)}>Skip this song</button>`}
       ${phase==="cueing" && html`
@@ -635,7 +660,7 @@ function App(){
       <div class="footnote">
         Song ${Math.min(g.trackIdx+1, g.totalSongs)} of ${g.totalSongs} in the crate
         ${track ? ` · ${track.lang==="bolly" ? "Bollywood" : "Telugu"}` : ""}
-        ${g.source==="itunes" ? " · backup source" : ""}
+        ${g.source==="live" ? " · live search" : ""}
         <br/><a href="#" onClick=${e=>{e.preventDefault(); endGame();}}>End game</a>
       </div>
     </div>`;
