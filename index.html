@@ -535,13 +535,13 @@ function App(){
 
   if (state.screen === "setup"){
     if (loading) return html`
-      <div class="wrap center" style="padding-top:20vh">
+      <div class="wrap center" key="loading" style="padding-top:20vh">
         <${Disc} spinning=${true} />
         <div class="display" style="font-size:22px;font-weight:700;margin-top:12px">Digging through the crates…</div>
         <div class="sub" style="margin-top:6px">Loading songs</div>
       </div>`;
     return html`
-      <div class="wrap">
+      <div class="wrap" key="setup">
         <div class="center" style="margin:24px 0 28px">
           <div class="eyebrow">PASS-THE-PHONE PARTY GAME</div>
           <h1>Tune<span style="color:var(--rose)">Teasers</span></h1>
@@ -589,7 +589,7 @@ function App(){
   if (state.screen === "done"){
     const ranked = [...state.players].sort((a,b)=>b.score-a.score);
     return html`
-      <div class="wrap center" style="padding-top:16vh">
+      <div class="wrap center" key="done" style="padding-top:16vh">
         <div style="font-size:46px">🏆</div>
         <h2 class="display" style="font-size:30px;font-weight:800;margin:6px 0 18px">${ranked[0].name} takes it!</h2>
         <div class="card" style="text-align:left">
@@ -609,7 +609,7 @@ function App(){
   const spinning = phase==="playing" || phase==="revealed";
   const revealed = phase==="revealed";
   return html`
-    <div class="wrap">
+    <div class="wrap" key="game">
       <div class="topbar">
         <div class="sub" style="font-size:13px;font-weight:600">Round ${g.round}</div>
         <button class="scorebtn" onClick=${()=>setShowBoard(v=>!v)}>${showBoard?"Hide scores":"Scores"}</button>
