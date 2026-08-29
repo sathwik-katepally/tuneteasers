@@ -1,0 +1,10 @@
+# TuneTeasers — personal song-API instance
+#
+# Deploy your own copy of the JioSaavn API (repo: sumitkolhe/jiosaavn-api on GitHub)
+# using the one-click Vercel or Cloudflare Workers button in its README, then put
+# the deployed URL on its own line below (no leading #). The game tries it first.
+#
+# Example (yours will differ):
+#   put something like  your-project-name.vercel.app  here, with https:// in front
+#
+# Lines starting with # are ignored. "/api" is appended automatically if missing.

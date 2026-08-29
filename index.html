@@ -113,6 +113,22 @@ const SAAVN_BASES = [
   "https://saavn.sumit.co/api",
   "https://jiosaavn-api-sigma.vercel.app/api",
 ];
+/* Personal API instance (tried first): put its URL in api-base.txt next to this file. */
+let customBaseLoaded = false;
+async function loadCustomBase(){
+  if (customBaseLoaded) return;
+  customBaseLoaded = true;
+  try {
+    const r = await fetch("./api-base.txt", { cache: "no-store" });
+    if (!r.ok) return;
+    const lines = (await r.text()).split("\n").filter(l => !l.trim().startsWith("#"));
+    const m = lines.join("\n").match(/https:\/\/[^\s"']+/);
+    if (!m) return;
+    let u = m[0].replace(/\/+$/, "");
+    if (!/\/api$/.test(u)) u += "/api";
+    if (!SAAVN_BASES.includes(u)) SAAVN_BASES.unshift(u);
+  } catch(e){}
+}
 const SAAVN_QUERIES = {
   bolly: ["bollywood hits","hindi hit songs","Arijit Singh hits","Pritam hits","best of bollywood","hindi songs 2010s","hindi songs 2020s","Shreya Ghoshal hindi","A R Rahman hindi","hindi romantic hits","hindi dance hits","Atif Aslam hits"],
   telugu: ["telugu hits","telugu hit songs","top telugu songs","Sid Sriram telugu","Devi Sri Prasad hits","telugu songs 2010s","telugu songs 2020s","Thaman hits","Anirudh telugu","telugu melody hits","telugu mass hits","tollywood hits"],
@@ -310,6 +326,7 @@ async function loadFromItunes(langs){
 }
 async function buildCrate(mix){
   const langs = mix==="both" ? ["bolly","telugu"] : [mix];
+  await loadCustomBase();
   let pool = [];
   try { pool = await loadFromSaavn(langs); } catch(e){}
   let source = "saavn";
