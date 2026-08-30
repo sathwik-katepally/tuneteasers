@@ -21,7 +21,9 @@
 `App` holds one persisted `state` object: `{ screen, settings, players, game }`.
 `settings` is `{ mix, sound, snippetLen, eras }`.
 `game` is `{ queue, trackIdx, turn, round, totalSongs, source }` or null when no game is running.
-Every `state` change is persisted to localStorage (`tuneteasers_v6`) by an effect, and `loadPersisted` restores and sanitizes it on boot, auto-resuming into a running game.
+Every `state` change is persisted to localStorage (`tuneteasers_v6`) by an effect, and `loadPersisted` restores and sanitizes it on boot.
+A page load always lands on the setup (home) screen; if a saved game exists, setup shows a Resume/Discard card rather than jumping straight into it.
+The game screen's "← Home" button navigates back without destroying the game (it resets the transient phase to `ready`); the footnote's "End game" link is the destructive exit.
 Ephemeral per-round UI state (phase, snippet progress, hint, scoreboard visibility) is separate `useState` and intentionally not persisted.
 
 ## Screens and phases

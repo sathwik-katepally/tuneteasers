@@ -56,7 +56,7 @@ export function loadPersisted(){
         totalSongs: queue.length,
         source: ["saavn","catalog","live"].includes(raw.game.source) ? raw.game.source : "catalog",
       };
-      s.screen = "game"; // auto-resume: refresh drops you right back in
+      // Screen stays "setup": the home page offers a Resume card instead of jumping straight in.
     }
   }
   return s;

@@ -73,13 +73,16 @@ export function App(){
     }
     setSnip(nextSnip);
     setPhase("playing");
-    engine.playElement(track.stream, offset, secs, done);
+    engine.playElement(track.stream, offset, secs, done,
+      ()=>{ setNote("This track won't stream right now — skip it or reveal."); setPhase("guessing"); });
   }
 
   function revealTrack(){
     if (!track) return;
+    setNote("");
     const offset = track.duration > 35 ? Math.min(45, Math.max(0, track.duration - 60)) : 0;
-    engine.playElement(track.stream, offset, 0, null);
+    engine.playElement(track.stream, offset, 0, null,
+      ()=>setNote("Couldn't stream the full song."));
     setPhase("revealed");
   }
 
@@ -131,12 +134,20 @@ export function App(){
     engine.stop();
     setState(st=>({ ...st, screen:"setup", game:null }));
   }
+  function goHome(){ // back to the home page; the game keeps running and can be resumed from there
+    engine.stop();
+    setPhase("ready"); setNote(""); setShowBoard(false);
+    setSnip(s=>({ ...s, end:0, playSecs:0 }));
+    setState(st=>({ ...st, screen:"setup" }));
+  }
 
   if (state.screen === "setup"){
     if (loading) return <Loading />;
     return <Setup error={error} S={S} upSettings={upSettings} toggleEra={toggleEra}
       players={state.players} renamePlayer={renamePlayer} removePlayer={removePlayer} addPlayer={addPlayer}
-      blocked={blocked} unblockArtist={unblockArtist} startGame={startGame} />;
+      blocked={blocked} unblockArtist={unblockArtist} startGame={startGame}
+      savedGame={g} resumeGame={()=>setState(st=>({ ...st, screen:"game" }))}
+      discardGame={()=>setState(st=>({ ...st, game:null, players: st.players.map(p=>({ ...p, score:0 })) }))} />;
   }
   if (state.screen === "done"){
     if (loading) return <Loading />;
@@ -149,5 +160,5 @@ export function App(){
   return <Game g={g} players={state.players} S={S} track={track} phase={phase} snip={snip} note={note}
     hint={hint} useHint={()=>setHint(true)} showBoard={showBoard} toggleBoard={()=>setShowBoard(v=>!v)}
     playSnippet={playSnippet} revealTrack={revealTrack} nextRound={nextRound}
-    blockArtist={blockArtist} primaryArtist={primaryArtist} curArtistBlocked={curArtistBlocked} endGame={endGame} />;
+    blockArtist={blockArtist} primaryArtist={primaryArtist} curArtistBlocked={curArtistBlocked} endGame={endGame} goHome={goHome} />;
 }

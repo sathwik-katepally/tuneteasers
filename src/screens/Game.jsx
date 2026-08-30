@@ -3,14 +3,17 @@ import { Disc, ScoreRow } from "../components/bits.jsx";
 
 export function Game(props){
   const { g, players, S, track, phase, snip, note, hint, useHint, showBoard, toggleBoard,
-          playSnippet, revealTrack, nextRound, blockArtist, primaryArtist, curArtistBlocked, endGame } = props;
+          playSnippet, revealTrack, nextRound, blockArtist, primaryArtist, curArtistBlocked, endGame, goHome } = props;
   const cur = players[g.turn];
   const spinning = phase==="playing" || phase==="revealed";
   const revealed = phase==="revealed";
   return (
     <div class="wrap" key="game">
       <div class="topbar">
-        <div class="sub" style="font-size:13px;font-weight:600">Round {g.round}</div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <button class="scorebtn" aria-label="Back to home" onClick={goHome}>← Home</button>
+          <div class="sub" style="font-size:13px;font-weight:600">Round {g.round}</div>
+        </div>
         <button class="scorebtn" onClick={toggleBoard}>{showBoard?"Hide scores":"Scores"}</button>
       </div>
       {showBoard && (
@@ -46,6 +49,7 @@ export function Game(props){
       </>}
       {phase==="guessing" && <>
         <p class="center sub" style="margin-bottom:14px">Say your guess out loud, then reveal.</p>
+        {note && <div class="notice" style="margin:-6px 0 12px">{note}</div>}
         {hint && track && (
           <div class="card center" style="padding:12px;border:1.5px solid #FFB62755;margin-bottom:14px">
             <div style="color:var(--marigold);font-weight:700">💡 {track.album ? `From "${track.album}"` : "No movie on record"}{track.year ? ` · ${track.year}` : ""}</div>
@@ -63,6 +67,7 @@ export function Game(props){
         </>}
       </>}
       {revealed && track && <>
+        {note && <div class="notice" style="margin:0 0 10px">{note}</div>}
         <div class="center" style="margin-bottom:16px">
           <div class="answer-title">{track.title}</div>
           <div class="answer-artist">{track.artist}</div>

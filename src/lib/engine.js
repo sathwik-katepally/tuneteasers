@@ -66,7 +66,7 @@ export const engine = {
     this.timer = setTimeout(()=>{ if (s === this.session) onEnd && onEnd(); }, secs*1000);
     return "played";
   },
-  playElement(url, offset, secs, onEnd){
+  playElement(url, offset, secs, onEnd, onErr){
     this.stop();
     const s = this.session;
     if (!this.el || this.el.dataset.src !== url){
@@ -75,14 +75,24 @@ export const engine = {
       this.el.dataset.src = url;
     }
     const el = this.el;
+    let guard = null; // dead or stalled streams must not leave the game waiting forever
+    const fail = () => {
+      if (guard){ clearTimeout(guard); guard = null; }
+      if (s === this.session && onErr) onErr();
+    };
     const go = () => {
+      if (guard){ clearTimeout(guard); guard = null; }
       if (s !== this.session) return; // superseded while loading — never plays
       try { el.currentTime = offset; } catch(e){}
       const p = el.play(); if (p) p.catch(()=>{});
       if (secs) this.timer = setTimeout(()=>{ if (s === this.session){ el.pause(); onEnd && onEnd(); } }, secs*1000);
     };
     if (el.readyState >= 1) go();
-    else el.addEventListener("loadedmetadata", go, { once:true });
+    else {
+      guard = setTimeout(fail, 12000);
+      el.addEventListener("loadedmetadata", go, { once:true });
+      el.addEventListener("error", fail, { once:true });
+    }
   },
 };
 

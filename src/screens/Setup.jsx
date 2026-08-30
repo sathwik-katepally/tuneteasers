@@ -11,7 +11,7 @@ export function Loading(){
   );
 }
 
-export function Setup({ error, S, upSettings, toggleEra, players, renamePlayer, removePlayer, addPlayer, blocked, unblockArtist, startGame }){
+export function Setup({ error, S, upSettings, toggleEra, players, renamePlayer, removePlayer, addPlayer, blocked, unblockArtist, startGame, savedGame, resumeGame, discardGame }){
   return (
     <div class="wrap" key="setup">
       <div class="center" style="margin:24px 0 28px">
@@ -20,6 +20,17 @@ export function Setup({ error, S, upSettings, toggleEra, players, renamePlayer, 
         <p class="sub">Hear the melody. Shout the song. Claim the point.</p>
       </div>
       {error && <div class="card" style="border:1.5px solid var(--rose)"><div class="sub">{error}</div></div>}
+      {savedGame && (
+        <div class="card" style="border:1.5px solid var(--marigold)">
+          <div class="label">GAME IN PROGRESS</div>
+          <div class="sub" style="margin-bottom:12px">
+            Round {savedGame.round} · {players[savedGame.turn]?.name} is up · song {Math.min(savedGame.trackIdx+1, savedGame.totalSongs)} of {savedGame.totalSongs}
+          </div>
+          <button class="btn btn-gold" onClick={resumeGame}>▶ Resume game</button>
+          <div class="gap"></div>
+          <button class="btn btn-ghost" style="padding:10px" onClick={discardGame}>Discard it</button>
+        </div>
+      )}
       <div class="card">
         <div class="label">MUSIC MIX · songs from 2000 onwards</div>
         <div class="chips">
