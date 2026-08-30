@@ -137,7 +137,8 @@ function safeUrl(u){
 
 /* ═══════ Persistence (auto-save on every change, auto-resume on load) ═══════ */
 const LS_KEY = "tuneteasers_v6";
-const LS_PLAYED = "tt_played";
+const LS_PLAYED = "tt_played";   // { titleKey: lastPlayedMs } — device-local recent-play cooldown
+const LS_BLOCKED = "tt_blocked"; // [ artistName ] — device-local "never play this artist" list
 const lsGet = k => { try { return JSON.parse(localStorage.getItem(k)); } catch(e){ return null; } };
 const lsSet = (k,v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch(e){} };
 
@@ -190,12 +191,29 @@ function loadPersisted(){
   return s;
 }
 const persist = s => lsSet(LS_KEY, { settings:s.settings, players:s.players, game:s.game });
-function markPlayed(title){
-  const l = lsGet(LS_PLAYED) || [];
-  l.push(stripParens(title).toLowerCase());
-  while (l.length > 400) l.shift();
-  lsSet(LS_PLAYED, l);
+
+const PLAY_COOLDOWN = 7*24*3600*1000; // a song heard on this device sits out for a week
+function loadPlayed(){
+  const raw = lsGet(LS_PLAYED);
+  if (Array.isArray(raw)){ // migrate the old list format: treat every entry as just played
+    const m = {}; const t = Date.now();
+    for (const k of raw) if (typeof k === "string") m[k] = t;
+    return m;
+  }
+  return (raw && typeof raw === "object") ? raw : {};
 }
+function markPlayed(title){
+  const m = loadPlayed();
+  m[stripParens(title).toLowerCase()] = Date.now();
+  const cutoff = Date.now() - 30*24*3600*1000;
+  for (const k of Object.keys(m)) if (!(m[k] > cutoff)) delete m[k];
+  lsSet(LS_PLAYED, m);
+}
+
+const normArtist = s => String(s||"").trim().toLowerCase();
+const loadBlocked = () => { const l = lsGet(LS_BLOCKED); return Array.isArray(l) ? l.filter(x=>typeof x==="string" && x.trim()).slice(0,50) : []; };
+const trackArtists = t => String(t.artist||"").split(",").map(normArtist).filter(Boolean);
+const isBlocked = (t, set) => trackArtists(t).some(a=>set.has(a));
 
 /* ═══════ Song loading ═══════
    Primary: JioSaavn mirror (full songs, snippets start at the intro).
@@ -330,11 +348,18 @@ async function buildCrate(mix){
     if (!pool.length) source = "live";
     pool = pool.concat(live);
   }
+  const blocked = new Set(loadBlocked().map(normArtist));
+  if (blocked.size) pool = pool.filter(t => !isBlocked(t, blocked));
   if (pool.length < 10) return null;
-  const played = new Set(lsGet(LS_PLAYED) || []);
-  const fresh = pool.filter(t => !played.has(stripParens(t.title).toLowerCase()));
-  if (fresh.length >= 15) pool = fresh;
-  return { queue: shuffle(pool), source };
+  // Recently played songs (this device) sit out; when the fresh pool runs thin,
+  // repeats come back least-recently-played first, queued after all fresh songs.
+  const played = loadPlayed();
+  const now = Date.now();
+  const fresh = [], stale = [];
+  for (const t of pool) ((now - (played[key(t)] || 0)) > PLAY_COOLDOWN ? fresh : stale).push(t);
+  stale.sort((a,b) => (played[key(a)]||0) - (played[key(b)]||0));
+  const queue = fresh.length >= 15 ? shuffle(fresh) : shuffle(fresh).concat(stale);
+  return { queue, source };
 }
 
 /* ═══════ Audio engine — the ONLY owner of playback ═══════
@@ -443,6 +468,7 @@ function App(){
   const [note, setNote] = useState("");
   const [showBoard, setShowBoard] = useState(false);
   const [snip, setSnip] = useState({ end:0, lastSecs:10, playSecs:0 });
+  const [blocked, setBlocked] = useState(loadBlocked);
 
   useEffect(()=>{ persist(state); }, [state]);
   useEffect(()=>{
@@ -518,6 +544,27 @@ function App(){
     if (state.screen==="game" && track && S.sound==="inst") engine.prefetch(track.stream);
   }, [g && g.trackIdx, state.screen]);
 
+  function blockArtist(){
+    if (!track) return;
+    const primary = String(track.artist||"").split(",")[0].trim();
+    if (!primary) return;
+    const list = loadBlocked();
+    const next = list.some(a=>normArtist(a)===normArtist(primary)) ? list : [...list, primary].slice(0,50);
+    lsSet(LS_BLOCKED, next);
+    setBlocked(next);
+    const set = new Set(next.map(normArtist));
+    setState(st=>{ // drop the blocked artist's songs still waiting in this crate
+      const gg = st.game; if (!gg) return st;
+      const queue = gg.queue.filter((t,i)=> i<=gg.trackIdx || !isBlocked(t,set));
+      return { ...st, game:{ ...gg, queue, totalSongs:queue.length } };
+    });
+  }
+  function unblockArtist(name){
+    const next = loadBlocked().filter(a=>normArtist(a)!==normArtist(name));
+    lsSet(LS_BLOCKED, next);
+    setBlocked(next);
+  }
+
   function endGame(){
     if (!confirm("End this game? Scores will be cleared.")) return;
     engine.stop();
@@ -582,6 +629,12 @@ function App(){
           ${state.players.length<8 && html`<button class="btn btn-ghost" style="padding:10px"
             onClick=${()=>setState(st=>({ ...st, players:[...st.players, {name:"Player "+(st.players.length+1), score:0}] }))}>+ Add player</button>`}
         </div>
+        ${blocked.length>0 && html`<div class="card">
+          <div class="label">BLOCKED ARTISTS · tap to bring one back</div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px">
+            ${blocked.map(a=>html`<button class="chip" style="flex:0 0 auto" key=${a} onClick=${()=>unblockArtist(a)}>✕ ${a}</button>`)}
+          </div>
+        </div>`}
         <button class="btn btn-gold pulse" style="font-size:19px" onClick=${startGame}>Start the game</button>
       </div>`;
   }
@@ -608,6 +661,8 @@ function App(){
   const cur = state.players[g.turn];
   const spinning = phase==="playing" || phase==="revealed";
   const revealed = phase==="revealed";
+  const primaryArtist = track ? String(track.artist||"").split(",")[0].trim() : "";
+  const curArtistBlocked = !!primaryArtist && blocked.some(a=>normArtist(a)===normArtist(primaryArtist));
   return html`
     <div class="wrap" key="game">
       <div class="topbar">
@@ -656,7 +711,12 @@ function App(){
         <div class="row2">
           <button class="btn btn-teal" onClick=${()=>nextRound(true)}>✓ Got it (+1)</button>
           <button class="btn btn-dark" onClick=${()=>nextRound(false)}>✗ Missed</button>
-        </div>`}
+        </div>
+        ${primaryArtist && html`
+          <div class="gap"></div>
+          <button class="btn btn-ghost" style="padding:10px;font-size:13px" disabled=${curArtistBlocked} onClick=${blockArtist}>
+            ${curArtistBlocked ? `✓ ${primaryArtist} won't play again` : `🚫 Don't play ${primaryArtist} again`}
+          </button>`}`}
       <div class="footnote">
         Song ${Math.min(g.trackIdx+1, g.totalSongs)} of ${g.totalSongs} in the crate
         ${track ? ` · ${track.lang==="bolly" ? "Bollywood" : "Telugu"}` : ""}
