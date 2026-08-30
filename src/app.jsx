@@ -106,8 +106,11 @@ export function App(){
       return { ...st, players, game:{ ...gg, trackIdx, turn, round } };
     });
   }
-  useEffect(()=>{ // prefetch the upcoming track whenever it changes
-    if (state.screen==="game" && track && S.sound==="inst") engine.prefetch(track.stream);
+  useEffect(()=>{ // keep the current track ready, then warm the next one behind it
+    if (state.screen!=="game" || !track || S.sound!=="inst") return;
+    const next = g.queue[g.trackIdx+1];
+    engine.ensureBuf(track.stream).catch(()=>{})
+      .then(()=>{ if (next) engine.prefetch(next.stream); });
   }, [g && g.trackIdx, state.screen]);
 
   function blockArtist(){

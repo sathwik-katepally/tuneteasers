@@ -14,8 +14,17 @@ const LS_ML_SLOW = "tt_ml_slow";
 
 let sessionP = null;
 
+/* iOS Safari enforces tight per-tab memory limits: the model download + WebGPU
+   session on top of a decoded full song gets the tab jetsam-killed, which
+   reloads the page mid-game (seen as "Cueing it up… then back to the home
+   page"). The DSP centercut path is the reliable one there. iPadOS reports
+   itself as MacIntel, hence the maxTouchPoints check. */
+const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
+  || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+
 export function mlAvailable(){
   try {
+    if (IS_IOS) return false;
     if (!("gpu" in navigator)) return false;
     if (localStorage.getItem(LS_ML_SLOW) === "1") return false;
     return true;

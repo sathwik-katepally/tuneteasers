@@ -31,10 +31,14 @@ The model downloads from Hugging Face on first use and persists in the browser C
 `src/lib/mdx.js` is the runtime-agnostic STFT/chunk/iSTFT plumbing around the model (n_fft 6144 via a mixed-radix FFT of three fft.js 2048 transforms); it was batch-validated against the reference audio-separator implementation on 8 real songs (waveform correlation ≥ 0.974, vocals removed 2.5-12.6dB; the final ~1.5s of a clip legitimately diverges from the reference due to different tail chunking).
 Inputs are peak-normalized to 0.9 before inference (matching UVR) and rescaled after.
 Audio is resampled to 44.1kHz for inference (the model's training rate) and back for playback.
-Devices without WebGPU skip ML; a device that blows the 75s inference budget is remembered in localStorage (`tt_ml_slow`) and skips ML from then on.
-Successful ML output plays raw (mode "ml"); any failure falls through to centercut/legacy silently.
+Devices without WebGPU skip ML, and so does iOS (Safari's per-tab memory limit jetsam-kills the tab under the model + WebGPU session load, reloading the page mid-game); a device that blows the 75s inference budget is remembered in localStorage (`tt_ml_slow`) and skips ML from then on.
+ML never blocks the first play: inference gets a ~3.5s head start, after which the DSP result (raw/centercut/legacy) plays and the cache entry is upgraded in place to the ML buffer (mode "ml") once inference lands, so replays, extends, and prefetched tracks read the upgraded audio.
+This makes `window.__ttLastMode` time-dependent on ML-capable devices (it flips to "ml" when the upgrade lands), and an extend can audibly switch from centercut to ML separation mid-round - same window, strictly better separation.
+Successful ML output plays raw; any failure falls through to centercut/legacy silently.
 The `onnxruntime-web` version is pinned exactly and must match the CDN wasmPaths in mlsep.js; vite resolves the extern-wasm build via a custom condition in vite.config.js.
 Processed buffers are cached (current + prefetched track) as promises keyed by URL, so replay/extend and prefetched tracks never re-process.
+The app warms the NEXT track's full pipeline (fetch, decode, window pick, separation) in the background as soon as the current track's buffer resolves, so from round 2 onward the snippet cue is a cache hit (~0ms); only the first track of a game pays the pipeline cold.
+`playMuffled` bounds the cueing wait at 15s: a stalled stream fetch falls back to `playElement` (as-is playback with a notice) instead of pinning the game on "Cueing it up…", while the background load keeps running so later replays can still hit the cache.
 This path requires CORS-readable audio (`fetch` + decode), which is why song sources must serve `Access-Control-Allow-Origin: *`.
 If decode fails, the caller falls back to `playElement` (plain `<audio>`, vocals intact) and shows a notice.
 

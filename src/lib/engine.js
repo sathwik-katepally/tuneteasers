@@ -73,23 +73,40 @@ export const engine = {
     const res = await fetch(url);
     const ab = await res.arrayBuffer();
     const full = await this.ac().decodeAudioData(ab);
-    // Pick the most instrumental stretch, then ALWAYS run ML separation on it
-    // when this device can: the vocal-activity detector is only a heuristic
-    // (wide/doubled vocals evade it), so it chooses the window but never gets
-    // to skip separation. Raw playback without ML needs a truly clean verdict.
-    const done = r => { try { window.__ttLastMode = r.mode; } catch(e){} return r; }; // E2E/debug surface
+    // Pick the most instrumental stretch. ML separation still runs on every
+    // picked window on capable devices (the vocal-activity detector is only a
+    // heuristic; wide/doubled vocals evade it), but it must never hold up the
+    // first play: ML gets a short head start, then the DSP result plays and
+    // the cache entry upgrades to the ML buffer in place once inference lands
+    // (replays, extends, and prefetched tracks all read the upgraded entry).
+    const mark = m => { try { window.__ttLastMode = m; } catch(e){} }; // E2E/debug surface
     let start = 0, clean = false;
     try { ({ start, clean } = await pickSnippetWindow(full)); } catch(e){}
-    let buf = this.slice(full, start, 45);
-    if (mlAvailable()){
-      try { return done({ buf: await separateBuffer(buf, this.ac()), mode: "ml" }); } catch(e){}
+    const buf = this.slice(full, start, 45);
+    const dsp = async () => {
+      if (clean) return { buf, mode: "raw" };
+      if (buf.numberOfChannels >= 2){
+        try { return { buf: await centerCut(buf, this.ac()), mode: "cut" }; } catch(e){}
+      }
+      return { buf, mode: "legacy" };
+    };
+    const entry = { buf, mode: "pending" };
+    if (!mlAvailable()){
+      const r = await dsp();
+      entry.buf = r.buf; entry.mode = r.mode;
+      mark(entry.mode);
+      return entry;
     }
-    if (clean) return done({ buf, mode: "raw" });
-    let mode = "legacy";
-    if (buf.numberOfChannels >= 2){
-      try { buf = await centerCut(buf, this.ac()); mode = "cut"; } catch(e){}
+    const mlP = separateBuffer(buf, this.ac())
+      .then(mlBuf => { entry.buf = mlBuf; entry.mode = "ml"; mark("ml"); })
+      .catch(()=>{});
+    await Promise.race([mlP, new Promise(r=>setTimeout(r, 3500))]);
+    if (entry.mode === "pending"){
+      const r = await dsp();
+      if (entry.mode === "pending"){ entry.buf = r.buf; entry.mode = r.mode; } // ML may have landed while centerCut ran
     }
-    return done({ buf, mode });
+    mark(entry.mode);
+    return entry;
   },
   prefetch(url){ if (url) this.ensureBuf(url).catch(()=>{}); },
   /* returns "played" | "failed" | "superseded" */
@@ -97,7 +114,12 @@ export const engine = {
     this.stop();
     const s = this.session;
     let entry;
-    try { entry = await this.ensureBuf(url); } catch(e){ return (s===this.session) ? "failed" : "superseded"; }
+    try { // bound the cueing wait: a stalled fetch must not pin the game on "Cueing it up…"
+      entry = await Promise.race([
+        this.ensureBuf(url), // keeps loading in the background even if the race times out, so replays can still hit the cache
+        new Promise((_,rej)=>setTimeout(()=>rej(new Error("cue timeout")), 15000)),
+      ]);
+    } catch(e){ return (s===this.session) ? "failed" : "superseded"; }
     if (s !== this.session) return "superseded";
     const { buf, mode } = entry;
     if (offset >= buf.duration - 1) return "failed";
