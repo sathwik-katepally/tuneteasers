@@ -7,7 +7,7 @@ const TERMS = {
   telugu: ["Sid Sriram telugu","Devi Sri Prasad hits","Thaman S telugu","Anirudh telugu songs","Mickey J Meyer telugu","Gopi Sundar telugu","M M Keeravani telugu","Armaan Malik telugu","Anurag Kulkarni","telugu hit songs","Kaala Bhairava","Mangli telugu"],
 };
 const LANG_OK = { bolly:["bollywood","hindi"], telugu:["telugu","tollywood"] };
-const EXCLUDE_RX = /(remix|mashup|lo-?fi|slowed|reverb|medley|unplugged|acoustic|cover|karaoke|instrumental|\bbgm\b|jukebox|revisited|reprise|redux|\bclub\b|\bdj\b|mix\b|8d\b|sped up|lounge|female version|male version)/i;
+const EXCLUDE_RX = /(remix|mashup|lo-?fi|slowed|reverb|medley|unplugged|acoustic|cover|karaoke|instrumental|\bbgm\b|jukebox|revisited|reprise|redux|\bclub\b|\bdj\b|mix\b|8d\b|sped up|lounge|\bversion\b)/i;
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const stripParens = s => s.replace(/[\(\[].*?[\)\]]/g,"").replace(/\s+/g," ").trim();

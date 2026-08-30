@@ -1,9 +1,43 @@
 /* Audio engine — the ONLY owner of playback.
    Every action bumps `session`. Any async continuation from an older session
    is ignored, so two songs can never play at once. */
+import { centerCut } from "./centercut.js";
+
+/* Post-centercut shaping: the lead vocal is already ducked, so only dull the leakage. */
+function buildMildGraph(c, src){
+  const lp = c.createBiquadFilter(); lp.type="lowpass"; lp.frequency.value=7000;
+  const cut = c.createBiquadFilter(); cut.type="peaking"; cut.frequency.value=2500; cut.Q.value=1; cut.gain.value=-5;
+  const makeup = c.createGain(); makeup.gain.value = 1.15;
+  src.connect(lp); lp.connect(cut); cut.connect(makeup);
+  return makeup;
+}
+/* Fallback when centercut couldn't run (mono track, or processing failed):
+   the previous muffle chain — bass foundation + L−R when stereo + formant cuts. */
+function buildLegacyGraph(c, src, channels){
+  const out = c.createGain();
+  const lp = c.createBiquadFilter(); lp.type="lowpass"; lp.frequency.value=140;
+  const lpG = c.createGain(); lpG.gain.value=0.9;
+  src.connect(lp); lp.connect(lpG); lpG.connect(out);
+  let mainIn;
+  if (channels >= 2){
+    const sp = c.createChannelSplitter(2);
+    const gL = c.createGain(); gL.gain.value = 1;
+    const gR = c.createGain(); gR.gain.value = -1;
+    const diff = c.createGain(); diff.gain.value = 1.8;
+    src.connect(sp); sp.connect(gL,0); sp.connect(gR,1);
+    gL.connect(diff); gR.connect(diff);
+    mainIn = diff;
+  } else { mainIn = c.createGain(); src.connect(mainIn); }
+  const cut1 = c.createBiquadFilter(); cut1.type="peaking"; cut1.frequency.value=1200; cut1.Q.value=0.9; cut1.gain.value=-10;
+  const cut2 = c.createBiquadFilter(); cut2.type="peaking"; cut2.frequency.value=3000; cut2.Q.value=0.9; cut2.gain.value=-9;
+  const hiLp = c.createBiquadFilter(); hiLp.type="lowpass"; hiLp.frequency.value=6500;
+  mainIn.connect(cut1); cut1.connect(cut2); cut2.connect(hiLp); hiLp.connect(out);
+  return out;
+}
+
 export const engine = {
   ctx:null, el:null, srcNode:null, timer:null, session:0,
-  cache:{ url:null, buf:null },
+  cache: new Map(), // url -> Promise<{ buf, cut }> for the current and prefetched tracks
   ac(){
     if (!this.ctx) this.ctx = new (window.AudioContext||window.webkitAudioContext)();
     if (this.ctx.state === "suspended") this.ctx.resume();
@@ -22,44 +56,39 @@ export const engine = {
     for (let ch=0; ch<buf.numberOfChannels; ch++) nb.copyToChannel(buf.getChannelData(ch).subarray(0,len), ch);
     return nb;
   },
-  async ensureBuf(url){
-    if (this.cache.url === url && this.cache.buf) return this.cache.buf;
+  ensureBuf(url){
+    let p = this.cache.get(url);
+    if (!p){
+      p = this._load(url);
+      this.cache.set(url, p);
+      if (this.cache.size > 2) this.cache.delete(this.cache.keys().next().value);
+      p.catch(()=>{ if (this.cache.get(url) === p) this.cache.delete(url); }); // never cache failures
+    }
+    return p;
+  },
+  async _load(url){
     const res = await fetch(url);
     const ab = await res.arrayBuffer();
     const full = await this.ac().decodeAudioData(ab);
-    const buf = this.trim(full, 45);
-    this.cache = { url, buf };
-    return buf;
+    let buf = this.trim(full, 45), cut = false;
+    try {
+      if (buf.numberOfChannels >= 2){ buf = await centerCut(buf, this.ac()); cut = true; }
+    } catch(e){} // fall back to the legacy realtime chain
+    return { buf, cut };
   },
   prefetch(url){ if (url) this.ensureBuf(url).catch(()=>{}); },
   /* returns "played" | "failed" | "superseded" */
   async playMuffled(url, offset, secs, onEnd){
     this.stop();
     const s = this.session;
-    let buf;
-    try { buf = await this.ensureBuf(url); } catch(e){ return (s===this.session) ? "failed" : "superseded"; }
+    let entry;
+    try { entry = await this.ensureBuf(url); } catch(e){ return (s===this.session) ? "failed" : "superseded"; }
     if (s !== this.session) return "superseded";
+    const { buf, cut } = entry;
     if (offset >= buf.duration - 1) return "failed";
     const c = this.ac();
     const src = c.createBufferSource(); src.buffer = buf;
-    const out = c.createGain();
-    const lp = c.createBiquadFilter(); lp.type="lowpass"; lp.frequency.value=140;
-    const lpG = c.createGain(); lpG.gain.value=0.9;
-    src.connect(lp); lp.connect(lpG); lpG.connect(out);
-    let mainIn;
-    if (buf.numberOfChannels >= 2){
-      const sp = c.createChannelSplitter(2);
-      const gL = c.createGain(); gL.gain.value = 1;
-      const gR = c.createGain(); gR.gain.value = -1;
-      const diff = c.createGain(); diff.gain.value = 1.8;
-      src.connect(sp); sp.connect(gL,0); sp.connect(gR,1);
-      gL.connect(diff); gR.connect(diff);
-      mainIn = diff;
-    } else { mainIn = c.createGain(); src.connect(mainIn); }
-    const cut1 = c.createBiquadFilter(); cut1.type="peaking"; cut1.frequency.value=1200; cut1.Q.value=0.9; cut1.gain.value=-10;
-    const cut2 = c.createBiquadFilter(); cut2.type="peaking"; cut2.frequency.value=3000; cut2.Q.value=0.9; cut2.gain.value=-9;
-    const hiLp = c.createBiquadFilter(); hiLp.type="lowpass"; hiLp.frequency.value=6500;
-    mainIn.connect(cut1); cut1.connect(cut2); cut2.connect(hiLp); hiLp.connect(out);
+    const out = cut ? buildMildGraph(c, src) : buildLegacyGraph(c, src, buf.numberOfChannels);
     out.connect(c.destination);
     src.start(0, offset, secs);
     this.srcNode = src;

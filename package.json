@@ -10,6 +10,7 @@
     "build:catalog": "node scripts/build-catalog.mjs"
   },
   "dependencies": {
+    "fft.js": "^4.0.4",
     "preact": "^10.29.8"
   },
   "devDependencies": {
