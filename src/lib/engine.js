@@ -2,6 +2,7 @@
    Every action bumps `session`. Any async continuation from an older session
    is ignored, so two songs can never play at once. */
 import { centerCut } from "./centercut.js";
+import { pickSnippetWindow } from "./snippick.js";
 
 /* Post-centercut shaping: the lead vocal is already ducked, so only dull the leakage. */
 function buildMildGraph(c, src){
@@ -49,11 +50,12 @@ export const engine = {
     if (this.srcNode){ try{ this.srcNode.stop(); }catch(e){} this.srcNode = null; }
     if (this.el){ this.el.pause(); }
   },
-  trim(buf, secs){
-    const c = this.ac();
-    const len = Math.min(buf.length, Math.floor(secs * buf.sampleRate));
-    const nb = c.createBuffer(buf.numberOfChannels, len, buf.sampleRate);
-    for (let ch=0; ch<buf.numberOfChannels; ch++) nb.copyToChannel(buf.getChannelData(ch).subarray(0,len), ch);
+  slice(buf, startSec, secs){
+    const c = this.ac(), sr = buf.sampleRate;
+    const from = Math.max(0, Math.min(Math.floor(startSec*sr), buf.length - sr));
+    const len = Math.min(buf.length - from, Math.floor(secs*sr));
+    const nb = c.createBuffer(buf.numberOfChannels, len, sr);
+    for (let ch=0; ch<buf.numberOfChannels; ch++) nb.copyToChannel(buf.getChannelData(ch).subarray(from, from+len), ch);
     return nb;
   },
   ensureBuf(url){
@@ -70,11 +72,19 @@ export const engine = {
     const res = await fetch(url);
     const ab = await res.arrayBuffer();
     const full = await this.ac().decodeAudioData(ab);
-    let buf = this.trim(full, 45), cut = false;
-    try {
-      if (buf.numberOfChannels >= 2){ buf = await centerCut(buf, this.ac()); cut = true; }
-    } catch(e){} // fall back to the legacy realtime chain
-    return { buf, cut };
+    // Find the song's most instrumental stretch; if it's clean by this song's
+    // own standards it plays raw, otherwise its least-vocal window gets centercut.
+    let start = 0, clean = false;
+    try { ({ start, clean } = await pickSnippetWindow(full)); } catch(e){}
+    let buf = this.slice(full, start, 45);
+    let mode = "raw";
+    if (!clean){
+      mode = "legacy";
+      if (buf.numberOfChannels >= 2){
+        try { buf = await centerCut(buf, this.ac()); mode = "cut"; } catch(e){}
+      }
+    }
+    return { buf, mode };
   },
   prefetch(url){ if (url) this.ensureBuf(url).catch(()=>{}); },
   /* returns "played" | "failed" | "superseded" */
@@ -84,11 +94,14 @@ export const engine = {
     let entry;
     try { entry = await this.ensureBuf(url); } catch(e){ return (s===this.session) ? "failed" : "superseded"; }
     if (s !== this.session) return "superseded";
-    const { buf, cut } = entry;
+    const { buf, mode } = entry;
     if (offset >= buf.duration - 1) return "failed";
     const c = this.ac();
     const src = c.createBufferSource(); src.buffer = buf;
-    const out = cut ? buildMildGraph(c, src) : buildLegacyGraph(c, src, buf.numberOfChannels);
+    let out;
+    if (mode === "raw"){ out = c.createGain(); src.connect(out); } // instrumental section: untouched audio
+    else if (mode === "cut") out = buildMildGraph(c, src);
+    else out = buildLegacyGraph(c, src, buf.numberOfChannels);
     out.connect(c.destination);
     src.start(0, offset, secs);
     this.srcNode = src;

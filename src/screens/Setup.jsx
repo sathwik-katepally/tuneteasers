@@ -51,7 +51,7 @@ export function Setup({ error, S, upSettings, toggleEra, players, renamePlayer, 
           <Chip on={S.sound==="inst"} onClick={()=>upSettings({sound:"inst"})}>🎻 Music only</Chip>
           <Chip on={S.sound==="full"} onClick={()=>upSettings({sound:"full"})}>🎤 With vocals</Chip>
         </div>
-        {S.sound==="inst" && <div class="sub" style="font-size:12px;margin-top:8px">Snippets play with vocals muffled, so the melody does the teasing.</div>}
+        {S.sound==="inst" && <div class="sub" style="font-size:12px;margin-top:8px">Snippets pick the song's most instrumental stretch; any singing left over gets muffled.</div>}
       </div>
       <div class="card">
         <div class="label">SNIPPET LENGTH</div>
