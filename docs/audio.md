@@ -13,8 +13,8 @@ This guarantees two songs can never play at once, even when the user mashes butt
 Strategy: find where the song is instrumental instead of trying to erase vocals — channel-based vocal removal cannot fully strip the doubled/reverbed leads typical of these mixes, but detecting vocal activity is reliable.
 `playMuffled` fetches the stream, decodes the full song, then `pickSnippetWindow` (`src/lib/snippick.js`) scores every STFT frame for vocal activity (center-correlated energy in the 200Hz-4kHz band) and picks the most instrumental ~25s window.
 Every decision is song-adaptive, never a fixed absolute threshold: the silence guard compares frame energy to the song's own median, and the "clean" verdict compares the best window to the song's own score percentiles.
-A clean window plays completely raw (mode "raw" — full-quality audio, no artifacts).
-If the song never goes instrumental, its least-vocal window is kept and processed with `centerCut` (below).
+The detector chooses the WINDOW but never gets to skip separation: wide/doubled vocals evade center-correlation entirely (measured: 11/12 real songs scored "clean" under the old trusting verdict), so on ML-capable devices every picked window goes through ML separation (below).
+Without ML, a window plays raw (mode "raw") only under a conservative clean verdict (real profile contrast AND the window clearly below the song's own spread); otherwise the least-vocal window is processed with `centerCut`.
 The kept buffer is the 45s slice starting at the chosen window, so all snippet offsets are relative to that start.
 
 ## Centercut (fallback vocal reduction)
@@ -26,9 +26,10 @@ Centercut playback applies a mild leakage-dulling graph (7kHz lowpass, −5dB pe
 Mono tracks (or a failed centercut) fall back to the legacy realtime chain: L−R difference when stereo, peaking cuts at 1.2kHz/3kHz, 6.5kHz lowpass, 140Hz bass branch.
 
 ## ML separation (vocal windows, capable devices)
-When the picked window is not clean, `src/lib/mlsep.js` runs true vocal separation before the DSP fallbacks: the UVR MDX-Net instrumental model (ONNX, ~64MB) executes on WebGPU via onnxruntime-web.
+On any WebGPU device, `src/lib/mlsep.js` runs true vocal separation on every picked window (the DSP paths are fallback-only): the public UVR MDX-Net Inst_HQ_3 model (ONNX, ~64MB; do NOT use the VIP models — they are for UVR's paying subscribers) executes on WebGPU via onnxruntime-web.
 The model downloads from Hugging Face on first use and persists in the browser Cache API; the site hosts neither model nor audio.
-`src/lib/mdx.js` is the runtime-agnostic STFT/chunk/iSTFT plumbing around the model (n_fft 6144 via a mixed-radix FFT of three fft.js 2048 transforms); it was validated against the reference audio-separator implementation (0.992 waveform correlation).
+`src/lib/mdx.js` is the runtime-agnostic STFT/chunk/iSTFT plumbing around the model (n_fft 6144 via a mixed-radix FFT of three fft.js 2048 transforms); it was batch-validated against the reference audio-separator implementation on 8 real songs (waveform correlation ≥ 0.974, vocals removed 2.5-12.6dB; the final ~1.5s of a clip legitimately diverges from the reference due to different tail chunking).
+Inputs are peak-normalized to 0.9 before inference (matching UVR) and rescaled after.
 Audio is resampled to 44.1kHz for inference (the model's training rate) and back for playback.
 Devices without WebGPU skip ML; a device that blows the 75s inference budget is remembered in localStorage (`tt_ml_slow`) and skips ML from then on.
 Successful ML output plays raw (mode "ml"); any failure falls through to centercut/legacy silently.

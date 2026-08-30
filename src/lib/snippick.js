@@ -74,14 +74,14 @@ export async function pickSnippetWindow(buf){
     if (mean < bestMean){ bestMean = mean; bestIdx = i; }
   }
   const meanBest = (prefix[bestIdx+winF]-prefix[bestIdx])/winF;
-  // Song-adaptive verdict: a window only counts as instrumental if it sits
-  // clearly below this song's own typical vocal level. Songs with a flat
-  // profile (uniform texture end to end) get judged on their overall level.
+  // Conservative verdict, used only when ML separation is unavailable: raw
+  // playback needs the window clearly below this song's own typical level AND
+  // a profile with real contrast. A flat profile proves nothing — wide/doubled
+  // vocals score low everywhere and are indistinguishable from instruments
+  // here — so flat songs are never trusted as clean (they get the muffle).
   const sorted = Float32Array.from(eff).sort();
-  const p20 = sorted[Math.floor(nF*0.2)], p50 = sorted[nF>>1], p80 = sorted[Math.floor(nF*0.8)];
-  const clean = (p80 - p20 < 0.08)
-    ? p50 < 0.3
-    : meanBest < p20 + 0.25*(p80 - p20);
+  const p20 = sorted[Math.floor(nF*0.2)], p80 = sorted[Math.floor(nF*0.8)];
+  const clean = (p80 - p20 >= 0.12) && meanBest < p20 + 0.15*(p80 - p20);
   return { start: bestIdx*hop/sr, clean };
 }
 

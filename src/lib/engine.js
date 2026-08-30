@@ -73,21 +73,23 @@ export const engine = {
     const res = await fetch(url);
     const ab = await res.arrayBuffer();
     const full = await this.ac().decodeAudioData(ab);
-    // Find the song's most instrumental stretch; a clean window plays raw.
-    // A vocal window goes to ML separation (true instrumental) when this device
-    // can run it, then to the DSP chains as fallback.
+    // Pick the most instrumental stretch, then ALWAYS run ML separation on it
+    // when this device can: the vocal-activity detector is only a heuristic
+    // (wide/doubled vocals evade it), so it chooses the window but never gets
+    // to skip separation. Raw playback without ML needs a truly clean verdict.
+    const done = r => { try { window.__ttLastMode = r.mode; } catch(e){} return r; }; // E2E/debug surface
     let start = 0, clean = false;
     try { ({ start, clean } = await pickSnippetWindow(full)); } catch(e){}
     let buf = this.slice(full, start, 45);
-    if (clean) return { buf, mode: "raw" };
     if (mlAvailable()){
-      try { return { buf: await separateBuffer(buf, this.ac()), mode: "ml" }; } catch(e){}
+      try { return done({ buf: await separateBuffer(buf, this.ac()), mode: "ml" }); } catch(e){}
     }
+    if (clean) return done({ buf, mode: "raw" });
     let mode = "legacy";
     if (buf.numberOfChannels >= 2){
       try { buf = await centerCut(buf, this.ac()); mode = "cut"; } catch(e){}
     }
-    return { buf, mode };
+    return done({ buf, mode });
   },
   prefetch(url){ if (url) this.ensureBuf(url).catch(()=>{}); },
   /* returns "played" | "failed" | "superseded" */

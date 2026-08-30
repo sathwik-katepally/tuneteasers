@@ -7,7 +7,8 @@
    falls back gracefully. */
 import { separateInstrumental } from "./mdx.js";
 
-const MODEL_URL = "https://huggingface.co/Eddycrack864/UVR5-MDX-NET-VIP-MODELS/resolve/main/UVR-MDX-NET-Inst_full_292.onnx";
+// Public (non-VIP) UVR model; params: n_fft 6144, dim_f 3072, dim_t 256, primary stem Instrumental
+const MODEL_URL = "https://huggingface.co/Politrees/UVR_resources/resolve/main/models/MDXNet/UVR-MDX-NET-Inst_HQ_3.onnx";
 const ORT_VERSION = "1.29.0"; // must match package.json exactly (CDN wasm paths)
 const LS_ML_SLOW = "tt_ml_slow";
 
@@ -77,8 +78,17 @@ export async function separateBuffer(buf, ctx, budgetMs = 75000){
   const { ort, session } = await getSession();
   const playRate = buf.sampleRate;
   buf = await resample(buf, MODEL_RATE);
-  const chL = buf.getChannelData(0);
-  const chR = buf.numberOfChannels > 1 ? buf.getChannelData(1) : chL;
+  let chL = buf.getChannelData(0);
+  let chR = buf.numberOfChannels > 1 ? buf.getChannelData(1) : chL;
+  // match UVR's preprocessing: peaks above 0.9 are scaled down before inference
+  let peak = 0;
+  for (let i=0;i<chL.length;i++){ const a = Math.abs(chL[i]), b = Math.abs(chR[i]); if (a>peak) peak=a; if (b>peak) peak=b; }
+  const scale = peak > 0.9 ? 0.9/peak : 1;
+  if (scale !== 1){
+    const sL = new Float32Array(chL.length), sR = new Float32Array(chR.length);
+    for (let i=0;i<chL.length;i++){ sL[i]=chL[i]*scale; sR[i]=chR[i]*scale; }
+    chL = sL; chR = sR;
+  }
   const t0 = performance.now();
   const runFn = async (data, dims) => {
     if (performance.now() - t0 > budgetMs){
@@ -89,6 +99,9 @@ export async function separateBuffer(buf, ctx, budgetMs = 75000){
     return res.output.data;
   };
   const { outL, outR } = await separateInstrumental(chL, chR, runFn);
+  if (scale !== 1){
+    for (let i=0;i<outL.length;i++){ outL[i]/=scale; outR[i]/=scale; }
+  }
   const out = ctx.createBuffer(2, buf.length, MODEL_RATE); // createBuffer accepts any rate
   out.copyToChannel(outL, 0);
   out.copyToChannel(outR, 1);
