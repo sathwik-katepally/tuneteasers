@@ -127,6 +127,7 @@ const EXCLUDE_RX = /(remix|mashup|lo-?fi|slowed|reverb|medley|unplugged|acoustic
 /* ═══════ Small utils ═══════ */
 const de = s => { const t=document.createElement("textarea"); t.innerHTML=s||""; return t.value; };
 const stripParens = s => s.replace(/[\(\[].*?[\)\]]/g,"").replace(/\s+/g," ").trim();
+const fmtScore = n => n % 1 ? `${Math.floor(n)}½` : String(n);
 const shuffle = a => { a=[...a]; for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; };
 function safeUrl(u){
   if (typeof u !== "string") return null;
@@ -142,9 +143,12 @@ const LS_BLOCKED = "tt_blocked"; // [ artistName ] — device-local "never play 
 const lsGet = k => { try { return JSON.parse(localStorage.getItem(k)); } catch(e){ return null; } };
 const lsSet = (k,v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch(e){} };
 
+const ERAS = ["2000s","2010s","2020s"];
+const eraOf = y => y >= 2020 ? "2020s" : y >= 2010 ? "2010s" : "2000s";
+
 const DEFAULTS = {
   screen: "setup",
-  settings: { mix:"both", sound:"inst", snippetLen:10 },
+  settings: { mix:"both", sound:"inst", snippetLen:10, eras:[...ERAS] },
   players: [{name:"Player 1",score:0},{name:"Player 2",score:0}],
   game: null, // { queue, trackIdx, turn, round, totalSongs, source }
 };
@@ -167,13 +171,15 @@ function loadPersisted(){
   if (!raw) return DEFAULTS;
   const s = { ...DEFAULTS };
   const set = raw.settings || {};
+  const eras = Array.isArray(set.eras) ? ERAS.filter(e=>set.eras.includes(e)) : [];
   s.settings = {
     mix: ["bolly","telugu","both"].includes(set.mix) ? set.mix : "both",
     sound: ["inst","full"].includes(set.sound) ? set.sound : "inst",
     snippetLen: [5,10,15].includes(set.snippetLen) ? set.snippetLen : 10,
+    eras: eras.length ? eras : [...ERAS],
   };
   if (Array.isArray(raw.players) && raw.players.length)
-    s.players = raw.players.slice(0,8).map(p=>({ name:String(p.name||"Player").slice(0,24), score:Math.max(0,parseInt(p.score)||0) }));
+    s.players = raw.players.slice(0,8).map(p=>({ name:String(p.name||"Player").slice(0,24), score:Math.max(0, Math.round((parseFloat(p.score)||0)*2)/2) }));
   if (raw.game && Array.isArray(raw.game.queue)){
     const queue = raw.game.queue.map(sanitizeTrack).filter(Boolean);
     const trackIdx = Math.max(0, parseInt(raw.game.trackIdx)||0);
@@ -331,7 +337,7 @@ async function loadFromItunes(langs){
   });
   return pool.filter(Boolean);
 }
-async function buildCrate(mix){
+async function buildCrate(mix, eras){
   const langs = mix==="both" ? ["bolly","telugu"] : [mix];
   const key = t => stripParens(t.title).toLowerCase();
   let pool = await loadFromSaavn(langs);
@@ -348,9 +354,12 @@ async function buildCrate(mix){
     if (!pool.length) source = "live";
     pool = pool.concat(live);
   }
+  if (pool.length < 10) return { error:"load" };
+  if (Array.isArray(eras) && eras.length && eras.length < ERAS.length)
+    pool = pool.filter(t => eras.includes(eraOf(t.year)));
   const blocked = new Set(loadBlocked().map(normArtist));
   if (blocked.size) pool = pool.filter(t => !isBlocked(t, blocked));
-  if (pool.length < 10) return null;
+  if (pool.length < 10) return { error:"thin" };
   // Recently played songs (this device) sit out; when the fresh pool runs thin,
   // repeats come back least-recently-played first, queued after all fresh songs.
   const played = loadPlayed();
@@ -469,6 +478,7 @@ function App(){
   const [showBoard, setShowBoard] = useState(false);
   const [snip, setSnip] = useState({ end:0, lastSecs:10, playSecs:0 });
   const [blocked, setBlocked] = useState(loadBlocked);
+  const [hint, setHint] = useState(false);
 
   useEffect(()=>{ persist(state); }, [state]);
   useEffect(()=>{
@@ -483,14 +493,23 @@ function App(){
   const track = g ? g.queue[g.trackIdx] : null;
 
   const upSettings = patch => setState(st=>({ ...st, settings:{ ...st.settings, ...patch } }));
+  const toggleEra = e => upSettings({ eras: S.eras.includes(e)
+    ? (S.eras.length>1 ? S.eras.filter(x=>x!==e) : S.eras) // never allow zero eras
+    : ERAS.filter(x=>S.eras.includes(x) || x===e) });
 
   async function startGame(){
     engine.stop();
     setLoading(true); setError("");
-    const crate = await buildCrate(S.mix);
+    const crate = await buildCrate(S.mix, S.eras);
     setLoading(false);
-    if (!crate){ setError("Couldn't load enough songs. Check your connection and try again."); return; }
-    setPhase("ready"); setNote(""); setSnip({ end:0, lastSecs:S.snippetLen, playSecs:0 });
+    if (crate.error){
+      setError(crate.error==="thin"
+        ? "Not enough songs match your filters. Widen the era mix or unblock some artists."
+        : "Couldn't load enough songs. Check your connection and try again.");
+      setState(st=>({ ...st, screen:"setup" }));
+      return;
+    }
+    setPhase("ready"); setNote(""); setHint(false); setSnip({ end:0, lastSecs:S.snippetLen, playSecs:0 });
     setState(st=>({ ...st, screen:"game",
       players: st.players.map(p=>({ ...p, score:0 })),
       game:{ queue:crate.queue, trackIdx:0, turn:0, round:1, totalSongs:crate.queue.length, source:crate.source } }));
@@ -526,12 +545,13 @@ function App(){
   function nextRound(gotIt){
     engine.stop();
     if (track) markPlayed(track.title);
-    setPhase("ready"); setNote(""); setShowBoard(false);
+    const pts = hint ? 0.5 : 1; // a hint halves the payout
+    setPhase("ready"); setNote(""); setShowBoard(false); setHint(false);
     setSnip(s=>({ ...s, end:0, playSecs:0 }));
     setState(st=>{
       const gg = st.game;
       const players = gotIt===true
-        ? st.players.map((p,i)=> i===gg.turn ? { ...p, score:p.score+1 } : p)
+        ? st.players.map((p,i)=> i===gg.turn ? { ...p, score:p.score+pts } : p)
         : st.players;
       const turn = gotIt===null ? gg.turn : (gg.turn+1) % players.length; // skip keeps the same player
       const round = (gotIt!==null && turn===0) ? gg.round+1 : gg.round;
@@ -604,6 +624,12 @@ function App(){
           </div>
         </div>
         <div class="card">
+          <div class="label">ERA · pick one or more</div>
+          <div class="chips">
+            ${ERAS.map(e=>html`<${Chip} on=${S.eras.includes(e)} onClick=${()=>toggleEra(e)}>${e}<//>`)}
+          </div>
+        </div>
+        <div class="card">
           <div class="label">SOUND</div>
           <div class="chips">
             <${Chip} on=${S.sound==="inst"} onClick=${()=>upSettings({sound:"inst"})}>🎻 Music only<//>
@@ -648,7 +674,7 @@ function App(){
         <div class="card" style="text-align:left">
           ${ranked.map((p,i)=>html`
             <div class="boardrow" style="font-weight:${i===0?800:600};color:${i===0?'var(--marigold)':'var(--cream)'};${i<ranked.length-1?'border-bottom:1px solid var(--surface2)':''}">
-              <span>${i+1}. ${p.name}</span><span>${p.score}</span>
+              <span>${i+1}. ${p.name}</span><span>${fmtScore(p.score)}</span>
             </div>`)}
         </div>
         <button class="btn btn-gold" onClick=${startGame}>Play again</button>
@@ -672,7 +698,7 @@ function App(){
       ${showBoard && html`<div class="card" style="padding:12px;margin-bottom:10px">
         ${state.players.map((p,i)=>({p,i})).sort((a,b)=>b.p.score-a.p.score).map(({p,i})=>html`
           <div class="boardrow" style="font-weight:${i===g.turn?800:500};color:${i===g.turn?'var(--marigold)':'var(--cream)'}">
-            <span>${p.name}${i===g.turn?" ← up now":""}</span><span>${p.score}</span>
+            <span>${p.name}${i===g.turn?" ← up now":""}</span><span>${fmtScore(p.score)}</span>
           </div>`)}
       </div>`}
       <div class="turnbar">
@@ -696,12 +722,19 @@ function App(){
         <button class="btn btn-rose" onClick=${revealTrack}>I know it! Reveal</button>`}
       ${phase==="guessing" && html`
         <p class="center sub" style="margin-bottom:14px">Say your guess out loud, then reveal.</p>
+        ${hint && track && html`
+          <div class="card center" style="padding:12px;border:1.5px solid #FFB62755;margin-bottom:14px">
+            <div style="color:var(--marigold);font-weight:700">💡 ${track.album ? `From "${track.album}"` : "No movie on record"}${track.year ? ` · ${track.year}` : ""}</div>
+          </div>`}
         <button class="btn btn-rose" onClick=${revealTrack}>Reveal the song</button>
         <div class="gap"></div>
         <div class="row2">
           <button class="btn btn-ghost" onClick=${()=>playSnippet(snip.lastSecs, "replay")}>🔁 Replay</button>
           <button class="btn btn-ghost" onClick=${()=>playSnippet(5, "extend")}>＋5 more secs</button>
-        </div>`}
+        </div>
+        ${!hint && html`
+          <div class="gap"></div>
+          <button class="btn btn-ghost" style="padding:10px;font-size:13px" onClick=${()=>setHint(true)}>💡 Hint: movie ＆ year — costs ½ point</button>`}`}
       ${revealed && track && html`
         <div class="center" style="margin-bottom:16px">
           <div class="answer-title">${track.title}</div>
@@ -709,7 +742,7 @@ function App(){
           ${track.album && html`<div class="answer-album">${track.album}${track.year ? ` · ${track.year}` : ""}</div>`}
         </div>
         <div class="row2">
-          <button class="btn btn-teal" onClick=${()=>nextRound(true)}>✓ Got it (+1)</button>
+          <button class="btn btn-teal" onClick=${()=>nextRound(true)}>✓ Got it (+${hint?"½":"1"})</button>
           <button class="btn btn-dark" onClick=${()=>nextRound(false)}>✗ Missed</button>
         </div>
         ${primaryArtist && html`
