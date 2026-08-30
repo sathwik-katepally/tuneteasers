@@ -24,6 +24,15 @@ The kept buffer is the 45s slice starting at the chosen window, so all snippet o
 Tuning lives in the exported `CENTERCUT` and `SNIPPICK` configs; verify any retune with the DSP E2E tests (`dsp.js` for suppression depth vs bass/side retention, `pick.js` for window selection and the per-song clean verdict).
 Centercut playback applies a mild leakage-dulling graph (7kHz lowpass, −5dB peaking at 2.5kHz, slight makeup gain).
 Mono tracks (or a failed centercut) fall back to the legacy realtime chain: L−R difference when stereo, peaking cuts at 1.2kHz/3kHz, 6.5kHz lowpass, 140Hz bass branch.
+
+## ML separation (vocal windows, capable devices)
+When the picked window is not clean, `src/lib/mlsep.js` runs true vocal separation before the DSP fallbacks: the UVR MDX-Net instrumental model (ONNX, ~64MB) executes on WebGPU via onnxruntime-web.
+The model downloads from Hugging Face on first use and persists in the browser Cache API; the site hosts neither model nor audio.
+`src/lib/mdx.js` is the runtime-agnostic STFT/chunk/iSTFT plumbing around the model (n_fft 6144 via a mixed-radix FFT of three fft.js 2048 transforms); it was validated against the reference audio-separator implementation (0.992 waveform correlation).
+Audio is resampled to 44.1kHz for inference (the model's training rate) and back for playback.
+Devices without WebGPU skip ML; a device that blows the 75s inference budget is remembered in localStorage (`tt_ml_slow`) and skips ML from then on.
+Successful ML output plays raw (mode "ml"); any failure falls through to centercut/legacy silently.
+The `onnxruntime-web` version is pinned exactly and must match the CDN wasmPaths in mlsep.js; vite resolves the extern-wasm build via a custom condition in vite.config.js.
 Processed buffers are cached (current + prefetched track) as promises keyed by URL, so replay/extend and prefetched tracks never re-process.
 This path requires CORS-readable audio (`fetch` + decode), which is why song sources must serve `Access-Control-Allow-Origin: *`.
 If decode fails, the caller falls back to `playElement` (plain `<audio>`, vocals intact) and shows a notice.

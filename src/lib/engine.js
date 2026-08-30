@@ -3,6 +3,7 @@
    is ignored, so two songs can never play at once. */
 import { centerCut } from "./centercut.js";
 import { pickSnippetWindow } from "./snippick.js";
+import { mlAvailable, separateBuffer } from "./mlsep.js";
 
 /* Post-centercut shaping: the lead vocal is already ducked, so only dull the leakage. */
 function buildMildGraph(c, src){
@@ -72,17 +73,19 @@ export const engine = {
     const res = await fetch(url);
     const ab = await res.arrayBuffer();
     const full = await this.ac().decodeAudioData(ab);
-    // Find the song's most instrumental stretch; if it's clean by this song's
-    // own standards it plays raw, otherwise its least-vocal window gets centercut.
+    // Find the song's most instrumental stretch; a clean window plays raw.
+    // A vocal window goes to ML separation (true instrumental) when this device
+    // can run it, then to the DSP chains as fallback.
     let start = 0, clean = false;
     try { ({ start, clean } = await pickSnippetWindow(full)); } catch(e){}
     let buf = this.slice(full, start, 45);
-    let mode = "raw";
-    if (!clean){
-      mode = "legacy";
-      if (buf.numberOfChannels >= 2){
-        try { buf = await centerCut(buf, this.ac()); mode = "cut"; } catch(e){}
-      }
+    if (clean) return { buf, mode: "raw" };
+    if (mlAvailable()){
+      try { return { buf: await separateBuffer(buf, this.ac()), mode: "ml" }; } catch(e){}
+    }
+    let mode = "legacy";
+    if (buf.numberOfChannels >= 2){
+      try { buf = await centerCut(buf, this.ac()); mode = "cut"; } catch(e){}
     }
     return { buf, mode };
   },
@@ -99,7 +102,7 @@ export const engine = {
     const c = this.ac();
     const src = c.createBufferSource(); src.buffer = buf;
     let out;
-    if (mode === "raw"){ out = c.createGain(); src.connect(out); } // instrumental section: untouched audio
+    if (mode === "raw" || mode === "ml"){ out = c.createGain(); src.connect(out); } // untouched audio
     else if (mode === "cut") out = buildMildGraph(c, src);
     else out = buildLegacyGraph(c, src, buf.numberOfChannels);
     out.connect(c.destination);

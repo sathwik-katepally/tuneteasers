@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "fft.js": "^4.0.4",
+    "onnxruntime-web": "1.29.0",
     "preact": "^10.29.8"
   },
   "devDependencies": {

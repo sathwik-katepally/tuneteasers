@@ -3,6 +3,7 @@ import { ERAS } from "./lib/constants.js";
 import { loadPersisted, persist, markPlayed, loadBlocked, saveBlocked, normArtist, isBlocked } from "./lib/storage.js";
 import { buildCrate } from "./lib/crate.js";
 import { engine, keepAwake } from "./lib/engine.js";
+import { warmup as mlWarmup } from "./lib/mlsep.js";
 import { Setup, Loading } from "./screens/Setup.jsx";
 import { Game } from "./screens/Game.jsx";
 import { Done } from "./screens/Done.jsx";
@@ -40,6 +41,7 @@ export function App(){
 
   async function startGame(){
     engine.stop();
+    if (S.sound === "inst") mlWarmup(); // start the separation model download/compile early
     setLoading(true); setError("");
     const crate = await buildCrate(S.mix, S.eras);
     setLoading(false);
