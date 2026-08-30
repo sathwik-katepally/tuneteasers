@@ -63,5 +63,5 @@ console.log(`Total: ${tracks.length}`, byLang);
 if (tracks.length < 100) { console.error("Too few tracks; not writing catalog.json"); process.exit(1); }
 
 const { writeFileSync } = await import("node:fs");
-writeFileSync(new URL("../catalog.json", import.meta.url), JSON.stringify({ tracks }));
-console.log("Wrote catalog.json");
+writeFileSync(new URL("../public/catalog.json", import.meta.url), JSON.stringify({ tracks }));
+console.log("Wrote public/catalog.json");

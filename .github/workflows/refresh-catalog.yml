@@ -18,12 +18,12 @@ jobs:
       - run: node scripts/build-catalog.mjs
       - name: Commit if changed
         run: |
-          if git diff --quiet catalog.json; then
+          if git diff --quiet public/catalog.json; then
             echo "Catalog unchanged"
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add catalog.json
+          git add public/catalog.json
           git commit -m "Refresh song catalog"
           git push
