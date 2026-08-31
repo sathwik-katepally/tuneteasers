@@ -1,0 +1,198 @@
+<!doctype html>
+<!-- Offline VAD scoring harness, served locally by scripts/build-snips.mjs and
+     driven by Playwright. Loads tfjs (WASM backend), essentia.js and the
+     MusiCNN voice/instrumental model, then exposes window.__scoreSong(url):
+     fetch -> decodeAudioData -> 16kHz mono offline render -> mel per kept
+     patch -> MusiCNN p(voice) -> median-of-3 smoothing -> pick the 10s
+     window whose worst patch is quietest.
+     The extraction is the client vad.worker.js logic with one fix (see
+     extractSegment below): essentia's FrameGenerator silently DROPS
+     digitally-silent frames, so a song with any pure silence (fade-in head,
+     mid-song gap) returns fewer mel frames than the patch geometry assumes;
+     the old worker then indexed past the end, pushed `undefined` rows into
+     the feature list, and tfjs' WASM backend crashed allocating the
+     shape-sized view over the too-short flattened buffer with
+     "Invalid typed array length: <n>" (~40% of real songs). -->
+<meta charset="utf-8">
+<title>snip scorer harness</title>
+<script src="/vendor/tf.min.js"></script>
+<script src="/vendor/tf-backend-wasm.min.js"></script>
+<script type="module">
+import { EssentiaTFInputExtractor, TensorflowMusiCNN } from "/essentia/essentia.js-model.es.js";
+
+const MODEL_SR = 16000;
+const PATCH_FRAMES = 187, MEL_HOP = 256; // MusiCNN input geometry
+const PATCH_STRIDE = 2;                  // score every 2nd patch (~5.98s granularity)
+const WINDOW_SEC = 10;                   // verified window length (owner update 2026-08-31)
+
+let ready = null;
+function init(){
+  if (!ready){
+    ready = (async () => {
+      tf.wasm.setWasmPaths("/tfjs/");
+      await tf.setBackend("wasm");
+      await tf.ready();
+      const model = new TensorflowMusiCNN(tf, "/models/voice_instrumental/model.json", false);
+      await model.initialize();
+      return { model };
+    })();
+    ready.catch(() => { ready = null; });
+  }
+  return ready;
+}
+
+/* Essentia leaks WASM heap for every frame its mel extraction touches
+   (~0.5GB+ per scored song, never freed - the reason the old client
+   terminated its VAD worker after every job). A fresh module instance per
+   song via cache-busted dynamic import gives each job a clean heap and lets
+   the browser GC the leaked one when the previous module goes unreferenced. */
+let essSeq = 0;
+async function freshEssentia(){
+  const mod = await import("/essentia/essentia-wasm.es.js?fresh=" + (++essSeq));
+  return mod.EssentiaWASM;
+}
+
+async function to16kMono(buf){
+  const len = Math.ceil(buf.duration * MODEL_SR);
+  const oc = new OfflineAudioContext(1, len, MODEL_SR);
+  const src = oc.createBufferSource(); src.buffer = buf;
+  src.connect(oc.destination); src.start();
+  return (await oc.startRendering()).getChannelData(0);
+}
+
+/* Deterministic PRNG for the silence dither (stable rescoring across runs). */
+function mulberry32(seed){
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/* THE FIX. Essentia's FrameGenerator drops frames whose 512 samples are
+   digitally silent (essentia isSilent: instant power < 1e-9), so any song
+   with a silent fade-in head or mid-song gap yields fewer frames than the
+   patch geometry expects - and time alignment past the gap breaks too.
+   When a segment comes back short, re-extract it with a deterministic
+   sub-audible dither (+-2e-4, ~-74dBFS, power ~1.3e-8 > the 1e-9 silence
+   threshold) so every frame survives and alignment stays exact.
+   Segments without silence are untouched: bit-identical to the old path. */
+function extractSegment(extractor, seg, seed, minFrames){
+  let features = null;
+  // A fully-silent segment makes FrameGenerator abort outright (observed:
+  // WASM exception), so the first attempt is try/caught like the short case.
+  try { features = extractor.computeFrameWise(seg, MEL_HOP); } catch (e){}
+  if (!features || features.melSpectrum.length < minFrames){
+    const rnd = mulberry32(seed);
+    for (let i = 0; i < seg.length; i++) seg[i] += (rnd() * 2 - 1) * 2e-4;
+    features = extractor.computeFrameWise(seg, MEL_HOP);
+    if (features.melSpectrum.length < minFrames)
+      throw new Error("silent-frame drop persists: " + features.melSpectrum.length + " < " + minFrames);
+  }
+  return features;
+}
+
+/* Mel per stride-kept patch; sample-aligned segments verified bit-identical
+   to a full-song pass (see src history / docs). Segments are COPIED out of
+   the song PCM (pcm.slice) because extractSegment may dither them in place. */
+function extractKept(extractor, pcm){
+  const segSamples = PATCH_FRAMES * MEL_HOP + MEL_HOP; // one extra hop: frame f covers [(f-1)*hop, (f-1)*hop + 2*hop)
+  const kept = [];
+  let features = null;
+  // FrameGenerator centers its first frame (a hop of leading zeros), so a
+  // segment starting one hop before patch p's first frame reproduces the
+  // full-song frames exactly once that centered frame 0 is skipped.
+  for (let p = 0; ; p++){
+    const f0 = p * PATCH_STRIDE * PATCH_FRAMES; // patch p's first frame index in the full song
+    const s = f0 === 0 ? 0 : (f0 - 1) * MEL_HOP;
+    const skip = f0 === 0 ? 0 : 1;
+    if (s + segSamples > pcm.length) break;
+    features = extractSegment(extractor, pcm.slice(s, s + segSamples), s, skip + PATCH_FRAMES);
+    for (let i = 0; i < PATCH_FRAMES; i++) kept.push(features.melSpectrum[skip + i]);
+  }
+  if (!kept.length){ // very short song: keep whatever there is
+    features = extractSegment(extractor, pcm.slice(0), 0, 1);
+    kept.push(...features.melSpectrum);
+  }
+  return { kept, features };
+}
+
+/* Median-of-3 smoothing + pick the WINDOW_SEC window whose worst patch is
+   quietest (ties go earlier) - copied from src/lib/vad.js. */
+function pickWindow(probs, hopSec){
+  const sm = Float32Array.from(probs);
+  for (let i = 1; i < probs.length - 1; i++){
+    const a = probs[i-1], b = probs[i], c = probs[i+1];
+    sm[i] = Math.max(Math.min(a, b), Math.min(Math.max(a, b), c));
+  }
+  const winPatches = Math.max(1, Math.min(sm.length, Math.round(WINDOW_SEC / hopSec)));
+  let bestIdx = 0, bestMax = Infinity;
+  for (let i = 0; i + winPatches <= sm.length; i++){
+    let mx = 0;
+    for (let j = i; j < i + winPatches; j++) if (sm[j] > mx) mx = sm[j];
+    if (mx < bestMax - 1e-6){ bestMax = mx; bestIdx = i; }
+  }
+  return { start: bestIdx * hopSec, winMax: bestMax, patches: sm.length, winPatches };
+}
+
+/* Returns { startSec, winMax, patches, dur, ms } or { error, stage }. */
+window.__scoreSong = async function(url){
+  const t0 = performance.now();
+  let stage = "init";
+  try {
+    const { model } = await init();
+    stage = "fetch";
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error("http " + resp.status);
+    const ab = await resp.arrayBuffer();
+    stage = "decode";
+    const ctx = new AudioContext();
+    let buf;
+    try { buf = await ctx.decodeAudioData(ab); } finally { ctx.close(); }
+    stage = "render";
+    const pcm = await to16kMono(buf);
+    stage = "extract";
+    // Fresh module AND extractor per job: reusing an extractor corrupts the
+    // essentia heap after a few songs (observed: "Out of bounds memory
+    // access", then aborts), and the module accumulates leaked heap.
+    const EssentiaWASM = await freshEssentia();
+    const extractor = new EssentiaTFInputExtractor(EssentiaWASM, "musicnn", false);
+    let kept, features;
+    try { ({ kept, features } = extractKept(extractor, pcm)); }
+    finally { try { extractor.delete(); } catch(e){} }
+    stage = "predict";
+    // Predict in bounded batches: a 13+ minute song is 130+ patches, and one
+    // giant batch blows the tfjs WASM heap ("memory access out of bounds" /
+    // "null function"). MusiCNN scores each patch independently, so chunked
+    // output is identical to a single batch.
+    const PATCHES_PER_PREDICT = 32;
+    const probs = []; // p(voice) per patch; acts rows are [p_instrumental, p_voice]
+    for (let i = 0; i < kept.length; i += PATCHES_PER_PREDICT * PATCH_FRAMES){
+      const chunk = kept.slice(i, i + PATCHES_PER_PREDICT * PATCH_FRAMES);
+      const acts = await model.predict({ ...features, melSpectrum: chunk, frameSize: chunk.length }, true);
+      for (const a of acts) probs.push(a[1]);
+    }
+    stage = "pick";
+    if (probs.length < 2) throw new Error("too few patches: " + probs.length);
+    const hopSec = (PATCH_FRAMES * MEL_HOP * PATCH_STRIDE) / MODEL_SR; // ~5.98s per kept patch
+    const pick = pickWindow(probs, hopSec);
+    return {
+      startSec: Math.round(pick.start),
+      winMax: Math.round(pick.winMax * 1000) / 1000,
+      patches: pick.patches,
+      dur: Math.round(buf.duration),
+      ms: Math.round(performance.now() - t0),
+    };
+  } catch (e){
+    return { error: String((e && e.message) || e).slice(0, 200), stage };
+  }
+};
+
+window.__harnessInit = init; // let the driver warm the model before the first song
+// debug handles for ad-hoc page.evaluate probes (harmless in production runs)
+window.__dbg = { freshEssentia, EssentiaTFInputExtractor, TensorflowMusiCNN, to16kMono, extractKept, pickWindow, init };
+window.__harnessReady = true;
+</script>
+<body>snip scorer harness</body>

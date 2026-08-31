@@ -2,7 +2,7 @@
    Primary: JioSaavn mirror (full songs, snippets start at the intro).
    Fallback 1: catalog.json baked into the site (rebuilt weekly by CI, 30s hook clips).
    Fallback 2: live iTunes search, throttled to stay under Apple's rate limit. */
-import { SAAVN_BASES, SAAVN_QUERIES, ITUNES_TERMS, ITUNES_LANG_OK, EXCLUDE_RX, ERAS, eraOf } from "./constants.js";
+import { SAAVN_BASES, SAAVN_QUERIES, ITUNES_TERMS, ITUNES_LANG_OK, EXCLUDE_RX, ERAS, eraOf, SNIP_CLEAN_MAX } from "./constants.js";
 import { de, stripParens, shuffle, safeUrl } from "./utils.js";
 import { sanitizeTrack, loadPlayed, loadBlocked, normArtist, isBlocked, PLAY_COOLDOWN } from "./storage.js";
 import { log, ms } from "./log.js";
@@ -123,11 +123,24 @@ async function loadFromItunes(langs){
   return pool.filter(Boolean);
 }
 
+/* The offline-scored instrumental-window index (see docs/audio.md).
+   Fetched fresh per crate build; absence is normal (index not built yet,
+   or fetch failed) and simply means no track gets a verified window. */
+async function loadSnips(){
+  try {
+    const r = await fetch("./snips.json", { cache:"no-cache" });
+    if (!r.ok) return null;
+    const j = await r.json();
+    return (j && j.snips && typeof j.snips === "object") ? j.snips : null;
+  } catch(e){ return null; }
+}
+
 /* Returns { queue, source } or { error: "load" | "thin" }. */
-export async function buildCrate(mix, eras){
+export async function buildCrate(mix, eras, sound){
   const t0 = performance.now();
   const langs = mix==="both" ? ["bolly","telugu"] : [mix];
   const key = t => stripParens(t.title).toLowerCase();
+  const snipsP = loadSnips();
   let pool = await loadFromSaavn(langs);
   let source = "saavn";
   const tiers = { saavn: pool.length };
@@ -145,7 +158,15 @@ export async function buildCrate(mix, eras){
     if (!pool.length) source = "live";
     pool = pool.concat(live);
   }
-  log("crate", { mix, source, ...tiers, ms: ms(t0) });
+  // Annotate verified instrumental windows: t.snip = window start in seconds,
+  // set only when the song's index entry is clean enough to trust raw playback.
+  const snips = await snipsP;
+  let snipped = 0;
+  if (snips) for (const t of pool){
+    const e = snips[key(t)];
+    if (Array.isArray(e) && Number.isFinite(e[0]) && e[1] < SNIP_CLEAN_MAX){ t.snip = Math.max(0, Math.floor(e[0])); snipped++; }
+  }
+  log("crate", { mix, source, ...tiers, snips: snips ? "ok" : "none", snipped, ms: ms(t0) });
   if (pool.length < 10) return { error:"load" };
   if (Array.isArray(eras) && eras.length && eras.length < ERAS.length)
     pool = pool.filter(t => eras.includes(eraOf(t.year)));
@@ -159,6 +180,14 @@ export async function buildCrate(mix, eras){
   const fresh = [], stale = [];
   for (const t of pool) ((now - (played[key(t)] || 0)) > PLAY_COOLDOWN ? fresh : stale).push(t);
   stale.sort((a,b) => (played[key(a)]||0) - (played[key(b)]||0));
-  const queue = fresh.length >= 15 ? shuffle(fresh) : shuffle(fresh).concat(stale);
+  let queue = fresh.length >= 15 ? shuffle(fresh) : shuffle(fresh).concat(stale);
+  // Music-only eligibility (adaptive): with enough verified tracks the whole
+  // game plays raw "snip" windows; when verified tracks are scarce they lead
+  // the queue and unverified ones follow, playing through the muffle graph.
+  if (sound === "inst"){
+    const verified = queue.filter(t => Number.isFinite(t.snip));
+    if (verified.length >= 15) queue = verified;
+    else queue = verified.concat(queue.filter(t => !Number.isFinite(t.snip)));
+  }
   return { queue, source };
 }

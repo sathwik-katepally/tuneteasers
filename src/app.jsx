@@ -3,8 +3,6 @@ import { ERAS } from "./lib/constants.js";
 import { loadPersisted, persist, markPlayed, loadBlocked, saveBlocked, normArtist, isBlocked } from "./lib/storage.js";
 import { buildCrate } from "./lib/crate.js";
 import { engine, keepAwake } from "./lib/engine.js";
-import { warmup as mlWarmup } from "./lib/mlsep.js";
-import { vadWarmup } from "./lib/vad.js";
 import { log } from "./lib/log.js";
 import { Setup, Loading } from "./screens/Setup.jsx";
 import { Game } from "./screens/Game.jsx";
@@ -43,9 +41,8 @@ export function App(){
 
   async function startGame(){
     engine.stop();
-    if (S.sound === "inst"){ mlWarmup(); vadWarmup(); } // start model downloads/compiles early
     setLoading(true); setError("");
-    const crate = await buildCrate(S.mix, S.eras);
+    const crate = await buildCrate(S.mix, S.eras, S.sound);
     setLoading(false);
     if (crate.error){
       setError(crate.error==="thin"
@@ -58,7 +55,7 @@ export function App(){
     setState(st=>({ ...st, screen:"game",
       players: st.players.map(p=>({ ...p, score:0 })),
       game:{ queue:crate.queue, trackIdx:0, turn:0, round:1, totalSongs:crate.queue.length, source:crate.source } }));
-    if (S.sound==="inst") engine.prefetch(crate.queue[0].stream);
+    if (S.sound==="inst") engine.prefetch(crate.queue[0]);
   }
 
   async function playSnippet(secs, mode){ // mode: fresh | replay | extend
@@ -70,12 +67,16 @@ export function App(){
     const done = ()=>setPhase("guessing");
     log("snippet", { how: mode, secs, sound: S.sound, title: String(track.title).slice(0, 28) });
     if (S.sound === "inst"){
-      setPhase("cueing");
-      const r = await engine.playMuffled(track.stream, offset, secs, done);
+      setPhase("cueing"); // brief: only while the element buffers (12s stall guard inside the engine)
+      const r = await engine.playSnippet(track, offset, secs, done);
       if (r === "superseded") return;         // user did something newer; obey them
-      if (r === "played"){ setSnip(nextSnip); setPhase("playing"); return; }
+      if (r === "snip" || r === "muffle"){ setSnip(nextSnip); setPhase("playing"); return; }
+      if (r === "plain"){ // muffle wiring failed; the engine already played it as-is
+        setNote("Couldn't process this one - playing it as-is.");
+        setSnip(nextSnip); setPhase("playing"); return;
+      }
       log("muffle-fallback", { title: String(track.title).slice(0, 28) }); // vocals will be audible
-      setNote("Couldn't process this one — playing it as-is.");
+      setNote("Couldn't process this one - playing it as-is.");
     }
     setSnip(nextSnip);
     setPhase("playing");
@@ -110,11 +111,10 @@ export function App(){
       return { ...st, players, game:{ ...gg, trackIdx, turn, round } };
     });
   }
-  useEffect(()=>{ // keep the current track ready, then warm the next one behind it
+  useEffect(()=>{ // warm the next track's stream behind the current one (one preload="auto" element)
     if (state.screen!=="game" || !track || S.sound!=="inst") return;
     const next = g.queue[g.trackIdx+1];
-    engine.ensureBuf(track.stream, true).catch(()=>{})
-      .then(()=>{ if (next) engine.prefetch(next.stream); });
+    if (next) engine.prefetch(next);
   }, [g && g.trackIdx, state.screen]);
 
   function blockArtist(){

@@ -1,6 +1,6 @@
 # Song loading
 
-`buildCrate(mix, eras)` in `src/lib/crate.js` assembles the game queue; it returns `{ queue, source }` or `{ error: "load" | "thin" }`.
+`buildCrate(mix, eras, sound)` in `src/lib/crate.js` assembles the game queue; it returns `{ queue, source }` or `{ error: "load" | "thin" }`.
 
 ## Source tiers
 
@@ -20,6 +20,15 @@ Tracks from tiers 2 and 3 are 30-second mid-song "hook" clips and carry `hook: t
 - Blocked artists are removed: a track is out if ANY of its comma-separated artists matches the device blocklist (`tt_blocked` in localStorage, managed in the reveal screen and setup screen).
 
 If filters shrink the pool below 10 the crate returns `{ error: "thin" }` and the UI tells the user to widen filters, distinct from the connection error.
+
+## Snips annotation and Music-only eligibility
+
+Each crate build fetches `./snips.json` (no-cache); a missing or failed fetch is tolerated and simply yields no annotations.
+A pooled track gets `t.snip = startSec` when its normalized-title key matches an index entry whose `winMax` is below `SNIP_CLEAN_MAX` (see docs/audio.md for the contract).
+The crate log entry records `snips: "ok"|"none"` and `snipped: <count>`.
+In Music-only mode (`sound === "inst"`), the queue is adaptive: if at least 15 annotated tracks survive the filters, the queue uses only annotated tracks (every song plays mode "snip").
+Otherwise annotated tracks lead the queue and unannotated ones follow, playing through the realtime muffle graph (mode "muffle").
+The annotation survives game resume: `sanitizeTrack` preserves a finite `snip` value.
 
 ## Played-song cooldown (per device)
 

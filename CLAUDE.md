@@ -8,6 +8,7 @@ Preact + Vite SPA, deployed by GitHub Actions to GitHub Pages at https://sathwik
 - `npm run dev` - local dev server
 - `npm run build` - production build to `dist/`
 - `npm run build:catalog` - regenerate `public/catalog.json` from iTunes (slow; sequential requests to respect Apple's ~20 req/min rate limit)
+- `npm run build:snips` - regenerate `public/snips.json`, the offline-scored instrumental-window index (slow; scores songs in a Playwright Chromium page)
 
 ## Hard rules
 
@@ -22,5 +23,5 @@ Read the matching doc before working in that area; skip otherwise.
 
 - `docs/architecture.md` - module layout, state model, screens and phases
 - `docs/song-loading.md` - 3-tier song sourcing, filters, era/artist/cooldown rules
-- `docs/audio.md` - Web Audio vocal-muffle engine and playback session rules
+- `docs/audio.md` - element playback modes, snips.json contract, and playback session rules
 - `docs/testing-and-deploy.md` - Playwright E2E harness, Pages deploy, catalog refresh CI

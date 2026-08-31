@@ -28,6 +28,8 @@ export function sanitizeTrack(t){
     year: parseInt(t.year)||0,
     lang: t.lang==="telugu" ? "telugu" : "bolly",
     hook: !!t.hook, // true when the stream is a mid-song preview clip, not the intro
+    // verified instrumental-window start (seconds), when the snips index vouched for it
+    ...(Number.isFinite(t.snip) ? { snip: Math.max(0, Math.floor(t.snip)) } : {}),
   };
 }
 
