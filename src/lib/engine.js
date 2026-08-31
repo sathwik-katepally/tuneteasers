@@ -79,7 +79,7 @@ export const engine = {
     const res = await fetch(url);
     const ab = await res.arrayBuffer();
     const tFetch = ms(t0);
-    const full = await this.ac().decodeAudioData(ab);
+    let full = await this.ac().decodeAudioData(ab);
     const tDecode = ms(t0) - tFetch;
     // Pick the most instrumental stretch. ML separation still runs on every
     // picked window on capable devices (the vocal-activity detector is only a
@@ -109,6 +109,7 @@ export const engine = {
     log("load", { id, kb: Math.round(ab.byteLength/1024), fetchMs: tFetch, decodeMs: tDecode,
       dur: Math.round(full.duration), picker, start: Math.round(start), clean, ...diag });
     const buf = this.slice(full, start, 45);
+    full = null; // the decoded full song is ~100MB; let it go before suppression runs
     // The "clean" verdict is telemetry only (logged above), never a reason to
     // skip processing: measured on real songs, 7/8 heuristic windows passed it
     // while still carrying audible vocals. Raw playback is earned only by ML.

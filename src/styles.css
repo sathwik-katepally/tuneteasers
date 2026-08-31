@@ -93,13 +93,15 @@ input:focus, button:focus-visible { outline:2px solid var(--marigold); outline-o
 
 /* ?debug=1 diagnostics overlay */
 .dbg-fab {
-  position:fixed; right:10px; bottom:10px; z-index:50;
+  /* lifted above the zone iOS Safari's bottom toolbar overlays */
+  position:fixed; right:10px; bottom:calc(64px + env(safe-area-inset-bottom, 0px)); z-index:999;
   background:var(--surface2); color:var(--dim); border:1px solid #FFB62755;
   border-radius:10px; padding:6px 10px; font-size:11px; font-family:monospace; cursor:pointer;
 }
 .dbg-panel {
-  position:fixed; left:0; right:0; bottom:0; z-index:50; max-height:45vh;
+  position:fixed; left:0; right:0; bottom:0; z-index:999; max-height:45vh;
   display:flex; flex-direction:column;
+  padding-bottom:calc(40px + env(safe-area-inset-bottom, 0px)); /* keep the log tail readable above the browser toolbar */
   background:#0E0616F2; border-top:1px solid var(--surface2);
 }
 .dbg-bar { display:flex; gap:8px; align-items:center; padding:6px 10px; color:var(--dim); font-size:11px; font-family:monospace; }

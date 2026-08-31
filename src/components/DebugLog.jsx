@@ -21,7 +21,12 @@ const fmt = e => {
 
 export function DebugLog(){
   const [on] = useState(debugEnabled);
-  const [open, setOpen] = useState(false);
+  // ?debug=1 in the URL is an explicit "show me the logs now": open the panel
+  // immediately instead of relying on the fab, which real iPhones hide behind
+  // the browser's bottom toolbar (fixed-bottom elements sit under it).
+  const [open, setOpen] = useState(() => {
+    try { return new URLSearchParams(location.search).get("debug") === "1"; } catch(e){ return false; }
+  });
   const [copied, setCopied] = useState(false);
   const [, bump] = useState(0);
   useEffect(() => { if (on && open) return onLog(() => bump(x => x + 1)); }, [on, open]);

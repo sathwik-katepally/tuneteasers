@@ -6,6 +6,7 @@
    trained on full mixes, so those are its training distribution.
    Model: essentia voice_instrumental-musicnn-msd-2 (CC BY-NC-SA 4.0,
    Music Technology Group UPF — see docs/audio.md for attribution). */
+import { isIOS } from "./utils.js";
 import { log, ms, errMsg } from "./log.js";
 
 export const VAD = {
@@ -13,6 +14,15 @@ export const VAD = {
   cleanMax: 0.25,    // window max p(voice) below this = genuinely instrumental
   timeoutMs: 90000,  // a wedged worker must not pin the pipeline forever
 };
+
+/* The essentia mel extraction leaks WASM heap on every frame it processes
+   (measured: the scoring worker's process grows by well over 1GB per full
+   song, and WASM memory never shrinks). On iOS that jetsam-kills the tab
+   mid-game, so the VAD is skipped there outright — snippick picks the
+   window, the same policy as ML separation. Elsewhere the worker is
+   recycled after every job (see below) so the OS reclaims the heap. */
+export function vadReason(){ return isIOS ? "ios" : "ok"; }
+export const vadAvailable = () => vadReason() === "ok";
 
 let worker = null, seq = 0;
 const pending = new Map();
@@ -33,8 +43,20 @@ function getWorker(){
   return worker;
 }
 
+/* Terminating the worker is the only way to reclaim the WASM memory the
+   scoring stack leaks per job; it also prevents the heap corruption a reused
+   essentia instance develops after a few songs. Deferred while other jobs
+   are in flight so their replies aren't lost. */
+function recycleWorker(){
+  try { if (worker) worker.terminate(); } catch(e){}
+  for (const p of pending.values()) p({ error: "worker recycled" });
+  pending.clear();
+  worker = null;
+}
+
 /* Start loading the worker + model in the background (call at game start). */
 export function vadWarmup(){
+  if (!vadAvailable()) return;
   try {
     const base = new URL(import.meta.env.BASE_URL, self.location.href).href;
     getWorker().postMessage({ warm: true, base });
@@ -73,6 +95,7 @@ export async function pickWindowVAD(buf, url){
   const key = String(url || "").slice(-40);
   const hit = key && cacheGet(key);
   if (hit) return { start: hit.s, clean: !!hit.c, diag: { vad: 1, cached: 1, winMax: hit.w } };
+  if (!vadAvailable()) return null; // iOS: memory-unsafe (see vadReason) — heuristic picks
   try {
     const pcm = await to16kMono(buf);
     const base = new URL(import.meta.env.BASE_URL, self.location.href).href;
@@ -86,14 +109,10 @@ export async function pickWindowVAD(buf, url){
     });
     if (result.error){
       log("vad-fail", { msg: result.error, ms: ms(t0) });
-      // A WASM abort poisons the whole worker heap: discard it so the next
-      // song gets a fresh worker instead of a permanently broken one.
-      try { if (worker) worker.terminate(); } catch(e){}
-      for (const p of pending.values()) p({ error: "worker recycled" });
-      pending.clear();
-      worker = null;
+      recycleWorker();
       return null;
     }
+    if (pending.size === 0) recycleWorker(); // reclaim the job's leaked WASM heap
     const { probs, hopSec } = result;
     if (!probs || probs.length < 2){ log("vad-fail", { msg: "too few patches", ms: ms(t0) }); return null; }
     // median-of-3 smoothing knocks out single-patch blips

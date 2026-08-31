@@ -6,6 +6,7 @@
    chain. All of this is best-effort: every failure path throws and the engine
    falls back gracefully. */
 import { separateInstrumental } from "./mdx.js";
+import { isIOS } from "./utils.js";
 import { log, ms, errMsg } from "./log.js";
 
 // Public (non-VIP) UVR model; params: n_fft 6144, dim_f 3072, dim_t 256, primary stem Instrumental
@@ -15,18 +16,14 @@ const LS_ML_SLOW = "tt_ml_slow";
 
 let sessionP = null;
 
-/* iOS Safari enforces tight per-tab memory limits: the model download + WebGPU
-   session on top of a decoded full song gets the tab jetsam-killed, which
-   reloads the page mid-game (seen as "Cueing it up… then back to the home
-   page"). The DSP centercut path is the reliable one there. iPadOS reports
-   itself as MacIntel, hence the maxTouchPoints check. */
-const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
-  || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+/* iOS Safari's per-tab memory limit rules ML out: the model download + WebGPU
+   session on top of a decoded full song gets the tab jetsam-killed. The DSP
+   centercut path is the reliable one there. */
 
 /* Why this device does or doesn't run ML — logged once per page load. */
 export function mlReason(){
   try {
-    if (IS_IOS) return "ios";
+    if (isIOS) return "ios";
     if (!("gpu" in navigator)) return "no-webgpu";
     if (localStorage.getItem(LS_ML_SLOW) === "1") return "slow-flag";
     return "ok";
