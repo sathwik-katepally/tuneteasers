@@ -10,7 +10,7 @@
 - `src/screens/Done.jsx` - final leaderboard.
 - `src/components/bits.jsx` - tiny shared presentational pieces (`Chip`, `Disc`, `ScoreRow`).
 - `src/lib/constants.js` - search queries, language/era tables, exclusion regex.
-- `src/lib/utils.js` - pure helpers (`stripParens`, `shuffle`, `safeUrl`, `fmtScore`, ...).
+- `src/lib/utils.js` - pure helpers (`songKey`, `shuffle`, `safeUrl`, `fmtScore`, ...).
 - `src/lib/storage.js` - localStorage persistence, track sanitization, played-cooldown and blocked-artist stores.
 - `src/lib/crate.js` - song loading (`buildCrate`) across the 3 source tiers.
 - `src/lib/engine.js` - the audio engine and screen wake lock.

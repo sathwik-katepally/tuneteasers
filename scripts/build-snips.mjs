@@ -27,6 +27,7 @@ import http from "node:http";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
+import { songKey } from "../src/lib/utils.js";
 
 const REPO = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const OUT = process.env.SNIP_OUT || path.join(REPO, "public/snips.json");
@@ -50,8 +51,7 @@ const SAAVN_QUERIES = {
 };
 const EXCLUDE_RX = /(remix|mashup|lo-?fi|slowed|reverb|medley|unplugged|acoustic|cover|karaoke|instrumental|\bbgm\b|jukebox|revisited|reprise|redux|\bclub\b|\bdj\b|mix\b|8d\b|sped up|lounge|\bversion\b)/i;
 
-const stripParens = s => s.replace(/[\(\[].*?[\)\]]/g, "").replace(/\s+/g, " ").trim(); // identical to src/lib/utils.js (keys must match the client's)
-const keyOf = title => stripParens(title).toLowerCase();
+const keyOf = songKey; // shared with the client — snips.json keys must match the crate's
 /* DOM-free version of the client's `de` (textarea entity decode); Saavn
    titles only ever carry the basic named + numeric entities. */
 const de = s => String(s || "")

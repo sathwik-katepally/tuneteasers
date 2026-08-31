@@ -3,7 +3,7 @@
    Fallback 1: catalog.json baked into the site (rebuilt weekly by CI, 30s hook clips).
    Fallback 2: live iTunes search, throttled to stay under Apple's rate limit. */
 import { SAAVN_BASES, SAAVN_QUERIES, ITUNES_TERMS, ITUNES_LANG_OK, EXCLUDE_RX, ERAS, eraOf, SNIP_CLEAN_MAX } from "./constants.js";
-import { de, stripParens, shuffle, safeUrl } from "./utils.js";
+import { de, songKey, shuffle, safeUrl } from "./utils.js";
 import { sanitizeTrack, loadPlayed, loadBlocked, normArtist, isBlocked, PLAY_COOLDOWN } from "./storage.js";
 import { log, ms } from "./log.js";
 
@@ -52,7 +52,7 @@ async function loadFromSaavn(langs){
       if (EXCLUDE_RX.test(name)) continue;
       const stream = safeUrl(pickStream(s.downloadUrl));
       if (!stream) continue;
-      const key = stripParens(name).toLowerCase();
+      const key = songKey(name);
       if (seen.has(key)) continue;
       seen.add(key);
       const artists = (s.artists?.primary || []).map(a=>de(a.name)).filter(Boolean);
@@ -110,7 +110,7 @@ async function loadFromItunes(langs){
       if (!ITUNES_LANG_OK[lang].some(k=>g.includes(k))) continue;
       const year = s.releaseDate ? new Date(s.releaseDate).getFullYear() : 0;
       if (year < 2000) continue;
-      const key = stripParens(s.trackName).toLowerCase();
+      const key = songKey(s.trackName);
       if (seen.has(key)) continue;
       seen.add(key);
       pool.push(sanitizeTrack({
@@ -139,7 +139,7 @@ async function loadSnips(){
 export async function buildCrate(mix, eras, sound){
   const t0 = performance.now();
   const langs = mix==="both" ? ["bolly","telugu"] : [mix];
-  const key = t => stripParens(t.title).toLowerCase();
+  const key = t => songKey(t.title);
   const snipsP = loadSnips();
   let pool = await loadFromSaavn(langs);
   let source = "saavn";
@@ -157,6 +157,13 @@ export async function buildCrate(mix, eras, sound){
     tiers.live = live.length;
     if (!pool.length) source = "live";
     pool = pool.concat(live);
+  }
+  // Belt-and-braces dedupe of the whole pool: catalog.json itself can carry
+  // near-duplicate titles, and per-tier dedupe can't see across sources.
+  // First occurrence wins, so full Saavn songs beat 30s hook clips.
+  {
+    const seen = new Set();
+    pool = pool.filter(t => { const k = key(t); if (seen.has(k)) return false; seen.add(k); return true; });
   }
   // Annotate verified instrumental windows: t.snip = window start in seconds,
   // set only when the song's index entry is clean enough to trust raw playback.

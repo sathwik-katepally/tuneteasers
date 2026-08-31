@@ -16,7 +16,7 @@ This guarantees two songs can never play at once, even when the user mashes butt
 
     { "v": 1, "built": "...", "snips": { "<key>": [startSec, winMax], ... } }
 
-`<key>` is the normalized song title, `stripParens(title).toLowerCase()`, the same normalization the crate uses for dedupe.
+`<key>` is the canonical song title key, `songKey(title)` from `src/lib/utils.js`, the same normalization the crate uses for dedupe.
 `startSec` is the start of the song's most instrumental window (integer seconds); the window is ~10-12s of verified coverage.
 `winMax` is the window's max p(voice) from the offline MusiCNN VAD; lower is cleaner.
 The file keeps entries up to winMax 0.40, but the client only trusts entries below `SNIP_CLEAN_MAX` (`src/lib/constants.js`, currently 0.25), so the threshold can be tuned without a corpus rebuild.

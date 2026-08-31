@@ -1,7 +1,7 @@
 /* Persistence: auto-save on every change, auto-resume on load.
    Everything is device-local (localStorage) — there are no accounts. */
 import { ERAS } from "./constants.js";
-import { stripParens, safeUrl } from "./utils.js";
+import { songKey, safeUrl } from "./utils.js";
 
 const LS_KEY = "tuneteasers_v6";
 const LS_PLAYED = "tt_played";   // { titleKey: lastPlayedMs } — device-local recent-play cooldown
@@ -70,14 +70,19 @@ export function loadPlayed(){
   const raw = lsGet(LS_PLAYED);
   if (Array.isArray(raw)){ // migrate the old list format: treat every entry as just played
     const m = {}; const t = Date.now();
-    for (const k of raw) if (typeof k === "string") m[k] = t;
+    for (const k of raw) if (typeof k === "string") m[songKey(k)] = t;
     return m;
   }
-  return (raw && typeof raw === "object") ? raw : {};
+  if (!raw || typeof raw !== "object") return {};
+  // Re-key through songKey: entries written before the key normalization
+  // strengthened (e.g. 'song - from "movie"') collapse to the current key.
+  const m = {};
+  for (const [k, v] of Object.entries(raw)) m[songKey(k)] = Math.max(m[songKey(k)] || 0, v);
+  return m;
 }
 export function markPlayed(title){
   const m = loadPlayed();
-  m[stripParens(title).toLowerCase()] = Date.now();
+  m[songKey(title)] = Date.now();
   const cutoff = Date.now() - 30*24*3600*1000;
   for (const k of Object.keys(m)) if (!(m[k] > cutoff)) delete m[k];
   lsSet(LS_PLAYED, m);

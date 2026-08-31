@@ -10,6 +10,7 @@ Scripts serve `dist/` on a local port with correct MIME types and drive the full
 - `features.js` - artist blocking, unblock, queue trimming, played-map format and cooldown ordering.
 - `features2.js` - era filter chips and filtering, hint flow, half-point scoring, persistence.
 - `snips.js` - stubbed snips.json and Saavn responses; asserts a verified track plays mode "snip" seeked to its window and an unverified one plays "muffle".
+- `dupes.js` - builds a crate on the Saavn tier and the catalog tier and asserts no two queue entries share a `songKey` (keeps a synced copy of the key function).
 - `webkit-local.js` - iPhone-emulated WebKit run against the local build; asserts a fast cue and a valid mode.
 - `live*.js` - smoke tests against the production URL.
 

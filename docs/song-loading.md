@@ -8,7 +8,8 @@
 2. **Baked catalog** (`loadCatalog`) - `public/catalog.json`, ~700 iTunes tracks committed to the repo and served same-origin, so it cannot be rate-limited or CORS-blocked; refreshed weekly by CI because iTunes preview URLs rot.
 3. **Live iTunes search** (`loadFromItunes`) - last resort; deliberately throttled to few search terms because Apple rate-limits around 20 searches/min per IP (that rate limit caused the original "Couldn't load enough songs" production bug).
 
-Each tier only runs if the pool still has fewer than 10 songs, and tiers are deduped against each other by normalized title (`stripParens(title).toLowerCase()`).
+Each tier only runs if the pool still has fewer than 10 songs.
+Dedupe is by canonical title key (`songKey(title)` in `src/lib/utils.js`, which strips bracketed qualifiers, dash suffixes like `- From "Movie"`, and punctuation): each tier dedupes internally, later tiers are filtered against earlier ones, and the assembled pool gets a final dedupe pass (first occurrence wins, so full Saavn songs beat hook clips).
 Tracks from tiers 2 and 3 are 30-second mid-song "hook" clips and carry `hook: true`.
 
 ## Filters applied to every track

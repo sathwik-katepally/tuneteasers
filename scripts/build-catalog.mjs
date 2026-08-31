@@ -2,6 +2,8 @@
 // Run: node scripts/build-catalog.mjs
 // Requests are sequential with a delay to stay under Apple's ~20 req/min limit.
 
+import { songKey } from "../src/lib/utils.js";
+
 const TERMS = {
   bolly: ["Arijit Singh","Pritam songs","Shreya Ghoshal hindi","A R Rahman hindi","Amit Trivedi","Vishal Shekhar","Sonu Nigam hindi","Atif Aslam hindi","Jubin Nautiyal","Mohit Chauhan","Sachin Jigar","Badshah hindi"],
   telugu: ["Sid Sriram telugu","Devi Sri Prasad hits","Thaman S telugu","Anirudh telugu songs","Mickey J Meyer telugu","Gopi Sundar telugu","M M Keeravani telugu","Armaan Malik telugu","Anurag Kulkarni","telugu hit songs","Kaala Bhairava","Mangli telugu"],
@@ -10,7 +12,6 @@ const LANG_OK = { bolly:["bollywood","hindi"], telugu:["telugu","tollywood"] };
 const EXCLUDE_RX = /(remix|mashup|lo-?fi|slowed|reverb|medley|unplugged|acoustic|cover|karaoke|instrumental|\bbgm\b|jukebox|revisited|reprise|redux|\bclub\b|\bdj\b|mix\b|8d\b|sped up|lounge|\bversion\b)/i;
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-const stripParens = s => s.replace(/[\(\[].*?[\)\]]/g,"").replace(/\s+/g," ").trim();
 
 async function search(term, attempt = 0) {
   const url = `https://itunes.apple.com/search?term=${encodeURIComponent(term)}&media=music&entity=song&country=IN&limit=50`;
@@ -38,7 +39,7 @@ for (const [lang, terms] of Object.entries(TERMS)) {
       if (!LANG_OK[lang].some(k => g.includes(k))) continue;
       const year = s.releaseDate ? new Date(s.releaseDate).getFullYear() : 0;
       if (year < 2000) continue;
-      const key = stripParens(s.trackName).toLowerCase();
+      const key = songKey(s.trackName);
       if (seen.has(key)) continue;
       seen.add(key);
       kept++;
