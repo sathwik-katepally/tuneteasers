@@ -4,6 +4,7 @@ import { loadPersisted, persist, markPlayed, loadBlocked, saveBlocked, normArtis
 import { buildCrate } from "./lib/crate.js";
 import { engine, keepAwake } from "./lib/engine.js";
 import { warmup as mlWarmup } from "./lib/mlsep.js";
+import { vadWarmup } from "./lib/vad.js";
 import { log } from "./lib/log.js";
 import { Setup, Loading } from "./screens/Setup.jsx";
 import { Game } from "./screens/Game.jsx";
@@ -42,7 +43,7 @@ export function App(){
 
   async function startGame(){
     engine.stop();
-    if (S.sound === "inst") mlWarmup(); // start the separation model download/compile early
+    if (S.sound === "inst"){ mlWarmup(); vadWarmup(); } // start model downloads/compiles early
     setLoading(true); setError("");
     const crate = await buildCrate(S.mix, S.eras);
     setLoading(false);
@@ -112,7 +113,7 @@ export function App(){
   useEffect(()=>{ // keep the current track ready, then warm the next one behind it
     if (state.screen!=="game" || !track || S.sound!=="inst") return;
     const next = g.queue[g.trackIdx+1];
-    engine.ensureBuf(track.stream).catch(()=>{})
+    engine.ensureBuf(track.stream, true).catch(()=>{})
       .then(()=>{ if (next) engine.prefetch(next.stream); });
   }, [g && g.trackIdx, state.screen]);
 

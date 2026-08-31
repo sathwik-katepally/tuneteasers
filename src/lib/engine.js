@@ -1,14 +1,16 @@
 /* Audio engine — the ONLY owner of playback.
    Every action bumps `session`. Any async continuation from an older session
    is ignored, so two songs can never play at once. */
-import { centerCut } from "./centercut.js";
+import { suppressVocals } from "./suppress.js";
 import { pickSnippetWindow } from "./snippick.js";
+import { pickWindowVAD } from "./vad.js";
 import { mlAvailable, mlReason, separateBuffer } from "./mlsep.js";
 import { log, ms, errMsg } from "./log.js";
 
-/* Post-centercut shaping: the lead vocal is already ducked, so only dull the leakage. */
+/* Post-suppression shaping: the cascade already treats the band up to 14kHz,
+   so the lowpass only dulls the very top where residual sibilance could sit. */
 function buildMildGraph(c, src){
-  const lp = c.createBiquadFilter(); lp.type="lowpass"; lp.frequency.value=7000;
+  const lp = c.createBiquadFilter(); lp.type="lowpass"; lp.frequency.value=12000;
   const cut = c.createBiquadFilter(); cut.type="peaking"; cut.frequency.value=2500; cut.Q.value=1; cut.gain.value=-5;
   const makeup = c.createGain(); makeup.gain.value = 1.15;
   src.connect(lp); lp.connect(cut); cut.connect(makeup);
@@ -40,7 +42,8 @@ function buildLegacyGraph(c, src, channels){
 
 export const engine = {
   ctx:null, el:null, srcNode:null, timer:null, session:0,
-  cache: new Map(), // url -> Promise<{ buf, cut }> for the current and prefetched tracks
+  cache: new Map(), // url -> Promise<{ buf, mode }> for the current and prefetched tracks
+  _urgent: new Map(), // url -> resolver that cuts a pending load's VAD wait short
   ac(){
     if (!this.ctx) this.ctx = new (window.AudioContext||window.webkitAudioContext)();
     if (this.ctx.state === "suspended") this.ctx.resume();
@@ -60,17 +63,17 @@ export const engine = {
     for (let ch=0; ch<buf.numberOfChannels; ch++) nb.copyToChannel(buf.getChannelData(ch).subarray(from, from+len), ch);
     return nb;
   },
-  ensureBuf(url){
+  ensureBuf(url, patient){
     let p = this.cache.get(url);
     if (!p){
-      p = this._load(url);
+      p = this._load(url, patient);
       this.cache.set(url, p);
       if (this.cache.size > 2) this.cache.delete(this.cache.keys().next().value);
       p.catch(()=>{ if (this.cache.get(url) === p) this.cache.delete(url); }); // never cache failures
     }
     return p;
   },
-  async _load(url){
+  async _load(url, patient){
     const id = url.slice(-24); // enough to correlate log lines without full URLs
     const t0 = performance.now();
     const res = await fetch(url);
@@ -85,20 +88,34 @@ export const engine = {
     // the cache entry upgrades to the ML buffer in place once inference lands
     // (replays, extends, and prefetched tracks all read the upgraded entry).
     const mark = m => { try { window.__ttLastMode = m; } catch(e){} }; // E2E/debug surface
+    // Window choice: the learned VAD (MusiCNN) is the trusted picker; the
+    // snippick heuristic is its fallback. Both run in parallel. A patient
+    // load (background warming — the common case) gives the VAD 10s, which
+    // with fetch+decode+suppression stays under playMuffled's 20s cue
+    // timeout; an impatient one gets 4s. A VAD verdict that arrives too late
+    // still lands in the per-URL cache, so the song's next appearance wins.
     let start = 0, clean = false, diag = null;
-    try { ({ start, clean, diag } = await pickSnippetWindow(full)); }
-    catch(e){ log("pick-error", { id, msg: errMsg(e) }); }
+    const vadP = pickWindowVAD(full, url);
+    const heurP = pickSnippetWindow(full).catch(e => { log("pick-error", { id, msg: errMsg(e) }); return { start: 0, clean: false, diag: null }; });
+    // A patient wait must collapse the moment the user actually hits play:
+    // playMuffled resolves this promise, and the race falls through to the
+    // heuristic immediately instead of sitting out the rest of the VAD cap.
+    const urgent = new Promise(r => this._urgent.set(url, r));
+    let pick = await Promise.race([vadP, urgent, new Promise(r => setTimeout(() => r(undefined), patient ? 10000 : 4000))]);
+    this._urgent.delete(url);
+    const picker = pick ? "vad" : "heur";
+    if (!pick) pick = await heurP;
+    ({ start, clean, diag } = pick);
     log("load", { id, kb: Math.round(ab.byteLength/1024), fetchMs: tFetch, decodeMs: tDecode,
-      dur: Math.round(full.duration), start: Math.round(start), clean, ...diag });
+      dur: Math.round(full.duration), picker, start: Math.round(start), clean, ...diag });
     const buf = this.slice(full, start, 45);
     // The "clean" verdict is telemetry only (logged above), never a reason to
-    // skip processing: measured on real songs, 7/8 windows passed it while
-    // still carrying audible vocals — wide/doubled leads evade the
-    // center-correlation score. Raw playback is earned only by ML separation.
+    // skip processing: measured on real songs, 7/8 heuristic windows passed it
+    // while still carrying audible vocals. Raw playback is earned only by ML.
     const dsp = async () => {
       if (buf.numberOfChannels >= 2){
-        try { return { buf: await centerCut(buf, this.ac()), mode: "cut" }; }
-        catch(e){ log("centercut-fail", { id, msg: errMsg(e) }); }
+        try { return { buf: await suppressVocals(buf, this.ac()), mode: "cut" }; }
+        catch(e){ log("suppress-fail", { id, msg: errMsg(e) }); }
       }
       return { buf, mode: "legacy" };
     };
@@ -123,16 +140,18 @@ export const engine = {
     log("mode", { id, mode: entry.mode, ml: "ok", totalMs: ms(t0) });
     return entry;
   },
-  prefetch(url){ if (url) this.ensureBuf(url).catch(()=>{}); },
+  prefetch(url){ if (url) this.ensureBuf(url, true).catch(()=>{}); },
   /* returns "played" | "failed" | "superseded" */
   async playMuffled(url, offset, secs, onEnd){
     this.stop();
     const s = this.session;
+    const poke = this._urgent.get(url);
+    if (poke) poke(undefined); // the user is waiting now: stop being patient
     let entry;
     try { // bound the cueing wait: a stalled fetch must not pin the game on "Cueing it up…"
       entry = await Promise.race([
         this.ensureBuf(url), // keeps loading in the background even if the race times out, so replays can still hit the cache
-        new Promise((_,rej)=>setTimeout(()=>rej(new Error("cue timeout")), 15000)),
+        new Promise((_,rej)=>setTimeout(()=>rej(new Error("cue timeout")), 20000)), // must outlast fetch+decode+VAD cap+suppression
       ]);
     } catch(e){
       log("cue-fail", { id: url.slice(-24), msg: errMsg(e) });

@@ -10,20 +10,26 @@ This guarantees two songs can never play at once, even when the user mashes butt
 
 ## Vocal handling (default "Music only" mode)
 
-Strategy: find where the song is instrumental instead of trying to erase vocals — channel-based vocal removal cannot fully strip the doubled/reverbed leads typical of these mixes, but detecting vocal activity is reliable.
-`playMuffled` fetches the stream, decodes the full song, then `pickSnippetWindow` (`src/lib/snippick.js`) scores every STFT frame for vocal activity (center-correlated energy in the 200Hz-4kHz band) and picks the most instrumental ~25s window.
-Every decision is song-adaptive, never a fixed absolute threshold: the silence guard compares frame energy to the song's own median, and the "clean" verdict compares the best window to the song's own score percentiles.
+Strategy: find where the song is instrumental AND suppress whatever vocals remain — both halves are needed for the doubled/reverbed leads typical of these mixes.
+`playMuffled` fetches the stream, decodes the full song, then picks the most instrumental ~25s window using two pickers that run in parallel:
+the primary is `pickWindowVAD` (`src/lib/vad.js`) — the essentia `voice_instrumental-musicnn-msd-2` MusiCNN classifier (3MB, self-hosted under `public/models/`, CC BY-NC-SA 4.0, (c) Music Technology Group, Universitat Pompeu Fabra) scoring p(voice) per ~6s patch on the tfjs WASM backend in a worker (`src/lib/vad.worker.js`), picking the window whose worst patch is quietest;
+the fallback is the `pickSnippetWindow` heuristic (`src/lib/snippick.js`, center-correlated energy in the 200Hz-4kHz band), used when the VAD misses its time cap or fails.
+The VAD gets 10s on patient (background-warming) loads and 4s on impatient ones; a `playMuffled` call on a still-pending load pokes the wait short so a user tap never sits out the cap; verdicts persist per stream URL in localStorage (`tt_vad`), so a song's next appearance uses its VAD window instantly.
+A fresh extractor is created per scoring job and the worker is terminated and respawned after any failure — reusing either corrupts the essentia WASM heap after a few songs (observed on WebKit).
 The detector chooses the WINDOW but never gets to skip processing: wide/doubled vocals evade center-correlation entirely (measured twice: 11/12 real songs scored "clean" under the old trusting verdict, and 7/8 under the later "conservative" one while still carrying audible vocals - the chosen window is the song's own minimum, so the below-spread condition is nearly always true).
 The "clean" verdict is therefore telemetry only, logged with its numbers (`best`/`p20`/`p80`/`contrast`) for future tuning; on the DSP path every window is processed with `centerCut`, and raw playback exists only as ML output (mode "ml").
 The kept buffer is the 45s slice starting at the chosen window, so all snippet offsets are relative to that start.
 
-## Centercut (fallback vocal reduction)
+## Suppression cascade (DSP path)
 
-`centerCut` from `src/lib/centercut.js` runs offline on the sliced buffer.
-`centerCut` is per-bin center-channel suppression: an STFT (fft.js, 2048-point, 50% overlap, sqrt-Hann analysis+synthesis windows), where bins with near-identical L/R content (center-panned = almost always the lead vocal) get a soft-mask attenuation down to ~−15dB, band-limited to 180Hz-9kHz so center bass/kick and air pass untouched; panned and uncorrelated content is untouched, so the music keeps its stereo image.
-Tuning lives in the exported `CENTERCUT` and `SNIPPICK` configs; verify any retune with the DSP E2E tests (`dsp.js` for suppression depth vs bass/side retention, `pick.js` for window selection and the per-song clean verdict).
-Centercut playback applies a mild leakage-dulling graph (7kHz lowpass, −5dB peaking at 2.5kHz, slight makeup gain).
-Mono tracks (or a failed centercut) fall back to the legacy realtime chain: L−R difference when stereo, peaking cuts at 1.2kHz/3kHz, 6.5kHz lowpass, 140Hz bass branch.
+`suppressVocals` from `src/lib/suppress.js` runs offline on the sliced buffer (mode "cut"); it replaced the old single-cue centercut.
+Three independent cues combine over one STFT geometry (fft.js, 2048-point, 50% overlap, sqrt-Hann analysis+synthesis):
+a per-bin center mask (near-identical L/R content ducked, soft mask), a REPET-SIM mask (per-frame k-nearest-neighbor search over pooled log-mel features with a +-2.5s self-match exclusion, per-bin median over the k=25 most-similar frames modeling the repeating accompaniment; non-repeating energy — the vocal, however panned — gets ducked), and an HPSS percussive mask (17-tap median filters, Driedger margin 2) whose output is re-injected at 0.9 so drums stay loud and perceptually bury residue.
+Center and REPET masks multiply (suppression adds in dB where cues agree) and are raised to combinePow 1.35; the band reaches 180Hz-14kHz so sibilants are treated, with a floor of ~-15dB outside and ~-24dB inside the 1-8kHz consonant region.
+The O(T^2) similarity search is decimated 2x in both frames and candidates (4x less work); measured: center synthetic vocal -24.4dB, decorrelated wide vocal -13.2dB, bass and panned instruments 0dB, 30s stereo in ~1.4s (Chromium).
+Cut playback applies a mild graph (12kHz lowpass, -5dB peaking at 2.5kHz, slight makeup gain).
+Tuning lives in the exported `SUPPRESS` and `SNIPPICK` configs; verify any retune with the DSP E2E tests (`dsp.js` for suppression depth vs bass/side retention, `pick.js` for the heuristic picker, `vadtest.js` for the VAD).
+Mono tracks (or a failed suppression) fall back to the legacy realtime chain: L-R difference when stereo, peaking cuts at 1.2kHz/3kHz, 6.5kHz lowpass, 140Hz bass branch.
 
 ## ML separation (vocal windows, capable devices)
 On any WebGPU device, `src/lib/mlsep.js` runs true vocal separation on every picked window (the DSP paths are fallback-only): the public UVR MDX-Net Inst_HQ_3 model (ONNX, ~64MB; do NOT use the VIP models — they are for UVR's paying subscribers) executes on WebGPU via onnxruntime-web.
@@ -52,6 +58,6 @@ If decode fails, the caller falls back to `playElement` (plain `<audio>`, vocals
 
 ## Diagnostics
 
-`src/lib/log.js` keeps a structured ring buffer (250 entries) of pipeline events: boot (with ML availability reason), crate tier results, per-track load timings and window-pick verdict numbers, the resolved mode, ML model/session/inference events, and every fallback (`cue-fail`, `centercut-fail`, `muffle-fallback`, `element-play`, `element-fail`).
+`src/lib/log.js` keeps a structured ring buffer (250 entries) of pipeline events: boot (with ML availability reason), crate tier results, per-track load timings and window-pick verdict numbers, the resolved mode and picker, VAD scoring results (`vad`, `vad-fail`), ML model/session/inference events, and every fallback (`cue-fail`, `suppress-fail`, `muffle-fallback`, `element-play`, `element-fail`).
 The buffer mirrors to the console and persists in localStorage, so a tab reload keeps the evidence; a `boot` entry with no preceding `pagehide` is the signature of a crash or jetsam kill.
 On any device, append `?debug=1` to the URL for a live on-screen log overlay with copy-to-clipboard (`?debug=0` turns it off); `window.__ttLog.dump()` reads it programmatically, and the E2E evidence script (`/tmp/tt-e2e/evidence.js`) aggregates mode distribution per run.
