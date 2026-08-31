@@ -4,6 +4,7 @@ import { loadPersisted, persist, markPlayed, loadBlocked, saveBlocked, normArtis
 import { buildCrate } from "./lib/crate.js";
 import { engine, keepAwake } from "./lib/engine.js";
 import { warmup as mlWarmup } from "./lib/mlsep.js";
+import { log } from "./lib/log.js";
 import { Setup, Loading } from "./screens/Setup.jsx";
 import { Game } from "./screens/Game.jsx";
 import { Done } from "./screens/Done.jsx";
@@ -66,11 +67,13 @@ export function App(){
     const nextSnip = { end: offset + secs, lastSecs: mode==="extend" ? snip.lastSecs : secs, playSecs: secs };
     setNote("");
     const done = ()=>setPhase("guessing");
+    log("snippet", { how: mode, secs, sound: S.sound, title: String(track.title).slice(0, 28) });
     if (S.sound === "inst"){
       setPhase("cueing");
       const r = await engine.playMuffled(track.stream, offset, secs, done);
       if (r === "superseded") return;         // user did something newer; obey them
       if (r === "played"){ setSnip(nextSnip); setPhase("playing"); return; }
+      log("muffle-fallback", { title: String(track.title).slice(0, 28) }); // vocals will be audible
       setNote("Couldn't process this one — playing it as-is.");
     }
     setSnip(nextSnip);
@@ -140,6 +143,7 @@ export function App(){
     setState(st=>({ ...st, screen:"setup", game:null }));
   }
   function goHome(){ // back to the home page; the game keeps running and can be resumed from there
+    log("go-home", {});
     engine.stop();
     setPhase("ready"); setNote(""); setShowBoard(false);
     setSnip(s=>({ ...s, end:0, playSecs:0 }));

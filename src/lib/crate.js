@@ -5,6 +5,7 @@
 import { SAAVN_BASES, SAAVN_QUERIES, ITUNES_TERMS, ITUNES_LANG_OK, EXCLUDE_RX, ERAS, eraOf } from "./constants.js";
 import { de, stripParens, shuffle, safeUrl } from "./utils.js";
 import { sanitizeTrack, loadPlayed, loadBlocked, normArtist, isBlocked, PLAY_COOLDOWN } from "./storage.js";
+import { log, ms } from "./log.js";
 
 let saavnBase = null;
 async function saavnFetch(path){
@@ -124,22 +125,27 @@ async function loadFromItunes(langs){
 
 /* Returns { queue, source } or { error: "load" | "thin" }. */
 export async function buildCrate(mix, eras){
+  const t0 = performance.now();
   const langs = mix==="both" ? ["bolly","telugu"] : [mix];
   const key = t => stripParens(t.title).toLowerCase();
   let pool = await loadFromSaavn(langs);
   let source = "saavn";
+  const tiers = { saavn: pool.length };
   if (pool.length < 10){
     const keys = new Set(pool.map(key));
     const backup = (await loadCatalog(langs)).filter(t=>!keys.has(key(t)));
+    tiers.catalog = backup.length;
     if (!pool.length) source = "catalog";
     pool = pool.concat(backup);
   }
   if (pool.length < 10){
     const keys = new Set(pool.map(key));
     const live = (await loadFromItunes(langs)).filter(t=>!keys.has(key(t)));
+    tiers.live = live.length;
     if (!pool.length) source = "live";
     pool = pool.concat(live);
   }
+  log("crate", { mix, source, ...tiers, ms: ms(t0) });
   if (pool.length < 10) return { error:"load" };
   if (Array.isArray(eras) && eras.length && eras.length < ERAS.length)
     pool = pool.filter(t => eras.includes(eraOf(t.year)));

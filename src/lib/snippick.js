@@ -53,11 +53,13 @@ async function vocalProfile(buf){
   return { scores, energies, hop, sr };
 }
 
-/* Returns { start, clean }: the offset (seconds) of the most instrumental
-   window, and whether it is clean enough — by this song's own standards —
-   to play raw with no vocal processing at all. */
+/* Returns { start, clean, diag }: the offset (seconds) of the most instrumental
+   window, plus the "clean" verdict and its numbers. The verdict is telemetry
+   only — measured on real songs it passes windows that still carry audible
+   vocals, so the engine logs it but never skips processing because of it. */
 export async function pickSnippetWindow(buf){
-  if (buf.numberOfChannels < 2 || buf.duration < 12) return { start: 0, clean: false };
+  if (buf.numberOfChannels < 2 || buf.duration < 12)
+    return { start: 0, clean: false, diag: { skip: buf.numberOfChannels < 2 ? "mono" : "short" } };
   const { scores, energies, hop, sr } = await vocalProfile(buf);
   const nF = scores.length;
   // Near-silent frames (relative to this song) are as bad as vocal ones:
@@ -82,7 +84,9 @@ export async function pickSnippetWindow(buf){
   const sorted = Float32Array.from(eff).sort();
   const p20 = sorted[Math.floor(nF*0.2)], p80 = sorted[Math.floor(nF*0.8)];
   const clean = (p80 - p20 >= 0.12) && meanBest < p20 + 0.15*(p80 - p20);
-  return { start: bestIdx*hop/sr, clean };
+  const rnd = x => Math.round(x*1000)/1000;
+  return { start: bestIdx*hop/sr, clean,
+    diag: { best: rnd(meanBest), p20: rnd(p20), p80: rnd(p80), contrast: rnd(p80 - p20) } };
 }
 
 if (typeof window !== "undefined") window.__ttPick = pickSnippetWindow; // exercised by the DSP E2E test

@@ -6,6 +6,7 @@
    chain. All of this is best-effort: every failure path throws and the engine
    falls back gracefully. */
 import { separateInstrumental } from "./mdx.js";
+import { log, ms, errMsg } from "./log.js";
 
 // Public (non-VIP) UVR model; params: n_fft 6144, dim_f 3072, dim_t 256, primary stem Instrumental
 const MODEL_URL = "https://huggingface.co/Politrees/UVR_resources/resolve/main/models/MDXNet/UVR-MDX-NET-Inst_HQ_3.onnx";
@@ -22,30 +23,40 @@ let sessionP = null;
 const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
   || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 
-export function mlAvailable(){
+/* Why this device does or doesn't run ML — logged once per page load. */
+export function mlReason(){
   try {
-    if (IS_IOS) return false;
-    if (!("gpu" in navigator)) return false;
-    if (localStorage.getItem(LS_ML_SLOW) === "1") return false;
-    return true;
-  } catch(e){ return false; }
+    if (IS_IOS) return "ios";
+    if (!("gpu" in navigator)) return "no-webgpu";
+    if (localStorage.getItem(LS_ML_SLOW) === "1") return "slow-flag";
+    return "ok";
+  } catch(e){ return "error"; }
 }
+export function mlAvailable(){ return mlReason() === "ok"; }
 
 async function fetchModel(){
+  const t0 = performance.now();
   try {
     const c = await caches.open("tt-models");
     const hit = await c.match(MODEL_URL);
-    if (hit) return await hit.arrayBuffer();
+    if (hit){
+      const buf = await hit.arrayBuffer();
+      log("ml-model", { from: "cache", mb: Math.round(buf.byteLength/1048576), ms: ms(t0) });
+      return buf;
+    }
     const r = await fetch(MODEL_URL);
     if (!r.ok) throw new Error("model fetch " + r.status);
     const clone = r.clone();
     const buf = await r.arrayBuffer();
     c.put(MODEL_URL, clone).catch(()=>{});
+    log("ml-model", { from: "download", mb: Math.round(buf.byteLength/1048576), ms: ms(t0) });
     return buf;
   } catch(e){ // Cache API unavailable (private mode etc.) — plain fetch
     const r = await fetch(MODEL_URL);
     if (!r.ok) throw new Error("model fetch " + r.status);
-    return await r.arrayBuffer();
+    const buf = await r.arrayBuffer();
+    log("ml-model", { from: "download-nocache", mb: Math.round(buf.byteLength/1048576), ms: ms(t0) });
+    return buf;
   }
 }
 
@@ -55,10 +66,12 @@ function getSession(){
       const ort = await import("onnxruntime-web/webgpu");
       ort.env.wasm.wasmPaths = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${ORT_VERSION}/dist/`;
       const model = await fetchModel();
+      const t0 = performance.now();
       const session = await ort.InferenceSession.create(model, { executionProviders: ["webgpu"] });
+      log("ml-session", { ms: ms(t0) });
       return { ort, session };
     })();
-    sessionP.catch(()=>{ sessionP = null; }); // allow a retry after transient failures
+    sessionP.catch(e => { log("ml-session-fail", { msg: errMsg(e) }); sessionP = null; }); // allow a retry after transient failures
   }
   return sessionP;
 }
@@ -102,6 +115,7 @@ export async function separateBuffer(buf, ctx, budgetMs = 75000){
   const runFn = async (data, dims) => {
     if (performance.now() - t0 > budgetMs){
       try { localStorage.setItem(LS_ML_SLOW, "1"); } catch(e){}
+      log("ml-budget-exceeded", { ms: ms(t0) });
       throw new Error("ml budget exceeded");
     }
     const res = await session.run({ input: new ort.Tensor("float32", data, dims) });

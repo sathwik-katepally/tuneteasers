@@ -90,3 +90,19 @@ input:focus, button:focus-visible { outline:2px solid var(--marigold); outline-o
 .footnote { text-align:center; color:var(--dim); font-size:12px; margin-top:18px; }
 .footnote a { color:var(--dim); }
 .notice { text-align:center; color:var(--dim); font-size:12px; margin:8px 0; }
+
+/* ?debug=1 diagnostics overlay */
+.dbg-fab {
+  position:fixed; right:10px; bottom:10px; z-index:50;
+  background:var(--surface2); color:var(--dim); border:1px solid #FFB62755;
+  border-radius:10px; padding:6px 10px; font-size:11px; font-family:monospace; cursor:pointer;
+}
+.dbg-panel {
+  position:fixed; left:0; right:0; bottom:0; z-index:50; max-height:45vh;
+  display:flex; flex-direction:column;
+  background:#0E0616F2; border-top:1px solid var(--surface2);
+}
+.dbg-bar { display:flex; gap:8px; align-items:center; padding:6px 10px; color:var(--dim); font-size:11px; font-family:monospace; }
+.dbg-bar span { flex:1; }
+.dbg-bar button { background:var(--surface2); color:var(--cream); border:none; border-radius:8px; padding:4px 10px; font-size:11px; font-family:monospace; cursor:pointer; }
+.dbg-body { margin:0; padding:0 10px 10px; overflow:auto; color:#9FE8D9; font-size:10px; line-height:1.5; }

@@ -3,7 +3,8 @@
    is ignored, so two songs can never play at once. */
 import { centerCut } from "./centercut.js";
 import { pickSnippetWindow } from "./snippick.js";
-import { mlAvailable, separateBuffer } from "./mlsep.js";
+import { mlAvailable, mlReason, separateBuffer } from "./mlsep.js";
+import { log, ms, errMsg } from "./log.js";
 
 /* Post-centercut shaping: the lead vocal is already ducked, so only dull the leakage. */
 function buildMildGraph(c, src){
@@ -70,9 +71,13 @@ export const engine = {
     return p;
   },
   async _load(url){
+    const id = url.slice(-24); // enough to correlate log lines without full URLs
+    const t0 = performance.now();
     const res = await fetch(url);
     const ab = await res.arrayBuffer();
+    const tFetch = ms(t0);
     const full = await this.ac().decodeAudioData(ab);
+    const tDecode = ms(t0) - tFetch;
     // Pick the most instrumental stretch. ML separation still runs on every
     // picked window on capable devices (the vocal-activity detector is only a
     // heuristic; wide/doubled vocals evade it), but it must never hold up the
@@ -80,13 +85,20 @@ export const engine = {
     // the cache entry upgrades to the ML buffer in place once inference lands
     // (replays, extends, and prefetched tracks all read the upgraded entry).
     const mark = m => { try { window.__ttLastMode = m; } catch(e){} }; // E2E/debug surface
-    let start = 0, clean = false;
-    try { ({ start, clean } = await pickSnippetWindow(full)); } catch(e){}
+    let start = 0, clean = false, diag = null;
+    try { ({ start, clean, diag } = await pickSnippetWindow(full)); }
+    catch(e){ log("pick-error", { id, msg: errMsg(e) }); }
+    log("load", { id, kb: Math.round(ab.byteLength/1024), fetchMs: tFetch, decodeMs: tDecode,
+      dur: Math.round(full.duration), start: Math.round(start), clean, ...diag });
     const buf = this.slice(full, start, 45);
+    // The "clean" verdict is telemetry only (logged above), never a reason to
+    // skip processing: measured on real songs, 7/8 windows passed it while
+    // still carrying audible vocals — wide/doubled leads evade the
+    // center-correlation score. Raw playback is earned only by ML separation.
     const dsp = async () => {
-      if (clean) return { buf, mode: "raw" };
       if (buf.numberOfChannels >= 2){
-        try { return { buf: await centerCut(buf, this.ac()), mode: "cut" }; } catch(e){}
+        try { return { buf: await centerCut(buf, this.ac()), mode: "cut" }; }
+        catch(e){ log("centercut-fail", { id, msg: errMsg(e) }); }
       }
       return { buf, mode: "legacy" };
     };
@@ -95,17 +107,20 @@ export const engine = {
       const r = await dsp();
       entry.buf = r.buf; entry.mode = r.mode;
       mark(entry.mode);
+      log("mode", { id, mode: entry.mode, ml: mlReason(), totalMs: ms(t0) });
       return entry;
     }
+    const tMl = performance.now();
     const mlP = separateBuffer(buf, this.ac())
-      .then(mlBuf => { entry.buf = mlBuf; entry.mode = "ml"; mark("ml"); })
-      .catch(()=>{});
+      .then(mlBuf => { entry.buf = mlBuf; entry.mode = "ml"; mark("ml"); log("ml-upgrade", { id, ms: ms(tMl) }); })
+      .catch(e => { log("ml-fail", { id, msg: errMsg(e), ms: ms(tMl) }); });
     await Promise.race([mlP, new Promise(r=>setTimeout(r, 3500))]);
     if (entry.mode === "pending"){
       const r = await dsp();
       if (entry.mode === "pending"){ entry.buf = r.buf; entry.mode = r.mode; } // ML may have landed while centerCut ran
     }
     mark(entry.mode);
+    log("mode", { id, mode: entry.mode, ml: "ok", totalMs: ms(t0) });
     return entry;
   },
   prefetch(url){ if (url) this.ensureBuf(url).catch(()=>{}); },
@@ -119,10 +134,14 @@ export const engine = {
         this.ensureBuf(url), // keeps loading in the background even if the race times out, so replays can still hit the cache
         new Promise((_,rej)=>setTimeout(()=>rej(new Error("cue timeout")), 15000)),
       ]);
-    } catch(e){ return (s===this.session) ? "failed" : "superseded"; }
+    } catch(e){
+      log("cue-fail", { id: url.slice(-24), msg: errMsg(e) });
+      return (s===this.session) ? "failed" : "superseded";
+    }
     if (s !== this.session) return "superseded";
     const { buf, mode } = entry;
-    if (offset >= buf.duration - 1) return "failed";
+    if (offset >= buf.duration - 1){ log("cue-fail", { id: url.slice(-24), msg: "offset past buffer", offset }); return "failed"; }
+    log("play", { id: url.slice(-24), mode, offset, secs });
     const c = this.ac();
     const src = c.createBufferSource(); src.buffer = buf;
     let out;
@@ -137,6 +156,7 @@ export const engine = {
   },
   playElement(url, offset, secs, onEnd, onErr){
     this.stop();
+    log("element-play", { id: url.slice(-24), offset: Math.round(offset), secs }); // vocals-intact path
     const s = this.session;
     if (!this.el || this.el.dataset.src !== url){
       this.el = new Audio(url);
@@ -147,6 +167,7 @@ export const engine = {
     let guard = null; // dead or stalled streams must not leave the game waiting forever
     const fail = () => {
       if (guard){ clearTimeout(guard); guard = null; }
+      log("element-fail", { id: url.slice(-24), err: el.error ? el.error.code : "stall" });
       if (s === this.session && onErr) onErr();
     };
     const go = () => {

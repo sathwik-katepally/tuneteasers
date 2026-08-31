@@ -13,8 +13,8 @@ This guarantees two songs can never play at once, even when the user mashes butt
 Strategy: find where the song is instrumental instead of trying to erase vocals — channel-based vocal removal cannot fully strip the doubled/reverbed leads typical of these mixes, but detecting vocal activity is reliable.
 `playMuffled` fetches the stream, decodes the full song, then `pickSnippetWindow` (`src/lib/snippick.js`) scores every STFT frame for vocal activity (center-correlated energy in the 200Hz-4kHz band) and picks the most instrumental ~25s window.
 Every decision is song-adaptive, never a fixed absolute threshold: the silence guard compares frame energy to the song's own median, and the "clean" verdict compares the best window to the song's own score percentiles.
-The detector chooses the WINDOW but never gets to skip separation: wide/doubled vocals evade center-correlation entirely (measured: 11/12 real songs scored "clean" under the old trusting verdict), so on ML-capable devices every picked window goes through ML separation (below).
-Without ML, a window plays raw (mode "raw") only under a conservative clean verdict (real profile contrast AND the window clearly below the song's own spread); otherwise the least-vocal window is processed with `centerCut`.
+The detector chooses the WINDOW but never gets to skip processing: wide/doubled vocals evade center-correlation entirely (measured twice: 11/12 real songs scored "clean" under the old trusting verdict, and 7/8 under the later "conservative" one while still carrying audible vocals - the chosen window is the song's own minimum, so the below-spread condition is nearly always true).
+The "clean" verdict is therefore telemetry only, logged with its numbers (`best`/`p20`/`p80`/`contrast`) for future tuning; on the DSP path every window is processed with `centerCut`, and raw playback exists only as ML output (mode "ml").
 The kept buffer is the 45s slice starting at the chosen window, so all snippet offsets are relative to that start.
 
 ## Centercut (fallback vocal reduction)
@@ -49,3 +49,9 @@ If decode fails, the caller falls back to `playElement` (plain `<audio>`, vocals
 ## Wake lock
 
 `keepAwake(true)` requests a screen wake lock while the game screen is active and re-acquires it on visibility change; failures are ignored (unsupported browsers).
+
+## Diagnostics
+
+`src/lib/log.js` keeps a structured ring buffer (250 entries) of pipeline events: boot (with ML availability reason), crate tier results, per-track load timings and window-pick verdict numbers, the resolved mode, ML model/session/inference events, and every fallback (`cue-fail`, `centercut-fail`, `muffle-fallback`, `element-play`, `element-fail`).
+The buffer mirrors to the console and persists in localStorage, so a tab reload keeps the evidence; a `boot` entry with no preceding `pagehide` is the signature of a crash or jetsam kill.
+On any device, append `?debug=1` to the URL for a live on-screen log overlay with copy-to-clipboard (`?debug=0` turns it off); `window.__ttLog.dump()` reads it programmatically, and the E2E evidence script (`/tmp/tt-e2e/evidence.js`) aggregates mode distribution per run.
