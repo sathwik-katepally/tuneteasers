@@ -27,3 +27,20 @@ jobs:
           git add public/catalog.json
           git commit -m "Refresh song catalog"
           git push
+
+  # Phone alert on failure (ntfy, topic in the NTFY_TOPIC repo secret).
+  # failure() is false for a cancelled run, so a superseded run stays quiet.
+  alert:
+    needs: [refresh]
+    if: failure()
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: >-
+          curl -s --max-time 20
+          -H "Title: ${{ github.repository }}/${{ github.workflow }} failed"
+          -H "Priority: high" -H "Tags: x"
+          -d "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          "https://ntfy.sh/$NTFY_TOPIC"

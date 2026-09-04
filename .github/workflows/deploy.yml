@@ -27,10 +27,31 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # Cloudflare Web Analytics beacon token (a repo variable, not a secret:
+      # it ships in the HTML). Unset means the beacon is not rendered at all.
       - run: npm run build
+        env:
+          CF_WEB_ANALYTICS_TOKEN: ${{ vars.CF_WEB_ANALYTICS_TOKEN }}
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
       - id: deployment
         uses: actions/deploy-pages@v4
+
+  # Phone alert on failure (ntfy, topic in the NTFY_TOPIC repo secret).
+  # failure() is false for a cancelled run, so a superseded run stays quiet.
+  alert:
+    needs: [deploy]
+    if: failure()
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: >-
+          curl -s --max-time 20
+          -H "Title: ${{ github.repository }}/${{ github.workflow }} failed"
+          -H "Priority: high" -H "Tags: x"
+          -d "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          "https://ntfy.sh/$NTFY_TOPIC"
