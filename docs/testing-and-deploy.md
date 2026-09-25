@@ -41,7 +41,7 @@ Test locally with `npx wrangler dev`.
 
 `.github/workflows/refresh-catalog.yml` runs `scripts/build-catalog.mjs` weekly (Mon 03:00 UTC) and commits `public/catalog.json` if changed, which in turn triggers a deploy.
 The script must stay sequential with delays (iTunes rate limit) and refuses to write a catalog with fewer than 100 tracks.
-Keep the script's filters in sync with the page-side filters described in docs/song-loading.md.
+The script imports its search terms and `EXCLUDE_RX` from `src/lib/constants.js`, so it shares the page-side filters described in docs/song-loading.md.
 
 ## Snips refresh CI
 

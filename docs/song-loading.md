@@ -7,6 +7,9 @@
 1. **Saavn search** (`loadFromSaavn`) - JioSaavn search APIs listed in `SAAVN_BASES`; full songs, so snippets start at the intro.
    The first base is our own Cloudflare Worker (`worker/`, see docs/testing-and-deploy.md); the public nandanvarma mirror follows as a fallback.
    The first responding base is remembered for the session and tried first, but the others are still tried if it later fails.
+   Search jobs are (query, page) pairs from `SAAVN_QUERIES` x `SAAVN_PAGES` in `src/lib/constants.js` (~120 queries: singers, composers, stars, years, moods; ~3,000 unique songs after filters).
+   Each game samples 7 random jobs per language, so consecutive games draw from different slices of the corpus.
+   The offline snips scorer (`scripts/build-snips.mjs`) runs every job and imports the same constants, so any song a game can draw has been scored.
 2. **Baked catalog** (`loadCatalog`) - `public/catalog.json`, ~700 iTunes tracks committed to the repo and served same-origin, so it cannot be rate-limited or CORS-blocked; refreshed weekly by CI because iTunes preview URLs rot.
 3. **Live iTunes search** (`loadFromItunes`) - last resort; deliberately throttled to few search terms because Apple rate-limits around 20 searches/min per IP (that rate limit caused the original "Couldn't load enough songs" production bug).
 
@@ -19,7 +22,8 @@ Tracks from tiers 2 and 3 are 30-second mid-song "hook" clips and carry `hook: t
 - https-only stream URL, via `sanitizeTrack`.
 - Language must match the requested mix (Saavn `language` field, iTunes genre via `ITUNES_LANG_OK`).
 - Year ≥ 2000, plus the user's era selection (`settings.eras`, decade buckets from `eraOf`).
-- `EXCLUDE_RX` drops remixes, covers, lofi, karaoke, instrumentals, etc.
+- `EXCLUDE_RX` drops remixes, covers, lofi, karaoke, instrumentals, background-score themes/OST/teasers, etc.
+- Saavn songs with a reported play count below `SAAVN_MIN_PLAYS` (1M) are dropped (mostly dubs and obscure album cuts); a missing count means unknown and is kept.
 - Blocked artists are removed: a track is out if ANY of its comma-separated artists matches the device blocklist (`tt_blocked` in localStorage, managed in the reveal screen and setup screen).
 
 If filters shrink the pool below 10 the crate returns `{ error: "thin" }` and the UI tells the user to widen filters, distinct from the connection error.

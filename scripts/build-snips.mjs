@@ -3,10 +3,10 @@
    offline so the client just seeks and plays (docs/audio.md).
 
    Pipeline:
-   1. Query the Saavn mirror APIs with every SAAVN_QUERIES entry (both
+   1. Query the Saavn APIs with every SAAVN_QUERIES entry x SAAVN_PAGES (both
       languages, limit 40) and apply the same filters as the client crate
-      (language, year >= 2000, EXCLUDE_RX, https stream), deduped by
-      normalized title key.
+      (language, year >= 2000, SAAVN_MIN_PLAYS, EXCLUDE_RX, https stream),
+      deduped by normalized title key.
    2. Score each song not already in snips.json in headless Chromium
       (Playwright) via scripts/snip-harness.html: fetch stream ->
       decodeAudioData -> 16kHz mono render -> MusiCNN p(voice) per ~6s
@@ -28,6 +28,7 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { songKey } from "../src/lib/utils.js";
+import { SAAVN_BASES, SAAVN_QUERIES, SAAVN_PAGES, SAAVN_MIN_PLAYS, EXCLUDE_RX } from "../src/lib/constants.js";
 
 const REPO = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const OUT = process.env.SNIP_OUT || path.join(REPO, "public/snips.json");
@@ -38,19 +39,8 @@ const MIN_ENTRIES = 80;  // refuse to write a final result thinner than this
 const PAGE_RECYCLE = 10; // songs per page before recycling (decode memory)
 const PROGRESS_EVERY = 20;
 
-/* -- Saavn corpus (keep queries/filters in sync with src/lib/constants.js
-      and the crate's loadFromSaavn; the client and this scorer must agree
-      on what a poolable song is) -- */
-const SAAVN_BASES = [
-  "https://tuneteasers-saavn.sathwik-katepally.workers.dev/api",
-  "https://saavn-api.nandanvarma.com/api",
-];
-const SAAVN_QUERIES = {
-  bolly: ["bollywood hits","hindi hit songs","Arijit Singh hits","Pritam hits","best of bollywood","hindi songs 2010s","hindi songs 2020s","Shreya Ghoshal hindi","A R Rahman hindi","hindi romantic hits","hindi dance hits","Atif Aslam hits"],
-  telugu: ["telugu hits","telugu hit songs","top telugu songs","Sid Sriram telugu","Devi Sri Prasad hits","telugu songs 2010s","telugu songs 2020s","Thaman hits","Anirudh telugu","telugu melody hits","telugu mass hits","tollywood hits"],
-};
-const EXCLUDE_RX = /(remix|mashup|lo-?fi|slowed|reverb|medley|unplugged|acoustic|cover|karaoke|instrumental|\bbgm\b|jukebox|revisited|reprise|redux|\bclub\b|\bdj\b|mix\b|8d\b|sped up|lounge|\bversion\b)/i;
-
+/* -- Saavn corpus (filters mirror the crate's loadFromSaavn; the client and
+      this scorer must agree on what a poolable song is) -- */
 const keyOf = songKey; // shared with the client — snips.json keys must match the crate's
 /* DOM-free version of the client's `de` (textarea entity decode); Saavn
    titles only ever carry the basic named + numeric entities. */
@@ -92,8 +82,8 @@ const safeUrl = u => {
 async function collectSongs(){
   const seen = new Set(), pool = [];
   for (const [lang, queries] of Object.entries(SAAVN_QUERIES)){
-    for (const q of queries){
-      const r = await saavnFetch(`/search/songs?query=${encodeURIComponent(q)}&limit=40`);
+    for (const q of queries) for (let page = 1; page <= SAAVN_PAGES; page++){
+      const r = await saavnFetch(`/search/songs?query=${encodeURIComponent(q)}&limit=40&page=${page}`);
       await sleep(400); // sequential-polite to the mirror API
       const list = r?.data?.results || r?.results || [];
       for (const s of list){
@@ -101,6 +91,8 @@ async function collectSongs(){
         if (!name) continue;
         if ((s.language || "").toLowerCase() !== (lang === "bolly" ? "hindi" : "telugu")) continue;
         if ((parseInt(s.year) || 0) < 2000) continue;
+        const plays = parseInt(s.playCount) || 0;
+        if (plays && plays < SAAVN_MIN_PLAYS) continue;
         if (EXCLUDE_RX.test(name)) continue;
         const stream = safeUrl(pickStream(s.downloadUrl));
         if (!stream) continue;

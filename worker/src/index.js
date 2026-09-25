@@ -61,6 +61,7 @@ function toSong(s){
     type: s.type,
     year: s.year || null,
     duration: parseInt(info.duration) || null,
+    playCount: parseInt(s.play_count) || null,
     language: s.language,
     album: { id: info.album_id || null, name: info.album || "" },
     artists: { primary: artists(info.artistMap?.primary_artists) },

@@ -2,7 +2,7 @@
    Primary: JioSaavn mirror (full songs, snippets start at the intro).
    Fallback 1: catalog.json baked into the site (rebuilt weekly by CI, 30s hook clips).
    Fallback 2: live iTunes search, throttled to stay under Apple's rate limit. */
-import { SAAVN_BASES, SAAVN_QUERIES, ITUNES_TERMS, ITUNES_LANG_OK, EXCLUDE_RX, ERAS, eraOf, SNIP_CLEAN_MAX } from "./constants.js";
+import { SAAVN_BASES, SAAVN_QUERIES, SAAVN_PAGES, SAAVN_MIN_PLAYS, ITUNES_TERMS, ITUNES_LANG_OK, EXCLUDE_RX, ERAS, eraOf, SNIP_CLEAN_MAX } from "./constants.js";
 import { de, songKey, shuffle, safeUrl } from "./utils.js";
 import { sanitizeTrack, loadPlayed, loadBlocked, normArtist, isBlocked, PLAY_COOLDOWN } from "./storage.js";
 import { log, ms } from "./log.js";
@@ -34,10 +34,13 @@ const pickArt = img => Array.isArray(img) && img.length ? (img[img.length-1].url
 
 async function loadFromSaavn(langs){
   const jobs = [];
-  for (const lang of langs) for (const q of shuffle(SAAVN_QUERIES[lang]).slice(0,7)) jobs.push({q,lang});
+  for (const lang of langs){
+    const all = SAAVN_QUERIES[lang].flatMap(q => Array.from({ length:SAAVN_PAGES }, (_,i)=>({ q, page:i+1, lang })));
+    jobs.push(...shuffle(all).slice(0,7));
+  }
   const seen = new Set(); const pool = [];
   const results = await Promise.allSettled(jobs.map(j =>
-    saavnFetch(`/search/songs?query=${encodeURIComponent(j.q)}&limit=40`).then(r=>({r, lang:j.lang}))
+    saavnFetch(`/search/songs?query=${encodeURIComponent(j.q)}&limit=40&page=${j.page}`).then(r=>({r, lang:j.lang}))
   ));
   for (const res of results){
     if (res.status!=="fulfilled" || !res.value.r) continue;
@@ -49,6 +52,8 @@ async function loadFromSaavn(langs){
       if ((s.language||"").toLowerCase() !== (lang==="bolly"?"hindi":"telugu")) continue;
       const year = parseInt(s.year) || 0;
       if (year < 2000) continue;
+      const plays = parseInt(s.playCount) || 0;
+      if (plays && plays < SAAVN_MIN_PLAYS) continue;
       if (EXCLUDE_RX.test(name)) continue;
       const stream = safeUrl(pickStream(s.downloadUrl));
       if (!stream) continue;
