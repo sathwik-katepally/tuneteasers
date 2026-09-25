@@ -4,7 +4,9 @@
 
 ## Source tiers
 
-1. **Saavn mirror** (`loadFromSaavn`) - JioSaavn mirror APIs listed in `SAAVN_BASES`; full songs, so snippets start at the intro; the first responding base is remembered for the session.
+1. **Saavn search** (`loadFromSaavn`) - JioSaavn search APIs listed in `SAAVN_BASES`; full songs, so snippets start at the intro.
+   The first base is our own Cloudflare Worker (`worker/`, see docs/testing-and-deploy.md); the public nandanvarma mirror follows as a fallback.
+   The first responding base is remembered for the session and tried first, but the others are still tried if it later fails.
 2. **Baked catalog** (`loadCatalog`) - `public/catalog.json`, ~700 iTunes tracks committed to the repo and served same-origin, so it cannot be rate-limited or CORS-blocked; refreshed weekly by CI because iTunes preview URLs rot.
 3. **Live iTunes search** (`loadFromItunes`) - last resort; deliberately throttled to few search terms because Apple rate-limits around 20 searches/min per IP (that rate limit caused the original "Couldn't load enough songs" production bug).
 

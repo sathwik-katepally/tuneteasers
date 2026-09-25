@@ -1,6 +1,6 @@
 export const SAAVN_BASES = [
+  "https://tuneteasers-saavn.sathwik-katepally.workers.dev/api",
   "https://saavn-api.nandanvarma.com/api",
-  "https://saavn.dev/api",
 ];
 export const SAAVN_QUERIES = {
   bolly: ["bollywood hits","hindi hit songs","Arijit Singh hits","Pritam hits","best of bollywood","hindi songs 2010s","hindi songs 2020s","Shreya Ghoshal hindi","A R Rahman hindi","hindi romantic hits","hindi dance hits","Atif Aslam hits"],

@@ -1,0 +1,16 @@
+{
+  "name": "tuneteasers-saavn",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "node-forge": "^1.4.0"
+  },
+  "devDependencies": {
+    "wrangler": "^4.140.0"
+  }
+}

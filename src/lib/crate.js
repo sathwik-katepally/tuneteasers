@@ -9,7 +9,7 @@ import { log, ms } from "./log.js";
 
 let saavnBase = null;
 async function saavnFetch(path){
-  const bases = saavnBase ? [saavnBase] : SAAVN_BASES;
+  const bases = saavnBase ? [saavnBase, ...SAAVN_BASES.filter(x=>x!==saavnBase)] : SAAVN_BASES;
   for (const b of bases){
     try {
       const ctl = new AbortController();

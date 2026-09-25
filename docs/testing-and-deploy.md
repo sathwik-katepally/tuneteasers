@@ -26,6 +26,17 @@ Gotchas: buttons with the `.pulse` animation need `{ force: true }` clicks; stat
 `vite.config.js` sets `base: "./"` so the build works under the `/tuneteasers/` project path.
 After pushing, verify the workflow succeeded (`gh run watch` or `gh run list`) and smoke-test the live URL.
 
+## Saavn Worker (Cloudflare)
+
+`worker/` is a self-hosted JioSaavn search API, deployed to https://tuneteasers-saavn.sathwik-katepally.workers.dev on the free Workers plan.
+It exists because the public mirrors come and go (saavn.dev died in 2026); it is the first entry in `SAAVN_BASES` (client and `scripts/build-snips.mjs`).
+It serves only `GET /api/search/songs?query=&limit=&page=` (plus `/health`), calling JioSaavn's own `api.php` and decrypting `encrypted_media_url` (DES-ECB, the web player's public key) into `aac.saavncdn.com` stream URLs.
+Responses use the saavn.dev shape (the subset the client reads), so any saavn.dev-compatible mirror can sit behind it in `SAAVN_BASES` as a fallback.
+Successful responses are cached at the edge for 6 hours.
+
+Deploy is manual (it rarely changes): `cd worker && npm install && npx wrangler deploy`, using the local wrangler OAuth login.
+Test locally with `npx wrangler dev`.
+
 ## Catalog refresh CI
 
 `.github/workflows/refresh-catalog.yml` runs `scripts/build-catalog.mjs` weekly (Mon 03:00 UTC) and commits `public/catalog.json` if changed, which in turn triggers a deploy.

@@ -42,8 +42,8 @@ const PROGRESS_EVERY = 20;
       and the crate's loadFromSaavn; the client and this scorer must agree
       on what a poolable song is) -- */
 const SAAVN_BASES = [
+  "https://tuneteasers-saavn.sathwik-katepally.workers.dev/api",
   "https://saavn-api.nandanvarma.com/api",
-  "https://saavn.dev/api",
 ];
 const SAAVN_QUERIES = {
   bolly: ["bollywood hits","hindi hit songs","Arijit Singh hits","Pritam hits","best of bollywood","hindi songs 2010s","hindi songs 2020s","Shreya Ghoshal hindi","A R Rahman hindi","hindi romantic hits","hindi dance hits","Atif Aslam hits"],
@@ -62,7 +62,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 let saavnBase = null;
 async function saavnFetch(p){
-  const bases = saavnBase ? [saavnBase] : SAAVN_BASES;
+  const bases = saavnBase ? [saavnBase, ...SAAVN_BASES.filter(b => b !== saavnBase)] : SAAVN_BASES;
   for (const b of bases){
     try {
       const r = await fetch(b + p, { signal: AbortSignal.timeout(10000) });
