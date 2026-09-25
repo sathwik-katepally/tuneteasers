@@ -59,15 +59,9 @@ It POSTs the run URL to `https://ntfy.sh/$NTFY_TOPIC` with the title `<repo>/<wo
 The topic is the shared ops topic (`~/.config/ops/secrets.env`, `OPS_NTFY_TOPIC`), set with `gh secret set NTFY_TOPIC --repo sathwik-katepally/tuneteasers --body <topic>`.
 A failed scheduled refresh is not an outage (the client degrades without a fresh catalog or snips index), but the alert is how a broken iTunes filter or a rate-limit change gets noticed at all.
 
-### Web Analytics (dashboard step still open)
+### Web Analytics
 
-The beacon is wired but dormant: the `cloudflareBeacon` plugin in `vite.config.js` injects the Cloudflare Web Analytics `<script>` into `index.html` only when `CF_WEB_ANALYTICS_TOKEN` is set at build time, and `deploy.yml` feeds it from the repo variable of the same name.
+The `cloudflareBeacon` plugin in `vite.config.js` injects the Cloudflare Web Analytics `<script>` into `index.html` only when `CF_WEB_ANALYTICS_TOKEN` is set at build time, and `deploy.yml` feeds it from the repo variable of the same name (set, so production ships the beacon).
 Local builds have no token and ship no beacon.
 The token is public by design (every visitor can read it out of the HTML), which is why it is a variable and not a secret.
-Creating the site token needs an Account Analytics permission the wrangler OAuth token does not have (the API answers 403 on `/rum/site_info`), so:
-
-1. Open https://dash.cloudflare.com/?to=/:account/web-analytics and select **Add a site**.
-2. Enter the hostname `sathwik-katepally.github.io` (Web Analytics is keyed by hostname; the `/tuneteasers/` path is covered) and choose the manual (JS snippet) setup.
-3. Copy the `token` value out of the `data-cf-beacon='{"token": "..."}'` attribute in the snippet shown.
-4. Run `gh variable set CF_WEB_ANALYTICS_TOKEN --repo sathwik-katepally/tuneteasers --body <token>`.
-5. Re-run the deploy (`gh workflow run deploy.yml --ref main`); the next build ships the beacon.
+The site is registered in the dashboard under the hostname `sathwik-katepally.github.io` (https://dash.cloudflare.com/?to=/:account/web-analytics); the `/tuneteasers/` path is covered.
