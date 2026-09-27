@@ -22,8 +22,15 @@
   "ratelimits": [
     { "name": "REQUEST_LIMITER", "namespace_id": "7101", "simple": { "limit": 120, "period": 60 } },
     { "name": "WRITE_LIMITER", "namespace_id": "7102", "simple": { "limit": 60, "period": 60 } },
-    { "name": "CREATE_LIMITER", "namespace_id": "7103", "simple": { "limit": 5, "period": 60 } }
+    { "name": "CREATE_LIMITER", "namespace_id": "7103", "simple": { "limit": 5, "period": 60 } },
+    { "name": "ROOM_CREATE_LIMITER", "namespace_id": "7104", "simple": { "limit": 10, "period": 60 } },
+    // A party shares one IP behind the venue's Wi-Fi: every phone joining at once plus reconnects.
+    { "name": "ROOM_CONNECT_LIMITER", "namespace_id": "7105", "simple": { "limit": 240, "period": 60 } }
   ],
+  "durable_objects": { "bindings": [{ "name": "Room", "class_name": "Room" }] },
+  // Buzz-in rooms. SQLite-backed, which is what the free plan allows.
+  "migrations": [{ "tag": "rooms-v1", "new_sqlite_classes": ["Room"] }],
+
   "env": {
     // Non-production copy for testing a branch: its own Worker and D1 database.
     "preview": {
@@ -45,8 +52,11 @@
       "ratelimits": [
         { "name": "REQUEST_LIMITER", "namespace_id": "7111", "simple": { "limit": 120, "period": 60 } },
         { "name": "WRITE_LIMITER", "namespace_id": "7112", "simple": { "limit": 60, "period": 60 } },
-        { "name": "CREATE_LIMITER", "namespace_id": "7113", "simple": { "limit": 5, "period": 60 } }
-      ]
+        { "name": "CREATE_LIMITER", "namespace_id": "7113", "simple": { "limit": 5, "period": 60 } },
+        { "name": "ROOM_CREATE_LIMITER", "namespace_id": "7114", "simple": { "limit": 10, "period": 60 } },
+        { "name": "ROOM_CONNECT_LIMITER", "namespace_id": "7115", "simple": { "limit": 240, "period": 60 } }
+      ],
+      "durable_objects": { "bindings": [{ "name": "Room", "class_name": "Room" }] }
     }
   }
 }
