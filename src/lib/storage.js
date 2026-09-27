@@ -1,7 +1,7 @@
 /* Device-local stores (localStorage), there are no accounts: track
    sanitization, the recent-play cooldown and the blocked-artist list.
    The saved game itself lives in save.ts. */
-import { DIFFICULTIES } from "./constants.js";
+import { DIFFICULTIES, SNIP_WINDOW_SEC } from "./constants.js";
 import { songKey, safeUrl } from "./utils.js";
 
 const LS_PLAYED = "tt_played";   // { titleKey: lastPlayedMs } — device-local recent-play cooldown
@@ -25,7 +25,7 @@ export function sanitizeTrack(t){
     ...(typeof t.sourceId === "string" && t.sourceId ? { sourceId: t.sourceId } : {}),
     ...(t.snip && t.sourceId === t.snip.sourceId && typeof t.snip.indexBuilt === "string" &&
       Number.isFinite(t.snip.startSec) && Number.isFinite(t.snip.endSec) &&
-      t.snip.startSec >= 0 && t.snip.endSec - t.snip.startSec === 10
+      t.snip.startSec >= 0 && t.snip.endSec - t.snip.startSec === SNIP_WINDOW_SEC
       ? { snip: { startSec:t.snip.startSec, endSec:t.snip.endSec, sourceId:t.sourceId, indexBuilt:t.snip.indexBuilt } } : {}),
     ...(t.music ? { music: String(t.music).slice(0,120) } : {}),
   };

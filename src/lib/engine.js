@@ -10,6 +10,7 @@
    Game sound effects are synthesised on the same AudioContext (sfx), so the
    engine stays the only thing in the app that makes a sound. */
 import { log, errMsg } from "./log.js";
+import { SNIP_WINDOW_SEC } from "./constants.js";
 
 const STALL_MS = 12000; // a dead or stalled stream must not pin the game on "Cueing it up…"
 
@@ -23,9 +24,9 @@ export const engine = {
   stop(){
     this.session++;
     if (this.timer){ clearTimeout(this.timer); this.timer = null; }
-    if (this.boundary && this.el) this.el.removeEventListener("timeupdate", this.boundary);
+    if (this.boundary && this.el) this.el.removeEventListener("playing", this.boundary);
     this.boundary = null;
-    if (this.el?._ttOut) this.el._ttOut.gain.value = 0;
+    if (this.el?._ttOut){ this.el._ttOut.gain.cancelScheduledValues(0); this.el._ttOut.gain.value = 0; }
     if (this.el){ this.el.pause(); }
   },
   _mark(m){ try { window.__ttLastMode = m; } catch(e){} }, // E2E/debug surface
@@ -59,8 +60,9 @@ export const engine = {
       el.addEventListener("error", onErr);
     });
   },
-  /* Music-only plays only inside a verified 10-second interval.
-     A gain gate cuts output on the AudioContext clock even if JS timers lag. */
+  /* Music-only plays only inside a verified SNIP_WINDOW_SEC interval;
+     offset and secs are relative to its start. A gain gate cuts output on
+     the AudioContext clock even if JS timers lag. */
   async playSnippet(track, offset, secs, cb = {}){
     this.stop();
     const s = this.session;
@@ -68,18 +70,22 @@ export const engine = {
     if (!snip || !track.sourceId || snip.sourceId !== track.sourceId ||
         typeof snip.indexBuilt !== "string" || !snip.indexBuilt ||
         !Number.isFinite(snip.startSec) || !Number.isFinite(snip.endSec) ||
-        snip.startSec < 0 || snip.endSec - snip.startSec !== 10 ||
+        snip.startSec < 0 || snip.endSec - snip.startSec !== SNIP_WINDOW_SEC ||
         !Number.isFinite(offset) || !Number.isFinite(secs) || offset < 0 || secs <= 0 ||
-        offset + secs > 10) return "failed";
+        offset + secs > SNIP_WINDOW_SEC) return "failed";
     const url = track.stream;
     const id = url.slice(-24); // enough to correlate log lines without full URLs
     const el = this._el(url, true);
     const ok = await this._ready(el);
     if (s !== this.session) return "superseded";
     if (!ok){ log("element-fail", { id, err: el.error ? el.error.code : "stall" }); return "failed"; }
+    let gate;
+    const target = snip.startSec + offset;
     try {
-      const target = snip.startSec + offset;
-      if (Math.abs(el.currentTime - target) > 0.05) el.currentTime = target;
+      // Always seek, even to where the element already is: Chromium resumes a
+      // paused element ~60ms past its pause point unless a seek flushes it,
+      // and the tail past the last stop was gated silent anyway.
+      el.currentTime = target;
       if (el.seeking) await new Promise((resolve, reject) => {
         const guard = setTimeout(() => { el.removeEventListener("seeked", done); reject(new Error("seek stalled")); }, STALL_MS);
         const done = () => { clearTimeout(guard); resolve(); };
@@ -91,21 +97,71 @@ export const engine = {
       if (!el._ttSrc) el._ttSrc = c.createMediaElementSource(el);
       if (el._ttOut) el._ttOut.disconnect();
       el._ttSrc.disconnect();
-      const gate = c.createGain();
+      gate = c.createGain();
       gate.gain.setValueAtTime(1, c.currentTime);
       gate.gain.setValueAtTime(0, c.currentTime + secs);
       el._ttSrc.connect(gate); gate.connect(c.destination);
       el._ttOut = gate;
     } catch(e){ log("snip-fail", { id, msg:errMsg(e) }); return "failed"; }
     el.muted = false;
+    this._clip(el, s, id, snip.startSec + offset + secs, gate, cb);
     this._play(el, s, id, cb.onBlocked, cb.onErr);
     this._mark("snip");
     log("play", { id, mode:"snip", snip:snip.startSec, offset, secs });
-    const finish = () => { if (s !== this.session || !this.boundary) return; el._ttOut.gain.value = 0; el.pause(); clearTimeout(this.timer); this.timer = null; el.removeEventListener("timeupdate", this.boundary); this.boundary = null; cb.onEnd && cb.onEnd(); };
-    this.boundary = () => { if (el.currentTime >= snip.startSec + offset + secs - 0.03) finish(); };
-    el.addEventListener("timeupdate", this.boundary);
-    this.timer = setTimeout(finish, secs*1000);
     return "snip";
+  },
+  /* Stop a clip at media time `end`. The clip counts as started (onStart)
+     only when audio is actually flowing, so the UI never runs ahead of the
+     sound. Timers re-aim at the end from the element's own clock, and for a
+     gated element the gate close is re-aimed on the audio clock each tick. */
+  _clip(el, s, id, end, gate, cb){
+    let started = false, lastTime = -1, movedAt = performance.now(), startGuard = 0;
+    const trace = { mode: gate ? "snip" : "plain", end, from: null, to: null };
+    const finish = stalled => {
+      if (s !== this.session) return;
+      if (gate){ gate.gain.cancelScheduledValues(0); gate.gain.value = 0; }
+      el.pause();
+      trace.to = el.currentTime;
+      if (stalled) log("element-fail", { id, err: "stall" });
+      clearTimeout(this.timer); this.timer = null; clearTimeout(startGuard);
+      el.removeEventListener("playing", onPlaying); this.boundary = null;
+      cb.onEnd && cb.onEnd();
+    };
+    const tick = () => {
+      this.timer = null;
+      if (s !== this.session) return;
+      const now = el.currentTime, left = end - now;
+      if (left <= 0.005) return finish(false);
+      if (now !== lastTime){ lastTime = now; movedAt = performance.now(); }
+      else if (performance.now() - movedAt > STALL_MS) return finish(true);
+      if (gate && !el.paused && left > 0.05){
+        const c = this.ctx, g = gate.gain;
+        g.cancelScheduledValues(c.currentTime);
+        g.setValueAtTime(1, c.currentTime);
+        g.setValueAtTime(0, c.currentTime + left);
+      }
+      this.timer = setTimeout(tick, left > 0.4 ? Math.min(250, left * 1000 - 150) : Math.max(1, left * 1000 - 2));
+    };
+    const onPlaying = () => {
+      if (s !== this.session) return;
+      if (!started){
+        started = true;
+        clearTimeout(startGuard);
+        movedAt = performance.now();
+        trace.from = el.currentTime;
+        cb.onStart && cb.onStart();
+      }
+      if (!this.timer) tick();
+    };
+    try { (window.__ttClips ||= []).push(trace); } catch(e){} // E2E/debug surface
+    el.addEventListener("playing", onPlaying);
+    this.boundary = onPlaying;
+    startGuard = setTimeout(() => {
+      if (s !== this.session || started) return;
+      log("element-fail", { id, err: "no start" });
+      this.stop();
+      cb.onErr && cb.onErr();
+    }, STALL_MS);
   },
   _play(el, s, id, onBlocked, onErr){
     const p = el.play();
@@ -171,12 +227,16 @@ export const engine = {
         try { if (el._ttOut){ el._ttOut.disconnect(); el._ttOut = null; }
           el._ttSrc.disconnect(); el._ttSrc.connect(this.ac().destination); } catch(e){}
       }
-      try { el.currentTime = offset; } catch(e){}
+      // A continuation picks up exactly where the last clip paused (the few ms
+      // it ran past its end were heard). The seek is needed even then:
+      // Chromium resumes a paused element ~60ms past its pause point otherwise.
+      const at = el.currentTime - offset;
+      try { el.currentTime = at >= -0.02 && at <= 0.3 ? el.currentTime : offset; } catch(e){}
       el.muted = false;
+      if (secs) this._clip(el, s, url.slice(-24), offset + secs, null, cb);
       this._play(el, s, url.slice(-24), cb.onBlocked, cb.onErr);
       this._mark("plain");
-      cb.onStart && cb.onStart();
-      if (secs) this.timer = setTimeout(() => { if (s === this.session){ el.pause(); cb.onEnd && cb.onEnd(); } }, secs*1000);
+      if (!secs) cb.onStart && cb.onStart();
     };
     if (el.readyState >= 1) go();
     else {

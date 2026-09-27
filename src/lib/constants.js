@@ -62,7 +62,13 @@ export const ITUNES_TERMS = {
 export const ITUNES_LANG_OK = { bolly:["bollywood","hindi"], telugu:["telugu","tollywood"] };
 export const EXCLUDE_RX = /(remix|mashup|lo-?fi|slowed|reverb|medley|unplugged|acoustic|cover|karaoke|instrumental|\bbgm\b|jukebox|revisited|reprise|redux|\bclub\b|\bdj\b|mix\b|8d\b|sped up|lounge|\bversion\b|\btheme\b|\bost\b|teaser|prevue)/i;
 
-/* Maximum raw patch voice score accepted across a full 10-second interval. */
+/* The snips.json contract shared by the offline scorer and the client: every
+   Music-only interval is exactly SNIP_WINDOW_SEC long, which must hold the
+   whole clip ladder (CLIP_SEGMENTS in src/lib/config.ts), and every patch
+   across it scores below SNIP_CLEAN_MAX. */
+export const SNIP_INDEX_V = 3;
+export const SNIP_METHOD = "continuous-v3";
+export const SNIP_WINDOW_SEC = 20;
 export const SNIP_CLEAN_MAX = 0.25;
 export const SNIP_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Lightbulb, Play, Plus, RotateCcw } from "lucide-react";
 import { Equalizer } from "../components/Equalizer";
-import { CLIP_POINTS, CLIP_STEPS, MUSIC_CLIP_STEPS, HINT_PENALTY, SPEED_BONUS_MAX, pointsNow } from "../lib/config";
+import { CLIP_POINTS, CLIP_SEGMENTS, HINT_PENALTY, LAST_RUNG, SPEED_BONUS_MAX, pointsNow, rungStart } from "../lib/config";
 import type { Phase, Track, Turn } from "../types";
 import s from "./Playing.module.css";
 import sh from "./shared.module.css";
@@ -30,12 +30,12 @@ export function Playing({ name, track, plain, phase, turn, note, onPlay, onJudge
 
   const playing = phase === "playing";
   const cueing = phase === "cueing";
-  const steps = plain ? CLIP_STEPS : MUSIC_CLIP_STEPS;
-  const secs = steps[turn.rung];
-  const left = Math.max(0, Math.ceil(secs - (now - turn.clipStartedAt) / 1000));
+  const { from, to } = turn.span;
+  const left = Math.max(0, Math.ceil(to - from - (now - turn.clipStartedAt) / 1000));
   const worth = pointsNow(turn.rung, turn.clipEndedAt, turn.hint, now);
-  const nextLen = turn.rung < steps.length - 1 ? steps[turn.rung + 1] : null;
+  const nextLen = turn.rung < LAST_RUNG ? CLIP_SEGMENTS[turn.rung + 1] : null;
   const state = cueing ? "Loading" : playing ? `${left}s left` : phase === "blocked" ? "Paused" : "Guess, or hear more";
+  const inSpan = (i: number) => i <= turn.rung && rungStart(i) >= from;
 
   return (
     <div className={sh.stage}>
@@ -70,16 +70,17 @@ export function Playing({ name, track, plain, phase, turn, note, onPlay, onJudge
           <span className={s.ladderLabel}>Clip length</span>
           <span className={s.ladderState}>{state}</span>
         </div>
-        <div className={s.strip}>
-          {steps.map((sec, i) => {
-            const done = i < turn.rung;
-            const cur = i === turn.rung;
+        <div className={s.strip} style={{ gridTemplateColumns: CLIP_SEGMENTS.map(sec => `${sec}fr`).join(" ") }}>
+          {CLIP_SEGMENTS.map((sec, i) => {
+            const heard = i < turn.rung || (i === turn.rung && !cueing);
+            const running = playing && inSpan(i);
             return (
-              <div key={sec} className={`${s.frame} ${done ? s.frameDone : ""} ${cur ? s.frameNow : ""}`}>
-                {cur && !cueing && (
-                  <div key={turn.playKey} className={`${s.frameFill} ${playing ? s.frameRun : ""}`} style={{ animationDuration: `${sec}s` }} />
+              <div key={i} className={`${s.frame} ${heard && !running && !(cueing && inSpan(i)) ? s.frameDone : ""} ${i === turn.rung ? s.frameNow : ""}`}>
+                {running && (
+                  <div key={turn.playKey} className={`${s.frameFill} ${s.frameRun}`}
+                    style={{ animationDuration: `${sec}s`, animationDelay: `${rungStart(i) - from}s` }} />
                 )}
-                <span className={s.frameText}>{sec}s · {CLIP_POINTS[i]}</span>
+                <span className={s.frameText}>{i ? "+" : ""}{sec}s · {CLIP_POINTS[i]}</span>
               </div>
             );
           })}
@@ -90,7 +91,7 @@ export function Playing({ name, track, plain, phase, turn, note, onPlay, onJudge
       <div className={`${sh.actions} ${s.actions}`}>
         <div className={sh.row2}>
           <button type="button" className="btn btn-cream" onClick={() => nextLen && onPlay(turn.rung + 1)} disabled={!nextLen || cueing}>
-            <Plus size={18} strokeWidth={3} /> {nextLen ? `Hear ${nextLen}s` : "Full clip"}
+            <Plus size={18} strokeWidth={3} /> {nextLen ? `Hear ${nextLen}s more` : "Full clip"}
           </button>
           <button type="button" className="btn btn-cream" onClick={() => onPlay(turn.rung, true)} disabled={cueing || playing}>
             <RotateCcw size={17} strokeWidth={2.75} /> Replay

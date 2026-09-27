@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, LazyMotion, MotionConfig, domAnimation } from "motion/react";
 import * as m from "motion/react-m";
 import { loadSaved, save } from "./lib/save";
-import { CLIP_STEPS, MUSIC_CLIP_STEPS, DIFFICULTY, hookOffset, pointsNow } from "./lib/config";
+import { DIFFICULTY, hookOffset, pointsNow, rungSpan } from "./lib/config";
+import { playRung } from "./lib/ladder";
 import { markPlayed, loadBlocked, saveBlocked, normArtist, isBlocked } from "./lib/storage.js";
 import { buildCrate as buildCrateJs, refreshMusicQueue as refreshMusicQueueJs } from "./lib/crate.js";
 import { engine, keepAwake } from "./lib/engine.js";
@@ -25,7 +26,7 @@ type Crate = { error?: string; queue?: Track[]; source?: string };
 const buildCrate = buildCrateJs as (mix: string, eras: string[], sound: string, difficulty: Difficulty, minSongs: number, played?: Record<string, number>, categories?: Category[]) => Promise<Crate>;
 const refreshMusicQueue = refreshMusicQueueJs as (queue: Track[]) => Promise<Track[]>;
 
-const freshTurn = (): Turn => ({ rung: 0, clipEndedAt: null, clipStartedAt: 0, playKey: 0, hint: false });
+const freshTurn = (): Turn => ({ rung: 0, span: rungSpan(0, false), clipEndedAt: null, clipStartedAt: 0, playKey: 0, hint: false });
 const primaryArtistOf = (t: Track | null) => (t ? String(t.artist || "").split(",")[0].trim() : "");
 
 export function App(){
@@ -41,6 +42,7 @@ export function App(){
   const [blocked, setBlocked] = useState<string[]>(loadBlocked);
   const [invite, setInvite] = useState(takeInviteFromUrl);
   const groupSnap = useGroup();
+  const startOnShow = useRef(0);
 
   useEffect(() => { save(state); }, [state]);
   useEffect(() => {
@@ -74,6 +76,7 @@ export function App(){
   const setRoster = (mode: Mode, list: RosterEntry[]) => setState(st => (mode === "teams" ? { ...st, teams: list } : { ...st, players: list }));
 
   function resetTurn(){
+    clearTimeout(startOnShow.current); startOnShow.current = 0;
     setTurn(freshTurn()); setVerdict(null); setRevealed(null); setNote("");
   }
 
@@ -114,12 +117,12 @@ export function App(){
   async function playClip(rung: number, replay = false){
     if (!track) return;
     engine.ac();
-    const secs = (plain ? CLIP_STEPS : MUSIC_CLIP_STEPS)[rung];
+    const span = rungSpan(rung, replay);
     setNote("");
-    setTurn(t => ({ ...t, rung, clipEndedAt: replay ? t.clipEndedAt : null }));
+    setTurn(t => ({ ...t, rung, span, clipEndedAt: replay ? t.clipEndedAt : null }));
     const started = () => {
       setTurn(t => ({ ...t, clipStartedAt: Date.now(), playKey: t.playKey + 1 }));
-      // A refused play() reports back before playSnippet resolves; keep the tap prompt.
+      // A refused play() reports back before playing starts; keep the tap prompt.
       setPhase(p => (p === "blocked" || p === "listened" ? p : "playing"));
     };
     const ended = () => {
@@ -130,17 +133,24 @@ export function App(){
       setNote(plain ? "This song won't stream right now. Skip it to try another." : "This music-only clip isn't available. Skip it to try another.");
       ended();
     };
-    const cb = { onStart: started, onEnd: ended, onErr: failed, onBlocked: () => setPhase("blocked") };
-    log("snippet", { rung, secs, sound: plain ? "full" : "inst", title: String(track.title).slice(0, 28) });
+    log("snippet", { rung, from: span.from, to: span.to, sound: plain ? "full" : "inst", title: String(track.title).slice(0, 28) });
     setPhase("cueing");
-    if (plain){
-      engine.playElement(track.stream, hookOffset(track), secs, cb);
-      return;
-    }
-    const r = await engine.playSnippet(track, 0, secs, cb);
-    if (r === "superseded") return;
-    if (r === "snip"){ started(); return; }
-    failed();
+    const r = await playRung(track, plain, rung, replay, { onStart: started, onEnd: ended, onErr: failed, onBlocked: () => setPhase("blocked") });
+    if (r === "failed") failed();
+  }
+
+  /* The countdown hands over silently: the first clip starts only once the
+     listening screen has faded in, so the sound, "Now playing" and the clip
+     bar start together. The timeout covers a fade that never reports back
+     (a hidden tab pauses animation frames). */
+  function startWhenShown(){
+    setPhase("cueing");
+    startOnShow.current = window.setTimeout(shown, 1500);
+  }
+  function shown(){
+    if (!startOnShow.current) return;
+    clearTimeout(startOnShow.current); startOnShow.current = 0;
+    playClip(0);
   }
 
   function revealAndScore(result: "correct" | "wrong"){
@@ -284,7 +294,7 @@ export function App(){
         break;
       case "countdown":
         key = "countdown";
-        screen = <Countdown onTick={n => engine.sfx(n > 0 ? "tick" : "roll")} onDone={() => playClip(0)} />;
+        screen = <Countdown onTick={n => engine.sfx(n > 0 ? "tick" : "roll")} onDone={startWhenShown} />;
         break;
       case "reveal":
         key = "reveal";
@@ -309,7 +319,8 @@ export function App(){
       <MotionConfig reducedMotion="user">
         <Theatre meta={meta} game={inGame ? g : null} onHome={goHome} onEnd={endGame}>
           <AnimatePresence mode="wait" initial={false}>
-            <m.div key={key} className="screen" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.22 }}>
+            <m.div key={key} className="screen" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.22 }}
+              onAnimationComplete={key === "playing" ? shown : undefined}>
               {screen}
             </m.div>
           </AnimatePresence>
