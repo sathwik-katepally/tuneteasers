@@ -17,12 +17,13 @@ Scripts serve `dist/` on a local port with correct MIME types and drive the full
 Playback modes asserted by the suites are `snip | muffle | plain` (`window.__ttLastMode`); no ML/model network requests should ever appear.
 The old on-device pipeline suites `dsp.js`, `pick.js`, `vadtest.js`, and `ml*.js` are obsolete and no longer run.
 
-Run `npm run build` first; the scripts read `dist/`.
-Gotchas: buttons with the `.pulse` animation need `{ force: true }` clicks; state persists via a Preact effect, so after a click, `waitForFunction` on localStorage before reading it.
+Run `npm run typecheck && npm run build` first; the scripts read `dist/`.
+Gotchas: buttons with the `.pulse` animation need `{ force: true }` clicks; state persists via a React effect, so after a click, `waitForFunction` on localStorage before reading it.
 
 ## Deploy (GitHub Pages via Actions)
 
-`.github/workflows/deploy.yml` builds with Vite and deploys `dist/` to Pages on every push to main; Pages is configured with `build_type=workflow`.
+`.github/workflows/deploy.yml` checks TypeScript, builds with Vite, and deploys `dist/` to Pages on every push to main; Pages is configured with `build_type=workflow`.
+`.github/workflows/verify.yml` runs the same typecheck and build on pull requests.
 `vite.config.js` sets `base: "./"` so the build works under the `/tuneteasers/` project path.
 After pushing, verify the workflow succeeded (`gh run watch` or `gh run list`) and smoke-test the live URL.
 
@@ -53,7 +54,7 @@ The client tolerates a missing snips.json, so a failed refresh degrades to muffl
 
 ### Workflow failure alerts
 
-Every workflow (`deploy.yml`, `refresh-catalog.yml`, `refresh-snips.yml`) ends in an `alert` job that `needs` the other job and runs on `if: failure()`.
+The production workflows (`deploy.yml`, `refresh-catalog.yml`, `refresh-snips.yml`) end in an `alert` job that `needs` the other job and runs on `if: failure()`.
 It POSTs the run URL to `https://ntfy.sh/$NTFY_TOPIC` with the title `<repo>/<workflow> failed`.
 `failure()` is false for cancelled runs, so a deploy superseded by a newer push stays quiet.
 The topic is the shared ops topic (`~/.config/ops/secrets.env`, `OPS_NTFY_TOPIC`), set with `gh secret set NTFY_TOPIC --repo sathwik-katepally/tuneteasers --body <topic>`.

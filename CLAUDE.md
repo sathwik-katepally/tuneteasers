@@ -1,11 +1,12 @@
 # TuneTeasers
 
 Pass-the-phone Bollywood/Telugu song-guessing party game.
-Preact + Vite SPA, deployed by GitHub Actions to GitHub Pages at https://sathwik-katepally.github.io/tuneteasers/.
+React 19 + TypeScript + Vite SPA, deployed by GitHub Actions to GitHub Pages at https://sathwik-katepally.github.io/tuneteasers/.
 
 ## Commands
 
 - `npm run dev` - local dev server
+- `npm run typecheck` - strict TypeScript check of the React UI
 - `npm run build` - production build to `dist/`
 - `npm run build:catalog` - regenerate `public/catalog.json` from iTunes (slow; sequential requests to respect Apple's ~20 req/min rate limit)
 - `npm run build:snips` - regenerate `public/snips.json`, the offline-scored instrumental-window index (slow; scores songs in a Playwright Chromium page)

@@ -2,13 +2,15 @@
 
 ## Module layout
 
-- `index.html` - static shell; all UI is rendered into `#root` by Preact.
-- `src/main.jsx` - entry point; renders `App` and imports global styles.
-- `src/app.jsx` - the single state owner; all game state, actions, and screen routing live here.
-- `src/screens/Setup.jsx` - settings, players, blocked-artist management, plus the `Loading` screen.
-- `src/screens/Game.jsx` - the round loop UI (play, guess, hint, reveal, score, block artist).
-- `src/screens/Done.jsx` - final leaderboard.
-- `src/components/bits.jsx` - tiny shared presentational pieces (`Chip`, `Disc`, `ScoreRow`).
+- `index.html` - static shell; React 19 renders all UI into `#root`.
+- `src/main.tsx` - entry point; renders `App` and imports global styles.
+- `src/app.tsx` - the single state owner; all game state, actions, and screen routing live here.
+- `src/screens/Setup.tsx` - settings, players, blocked-artist management, plus the `Loading` screen.
+- `src/screens/Game.tsx` - the round loop UI (play, guess, hint, reveal, score, block artist).
+- `src/screens/Done.tsx` - final leaderboard.
+- `src/components/bits.tsx` - tiny shared presentational pieces (`Chip`, `Disc`, `ScoreRow`).
+- `src/types.ts` - shared types for saved state, tracks, and screen props.
+- `tsconfig.json` - strict UI type checking; existing `src/lib/*.js` remains JavaScript with `allowJs` and `checkJs` off.
 - `src/lib/constants.js` - search queries, language/era tables, exclusion regex.
 - `src/lib/utils.js` - pure helpers (`songKey`, `shuffle`, `safeUrl`, `fmtScore`, ...).
 - `src/lib/storage.js` - localStorage persistence, track sanitization, played-cooldown and blocked-artist stores.
@@ -28,6 +30,6 @@ Ephemeral per-round UI state (phase, snippet progress, hint, scoreboard visibili
 
 ## Screens and phases
 
-`screen` is one of `setup | game | done`; each screen root element carries a matching `key` so Preact remounts cleanly on switches (do not remove these keys - reusing DOM across screens previously caused duplicate disc / missing topbar bugs).
+`screen` is one of `setup | game | done`; each screen root element carries a matching `key` so React remounts cleanly on switches (do not remove these keys - reusing DOM across screens previously caused duplicate disc / missing topbar bugs).
 Within the game screen, `phase` cycles `ready → cueing → playing → guessing → revealed → (next round) ready`.
 Scoring: +1 per correct guess, halved to +½ if the movie/year hint was used that round; scores are stored as floats in 0.5 steps and rendered via `fmtScore` (e.g. `3½`).
