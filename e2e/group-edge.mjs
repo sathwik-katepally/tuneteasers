@@ -45,7 +45,7 @@ const api = async (invite, p, init = {}) => {
 const results = [];
 async function check(name, fn){
   try { await fn(); results.push(`PASS ${name}`); }
-  catch (e){ results.push(`FAIL ${name}: ${e.message.split("\n")[0]}`); }
+  catch (e){ results.push(`FAIL ${name}: ${e.message.split("\n")[0]}${e.cause ? ` (${e.cause.code || e.cause.message})` : ""}`); }
 }
 const expect = (ok, msg) => { if (!ok) throw new Error(msg); };
 
