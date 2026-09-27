@@ -19,15 +19,19 @@ interface Props {
    the show needs is greyed out with its count; a chosen one stays tappable
    so it can be turned off. */
 export function CategoryPicker({ settings: S, need, blocked, onChange }: Props){
-  const [counts, setCounts] = useState<Counts | null | undefined>(undefined);
+  const [loaded, setLoaded] = useState<{ key: string; counts: Counts | null } | null>(null);
   const sound = DIFFICULTY[S.difficulty].sound;
   const erasKey = S.eras.join(",");
+  const key = JSON.stringify([S.mix, erasKey, sound, S.difficulty, need, blocked]);
+  const counts = loaded?.key === key ? loaded.counts : undefined;
 
   useEffect(() => {
     let live = true;
-    categoryCounts(S.mix, S.eras, sound, S.difficulty, need, CATEGORIES.map(c => c.id)).then(c => { if (live) setCounts(c); });
-    return () => { live = false; };
-  }, [S.mix, erasKey, sound, S.difficulty, need, blocked.join("|")]); // eslint-disable-line react-hooks/exhaustive-deps
+    const timer = setTimeout(() => {
+      categoryCounts(S.mix, S.eras, sound, S.difficulty, need, CATEGORIES.map(c => c.id)).then(c => { if (live) setLoaded({ key, counts: c }); });
+    }, 200);
+    return () => { live = false; clearTimeout(timer); };
+  }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const chosen = new Set(S.categories);
   const toggle = (id: Category) => onChange(CATEGORIES.map(c => c.id).filter(c => (c === id ? !chosen.has(c) : chosen.has(c))));
