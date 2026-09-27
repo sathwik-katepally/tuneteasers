@@ -279,7 +279,11 @@ try {
   await shot(host, "host-04-playing");
   await shot(asha, "phone-04-buzzer-live");
   buzzLog = [];
-  await Promise.all([buzz(ravi), sleep(70).then(() => buzz(asha)), sleep(140).then(() => buzz(meena))]);
+  // The proxy's forwarding order stands in for arrival order. Across the
+  // internet separate connections jitter by tens of milliseconds, so a
+  // deployed Worker gets wider gaps.
+  const gap = A.worker ? 500 : 70;
+  await Promise.all([buzz(ravi), sleep(gap).then(() => buzz(asha)), sleep(gap * 2).then(() => buzz(meena))]);
   await until("three in the queue", () => song().queue.length === 3);
   const order = song().queue.map(nameOf);
   if (order.join() !== buzzLog.join()) fail(`buzz order ${order} differs from arrival order ${buzzLog}`);
