@@ -12,7 +12,7 @@ Scripts serve `dist/` on a local port with correct MIME types and drive the full
 - `snips.js` - stubbed snips.json and Saavn responses; asserts a verified track plays mode "snip" seeked to its window and an unverified one plays "muffle".
 - `dupes.js` - builds a crate on the Saavn tier and the catalog tier and asserts no two queue entries share a `songKey` (keeps a synced copy of the key function).
 - `webkit-local.js` - iPhone-emulated WebKit run against the local build; asserts a fast cue and a valid mode.
-- `node scripts/corpus-e2e.cjs [repo] [local-worker-origin]` - the corpus tier: games in each language resolve ids through a local `wrangler dev` worker (the deployed worker host is rerouted to it), through the deployed worker/mirror, and with no batch endpoint at all (must fall back to `source: "saavn"`); checks every queue track's corpus film/year/tier and the reveal; includes a phone-width WebKit pass.
+- `node scripts/corpus-e2e.cjs [repo] [local-worker-origin]` - the corpus tier: games in each language resolve ids through a local `wrangler dev` worker (the deployed worker host is rerouted to it), through the deployed worker, and with no batch endpoint at all (must fall back to `source: "saavn"`); checks every queue track's corpus film/year/tier and the reveal; includes a phone-width WebKit pass.
 - `live*.js` - smoke tests against the production URL.
 
 Playback modes asserted by the suites are `snip | muffle | plain` (`window.__ttLastMode`); no ML/model network requests should ever appear.

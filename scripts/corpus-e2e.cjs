@@ -1,15 +1,14 @@
 /* Corpus tier E2E: a real game loads and plays from corpus.json in both
    languages, resolving ids through (a) the local wrangler dev worker,
-   (b) the deployed worker (which lacks /api/songs until the captain deploys,
-   so the public mirror answers), and (c) no batch endpoint at all, which
-   must fall back to raw Saavn search. Run: node scripts/corpus-e2e.cjs [repo-dir] [local-worker-origin] */
+   (b) the deployed worker, and (c) no batch endpoint at all, which must fall
+   back to raw Saavn search. Run: node scripts/corpus-e2e.cjs [repo-dir] [local-worker-origin] */
 const { chromium, webkit } = require("playwright");
 const http = require("http"), fs = require("fs"), path = require("path");
 const REPO = process.argv[2] || path.join(__dirname, "..");
 const LOCAL = process.argv[3] || "http://127.0.0.1:8787";
 const DIST = path.join(REPO, "dist");
 const WORKER_HOST = "tuneteasers-saavn.sathwik-katepally.workers.dev";
-const MIRROR_HOST = "saavn-api.nandanvarma.com";
+const DEPLOYED_WORKER = `https://${WORKER_HOST}`;
 const MIME = { ".html":"text/html", ".js":"text/javascript", ".css":"text/css", ".json":"application/json", ".svg":"image/svg+xml", ".png":"image/png" };
 const corpusFile = JSON.parse(fs.readFileSync(path.join(DIST, "corpus.json"), "utf8"));
 const corpus = corpusFile.songs.map(r => Object.fromEntries(corpusFile.cols.map((c, i) => [c, r[i]])));
@@ -24,8 +23,8 @@ const srv = http.createServer((q, s) => {
 const SCENARIOS = [
   { name: "local-worker bolly", mix: "Bollywood", lang: "hindi", localWorker: true, blockMirror: true, expect: "corpus", via: "127.0.0.1" },
   { name: "local-worker telugu", mix: "Telugu", lang: "telugu", localWorker: true, blockMirror: true, expect: "corpus", via: "127.0.0.1" },
-  { name: "deployed/mirror bolly", mix: "Bollywood", lang: "hindi", expect: "corpus" },
-  { name: "deployed/mirror telugu", mix: "Telugu", lang: "telugu", expect: "corpus" },
+  { name: "deployed-worker bolly", mix: "Bollywood", lang: "hindi", expect: "corpus", via: DEPLOYED_WORKER },
+  { name: "deployed-worker telugu", mix: "Telugu", lang: "telugu", expect: "corpus", via: DEPLOYED_WORKER },
   { name: "no-batch-endpoint both", mix: "Both", blockMirror: true, blockLocalSongs: true, expect: "saavn" },
   { name: "webkit local-worker both", mix: "Both", localWorker: true, blockMirror: true, expect: "corpus", via: "127.0.0.1", browser: "webkit" },
 ];
@@ -37,7 +36,6 @@ async function run(sc, url){
   const reqs = [];
   await p.route("**/*", async r => {
     const u = new URL(r.request().url());
-    if (sc.blockMirror && u.host === MIRROR_HOST) return r.abort();
     if (u.host === WORKER_HOST && sc.localWorker){
       // stand in for the deployed worker with the local wrangler dev instance
       const local = LOCAL + u.pathname + u.search;
@@ -85,8 +83,7 @@ async function run(sc, url){
     if (!/From "/.test(reveal) && !/·\s*20\d\d/.test(reveal)) problems.push("reveal lacks film/year");
     const songReqs = reqs.filter(u => u.includes("/api/songs?ids="));
     if (!songReqs.length) problems.push("no batch id request");
-    if (sc.via && !songReqs.every(u => u.includes(sc.via))) problems.push("batch requests not via " + sc.via);
-    if (!sc.via && !songReqs.some(u => u.includes(MIRROR_HOST))) problems.push("expected mirror to serve /api/songs");
+    if (sc.via && !songReqs.every(u => u.startsWith(sc.via))) problems.push("batch requests not via " + sc.via);
   }
   const ok = !problems.length;
   console.log(ok ? "PASS" : "FAIL", sc.name, `| queue=${queue.length} mode=${mode} source=${state.game.source}`, problems.join("; "), "|", crate.slice(0, 160));
