@@ -172,6 +172,11 @@ try {
   await phone.page.getByText("Your group").waitFor();
   await phone.page.getByText("In sync").waitFor();
   await shot(phone, "phone-02-joined");
+  await phone.page.getByRole("button", { name: "Invite", exact: true }).click();
+  await phone.page.getByRole("img", { name: "Invite QR code" }).waitFor();
+  if ((await phone.page.getByLabel("Invite link").inputValue()) !== link) fail("phone shares a different invite link");
+  await shot(phone, "phone-02b-invite");
+  await phone.page.getByRole("button", { name: "Done" }).click();
   const phoneGroup = JSON.parse(await phone.page.evaluate(() => localStorage.getItem("tt_group")));
   if (phoneGroup.owner) fail("joining phone got the owner secret");
 

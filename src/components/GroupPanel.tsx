@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { encode } from "uqr";
 import {
   GROUP_NAME_MAX, GroupError, createGroup, deleteGroup, inviteLink, joinGroup, leaveGroup,
   localHistoryCount, parseInvite, previewInvite, useGroup,
@@ -232,17 +231,24 @@ function InviteView({ invite, name, onDone }: { invite: string; name: string; on
   );
 }
 
+// The encoder loads only when an invite is shown, keeping it out of the game bundle.
 function Qr({ text }: { text: string }){
-  const qr = useMemo(() => encode(text, { ecc: "M", border: 2 }), [text]);
-  const d = useMemo(() => {
-    let p = "";
-    qr.data.forEach((row, y) => row.forEach((on, x) => { if (on) p += `M${x} ${y}h1v1h-1z`; }));
-    return p;
-  }, [qr]);
+  const [qr, setQr] = useState<{ size: number; d: string } | null>(null);
+  useEffect(() => {
+    let live = true;
+    import("uqr").then(({ encode }) => {
+      const { size, data } = encode(text, { ecc: "M", border: 2 });
+      let d = "";
+      data.forEach((row, y) => row.forEach((on, x) => { if (on) d += `M${x} ${y}h1v1h-1z`; }));
+      if (live) setQr({ size, d });
+    }, () => {});
+    return () => { live = false; };
+  }, [text]);
+  if (!qr) return <div className={s.qr} aria-hidden />;
   return (
     <svg className={s.qr} viewBox={`0 0 ${qr.size} ${qr.size}`} shapeRendering="crispEdges" role="img" aria-label="Invite QR code">
       <rect width={qr.size} height={qr.size} fill="#fff8e8" />
-      <path d={d} fill="#1c0b08" />
+      <path d={qr.d} fill="#1c0b08" />
     </svg>
   );
 }
