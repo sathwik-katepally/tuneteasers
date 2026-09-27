@@ -1,29 +1,58 @@
 # Song loading
 
-`buildCrate(mix, eras, sound)` in `src/lib/crate.js` assembles the game queue; it returns `{ queue, source }` or `{ error: "load" | "thin" }`.
+`buildCrate(mix, eras, sound, difficulty)` in `src/lib/crate.js` assembles the game queue; it returns `{ queue, source }` or `{ error: "load" | "thin" }`.
+`difficulty` is `"easy" | "medium" | "hard" | "mixed"` (default `"mixed"`, also `settings.difficulty`).
+It maps to corpus tiers through `DIFFICULTY_TIERS` in `src/lib/constants.js` (easy → easy; medium → easy + medium; hard → medium + hard; mixed → all); when the mapped tiers hold fewer than 10 songs for the chosen languages and eras the crate widens to all tiers before reporting `thin`.
+The uncurated fallback tiers carry no tier and ignore it.
 
 ## Source tiers
 
-1. **Saavn search** (`loadFromSaavn`) - JioSaavn search APIs listed in `SAAVN_BASES`; full songs, so snippets start at the intro.
+1. **Curated corpus** (`loadFromCorpus`) - `public/corpus.json`, the verified film-song pool built offline by `scripts/build-corpus.mjs` (below).
+   The crate filters it by language, era, difficulty tier and the device blocklist, orders fresh songs before recently played ones, draws `CORPUS_DRAW` candidates and resolves them to streams with one batch request per `CORPUS_BATCH` ids (`GET /songs?ids=`, served by our Worker and by any saavn.dev-compatible mirror in `SAAVN_BASES`).
+   Tracks carry `album` = film, `year` = the film's verified year and `tier`.
+   If the corpus file is missing or the ids cannot be resolved (worker and mirror down), the tiers below take over; if the corpus loads but fewer than 10 songs match the filters, the crate returns `{ error: "thin" }` rather than playing unverified songs.
+2. **Saavn search** (`loadFromSaavn`) - JioSaavn search APIs listed in `SAAVN_BASES`; full songs, so snippets start at the intro.
    The first base is our own Cloudflare Worker (`worker/`, see docs/testing-and-deploy.md); the public nandanvarma mirror follows as a fallback.
    The first responding base is remembered for the session and tried first, but the others are still tried if it later fails.
    Search jobs are (query, page) pairs from `SAAVN_QUERIES` x `SAAVN_PAGES` in `src/lib/constants.js` (~120 queries: singers, composers, stars, years, moods; ~3,000 unique songs after filters).
    Each game samples 7 random jobs per language, so consecutive games draw from different slices of the corpus.
-   The offline snips scorer (`scripts/build-snips.mjs`) runs every job and imports the same constants, so any song a game can draw has been scored.
-2. **Baked catalog** (`loadCatalog`) - `public/catalog.json`, ~700 iTunes tracks committed to the repo and served same-origin, so it cannot be rate-limited or CORS-blocked; refreshed weekly by CI because iTunes preview URLs rot.
-3. **Live iTunes search** (`loadFromItunes`) - last resort; deliberately throttled to few search terms because Apple rate-limits around 20 searches/min per IP (that rate limit caused the original "Couldn't load enough songs" production bug).
+   Years here are whatever Saavn reports for the copy it returned (compilation copies carry re-release years), which is why this tier is only a fallback.
+3. **Baked catalog** (`loadCatalog`) - `public/catalog.json`, ~700 iTunes tracks committed to the repo and served same-origin, so it cannot be rate-limited or CORS-blocked; refreshed weekly by CI because iTunes preview URLs rot.
+4. **Live iTunes search** (`loadFromItunes`) - last resort; deliberately throttled to few search terms because Apple rate-limits around 20 searches/min per IP (that rate limit caused the original "Couldn't load enough songs" production bug).
 
 Each tier only runs if the pool still has fewer than 10 songs.
+The snips scorer (`scripts/build-snips.mjs`) scores every corpus song, so any corpus song a game draws has been scored; fallback-tier songs are unscored and play through the muffle graph.
 Dedupe is by canonical title key (`songKey(title)` in `src/lib/utils.js`, which strips bracketed qualifiers, dash suffixes like `- From "Movie"`, and punctuation): each tier dedupes internally, later tiers are filtered against earlier ones, and the assembled pool gets a final dedupe pass (first occurrence wins, so full Saavn songs beat hook clips).
 Tracks from tiers 2 and 3 are 30-second mid-song "hook" clips and carry `hook: true`.
+
+## The corpus (`public/corpus.json`)
+
+Built by `node scripts/build-corpus.mjs` (weekly in CI, see docs/testing-and-deploy.md) from `scripts/corpus.config.json`, which holds everything that changes: playlist search queries, the editorial owner uid, Wikidata language ids, the year floor and tolerance, the play-count floor, score weights and tier cut-offs.
+The rule is film songs only, with the film's real release year:
+
+1. **Seed** - JioSaavn's own editorial playlists (owner uid `phulki_user`, e.g. "Hindi 2000s", "Chartbusters 2019 - Telugu") found through the configured playlist searches, plus the per-language charts.
+   Only songs whose Saavn `language` is hindi or telugu are kept; titles matching `EXCLUDE_RX` (remixes, lofi, unplugged, ...) are dropped.
+2. **Film match** - the album name is cleaned ("(Original Motion Picture Soundtrack)", language markers such as "- Telugu", `From "X"` clauses, brackets) and looked up in a Wikidata index of films by original language (labels and aliases, min publication year).
+   A film of the song's language released within ±1 year of the copy's year verifies the song; the corpus stores Wikidata's canonical film label and year.
+3. **Canonical copy** - when the album is a compilation ("Best Of Arijit Singh"), the script searches the title and treats copies with the same language and a play count within 1% as the same recording (Saavn shares one counter across copies), then applies step 2 to each copy, oldest year first, and keeps the original album's song id.
+   A compilation copy without a matching original album copy is rejected.
+   If only the name matches (a re-upload with a later year), Wikidata's year is taken anyway, which is what drops re-released pre-2000 songs.
+4. **Unverified fallback** - songs Saavn tags with a `starring` role whose film-like album has no dub marker and no same-named Wikidata film of another language within ±1 year are kept with `yearVerified: false` and the earliest year among the copies.
+   Everything else is rejected: singles, devotional and indie releases, dubs of Tamil/Kannada/Malayalam films, remixes, pre-2000 songs, and songs under the play-count floor.
+5. **Difficulty** - within each language x decade (raw counts are not comparable: Hindi 2010s median ≈ 19M plays vs 2000s ≈ 6M) the score blends the play-count percentile (weight 0.8) with the editorial-playlist membership percentile (0.2).
+   The top 30% by score is `easy`, the next 40% `medium`, the rest `hard` (cut-offs in the config, baked into the file's `tiers`).
+
+The file is compact: `{ v, built, tiers, cols, songs: [[...], ...] }`, one row per song with columns `id, title, film, year, yearVerified, language, singers, composers, lyricists, starring, albumId, plays, score, tier`; the client expands rows by `cols` and carries composers as `music` for the reveal.
+Songs are deduped by language + `songKey(title)` (highest play count wins) so snips.json keys stay unambiguous.
+The script refuses to write a corpus with fewer than `minSongsPerLanguage` songs in either language.
 
 ## Filters applied to every track
 
 - https-only stream URL, via `sanitizeTrack`.
 - Language must match the requested mix (Saavn `language` field, iTunes genre via `ITUNES_LANG_OK`).
-- Year ≥ 2000, plus the user's era selection (`settings.eras`, decade buckets from `eraOf`).
+- Year ≥ 2000, plus the user's era selection (`settings.eras`, decade buckets from `eraOf`); for corpus songs the year is the film's verified year.
 - `EXCLUDE_RX` drops remixes, covers, lofi, karaoke, instrumentals, background-score themes/OST/teasers, etc.
-- Saavn songs with a reported play count below `SAAVN_MIN_PLAYS` (1M) are dropped (mostly dubs and obscure album cuts); a missing count means unknown and is kept.
+- Saavn-search songs with a reported play count below `SAAVN_MIN_PLAYS` (1M) are dropped (mostly dubs and obscure album cuts); a missing count means unknown and is kept. The corpus applies its own floor (`minPlays` in the config) at build time.
 - Blocked artists are removed: a track is out if ANY of its comma-separated artists matches the device blocklist (`tt_blocked` in localStorage, managed in the reveal screen and setup screen).
 
 If filters shrink the pool below 10 the crate returns `{ error: "thin" }` and the UI tells the user to widen filters, distinct from the connection error.
