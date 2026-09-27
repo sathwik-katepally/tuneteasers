@@ -4,6 +4,7 @@
    (tuneteasers_v6) are migrated once, then that key is dropped. */
 import { ERAS } from "./constants.js";
 import { sanitizeTrack } from "./storage.js";
+import { isResultId, randomId } from "./group";
 import { DEFAULT_ROUNDS, LEGACY_SCORE_SCALE, MAX_CAST, MAX_MEMBERS, NAME_MAX, ROUND_OPTIONS } from "./config";
 import type { AppState, CastMember, Difficulty, GameState, HistoryEntry, Mix, Mode, RosterEntry, Settings, Track } from "../types";
 
@@ -77,7 +78,7 @@ function parseQueue(raw: Raw): { queue: Track[]; trackIdx: number } | null {
 
 const sourceOf = (v: unknown) => oneOf(v, ["corpus", "saavn", "catalog", "live"], "catalog");
 
-function parseGame(raw: Raw, mode: Mode, difficulty: Difficulty): GameState | null {
+function parseGame(raw: Raw, mode: Mode, difficulty: Difficulty, mix: Mix): GameState | null {
   const q = parseQueue(raw);
   if (!q) return null;
   const cast: CastMember[] = parseRoster(raw.cast, [], "c").map((c, i) => ({
@@ -91,6 +92,7 @@ function parseGame(raw: Raw, mode: Mode, difficulty: Difficulty): GameState | nu
     .slice(-200);
   const round = Math.max(1, int(raw.round, 1));
   return {
+    id: isResultId(raw.id) ? raw.id : randomId(),
     ...q,
     turn: Math.min(Math.max(0, int(raw.turn, 0)), cast.length - 1),
     round,
@@ -99,6 +101,7 @@ function parseGame(raw: Raw, mode: Mode, difficulty: Difficulty): GameState | nu
     source: sourceOf(raw.source),
     mode: oneOf<Mode>(raw.mode, ["players", "teams"], mode),
     difficulty: oneOf<Difficulty>(raw.difficulty, ["easy", "medium", "hard"], difficulty),
+    mix: oneOf<Mix>(raw.mix, ["bolly", "telugu", "both"], mix),
     cast,
     history,
     finished: false,
@@ -123,6 +126,7 @@ function migrateLegacy(raw: Raw): AppState {
     }));
     const round = Math.max(1, int(g.round, 1));
     game = {
+      id: randomId(),
       ...q,
       turn: Math.min(Math.max(0, int(g.turn, 0)), cast.length - 1),
       round,
@@ -131,6 +135,7 @@ function migrateLegacy(raw: Raw): AppState {
       source: sourceOf(g.source),
       mode: "players",
       difficulty,
+      mix: settings.mix,
       cast,
       history: [],
       finished: false,
@@ -152,7 +157,7 @@ export function loadSaved(): AppState {
     settings,
     players: parseRoster(r.players, DEFAULTS.players, "p"),
     teams: parseRoster(r.teams, DEFAULTS.teams, "t"),
-    game: parseGame(obj(r.game), settings.mode, settings.difficulty),
+    game: parseGame(obj(r.game), settings.mode, settings.difficulty, settings.mix),
   };
 }
 

@@ -67,9 +67,10 @@ In Music-only mode (`sound === "inst"`), the queue contains only annotated track
 If fewer safe songs survive, the crate returns `safe` and setup explains the shortage.
 On resume, the remaining queue is checked against the current index again; stale entries are removed, and an inadequate queue cannot resume.
 
-## Played-song cooldown (per device)
+## Played-song cooldown (per device, or per group)
 
 `tt_played` in localStorage maps normalized title → last-played timestamp; entries older than 30 days are pruned.
+In a group, `startGame` passes `buildCrate` the group's map merged with `tt_played` (latest wins), so songs any phone in the group played recently sit out too; see docs/group-sync.md.
 Songs played within the last 7 days (`PLAY_COOLDOWN`) are excluded from the crate when at least 15 fresh songs remain.
 When fresh songs run low, recently played songs are appended AFTER all fresh ones, ordered least-recently-played first, so repeats only appear when unavoidable.
 Old installs stored `tt_played` as a plain array; `loadPlayed` migrates that format transparently.

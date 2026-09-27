@@ -1,5 +1,7 @@
+/* The project's own Worker: the first Saavn base and the group sync API. */
+export const WORKER_API = "https://tuneteasers-saavn.sathwik-katepally.workers.dev/api";
 export const SAAVN_BASES = [
-  "https://tuneteasers-saavn.sathwik-katepally.workers.dev/api",
+  WORKER_API,
   "https://saavn-api.nandanvarma.com/api",
 ];
 /* Every (query, page) pair is one search job. The offline snips scorer runs

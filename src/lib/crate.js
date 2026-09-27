@@ -229,8 +229,9 @@ export async function refreshMusicQueue(queue){
 
 /* Returns { queue, source } or { error: "load" | "thin" | "safe" }.
    difficulty: "easy" | "medium" | "hard" | "mixed" (corpus tiers; the
-   uncurated fallback tiers carry no difficulty and ignore it). */
-export async function buildCrate(mix, eras, sound, difficulty = "mixed", minSongs = 10){
+   uncurated fallback tiers carry no difficulty and ignore it).
+   played: the cooldown map, this phone's own unless a group's is passed. */
+export async function buildCrate(mix, eras, sound, difficulty = "mixed", minSongs = 10, played = loadPlayed()){
   const t0 = performance.now();
   const langs = mix==="both" ? ["bolly","telugu"] : [mix];
   const key = t => songKey(t.title);
@@ -240,7 +241,6 @@ export async function buildCrate(mix, eras, sound, difficulty = "mixed", minSong
     return { error:"safe" };
   }
   const blocked = new Set(loadBlocked().map(normArtist));
-  const played = loadPlayed();
   const safeIds = sound === "inst" ? new Set(Object.keys(snips?.snips || {})) : null;
   const corpus = await loadFromCorpus(langs, eras, difficulty, blocked, played, safeIds, minSongs);
   const tiers = { corpus: corpus.status === "ok" ? corpus.pool.length : corpus.status };
@@ -283,14 +283,14 @@ export async function buildCrate(mix, eras, sound, difficulty = "mixed", minSong
     const verified = verifiedSnip(t, snips);
     if (verified){ t.snip = verified; snipped++; }
   }
-  log("crate", { mix, difficulty, source, ...tiers, snips: snips ? "ok" : "none", snipped, ms: ms(t0) });
+  log("crate", { mix, difficulty, source, ...tiers, snips: snips ? "ok" : "none", snipped, played: Object.keys(played).length, ms: ms(t0) });
   if (pool.length < minSongs && sound !== "inst") return { error:"load" };
   if (Array.isArray(eras) && eras.length && eras.length < ERAS.length)
     pool = pool.filter(t => eras.includes(eraOf(t.year)));
   if (blocked.size) pool = pool.filter(t => !isBlocked(t, blocked));
   if (sound === "inst") pool = pool.filter(t => t.snip);
   if (pool.length < minSongs) return { error:sound === "inst" ? "safe" : "thin" };
-  // Recently played songs (this device) sit out; when the fresh pool runs thin,
+  // Recently played songs (this phone, or the whole group) sit out; when the fresh pool runs thin,
   // repeats come back least-recently-played first, queued after all fresh songs.
   const now = Date.now();
   const fresh = [], stale = [];

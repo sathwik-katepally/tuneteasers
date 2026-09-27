@@ -1,7 +1,8 @@
 /* Plays one full show through the real UI against the real song sources and
    checks the scoring bookkeeping at the end.
    node e2e/game.mjs --profile=phone|desktop --mode=players|teams --mix=bolly|telugu|both
-     --difficulty=easy|medium|hard --rounds=3 [--reduced] [--shots=dir] [--url=http://...] */
+     --difficulty=easy|medium|hard --rounds=3 [--reduced] [--no-worker] [--shots=dir] [--url=http://...]
+   --no-worker makes the project's Worker unreachable (songs then come from the mirror). */
 import fs from "node:fs";
 import path from "node:path";
 import { serve, open, args, saved } from "./harness.mjs";
@@ -28,6 +29,7 @@ const fail = msg => { throw new Error(msg); };
 
 let exit = 0;
 try {
+  if (A["no-worker"] === "true") await page.route(u => u.host === "tuneteasers-saavn.sathwik-katepally.workers.dev", r => r.abort("connectionrefused"));
   await page.goto(url);
   await page.evaluate(() => localStorage.clear());
   await page.goto(url);

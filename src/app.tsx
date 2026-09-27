@@ -8,6 +8,7 @@ import { buildCrate as buildCrateJs, refreshMusicQueue as refreshMusicQueueJs } 
 import { engine, keepAwake } from "./lib/engine.js";
 import { log } from "./lib/log.js";
 import { displayTitle } from "./lib/utils.js";
+import { groupPlayed, randomId, recordPlay, recordResult, takeInviteFromUrl, useGroup } from "./lib/group";
 import { Theatre } from "./components/Theatre";
 import { Setup } from "./screens/Setup";
 import { Loading } from "./screens/Loading";
@@ -17,10 +18,11 @@ import { Playing } from "./screens/Playing";
 import { Reveal } from "./screens/Reveal";
 import { Scoreboard } from "./screens/Scoreboard";
 import { Podium } from "./screens/Podium";
+import { PastGames } from "./screens/PastGames";
 import type { AppState, CastMember, Difficulty, GameState, Mode, Phase, RosterEntry, Settings, Track, Turn, Verdict } from "./types";
 
 type Crate = { error?: string; queue?: Track[]; source?: string };
-const buildCrate = buildCrateJs as (mix: string, eras: string[], sound: string, difficulty: Difficulty, minSongs: number) => Promise<Crate>;
+const buildCrate = buildCrateJs as (mix: string, eras: string[], sound: string, difficulty: Difficulty, minSongs: number, played?: Record<string, number>) => Promise<Crate>;
 const refreshMusicQueue = refreshMusicQueueJs as (queue: Track[]) => Promise<Track[]>;
 
 const freshTurn = (): Turn => ({ rung: 0, clipEndedAt: null, clipStartedAt: 0, playKey: 0, hint: false });
@@ -37,8 +39,15 @@ export function App(){
   const [error, setError] = useState("");
   const [note, setNote] = useState("");
   const [blocked, setBlocked] = useState<string[]>(loadBlocked);
+  const [invite, setInvite] = useState(takeInviteFromUrl);
+  const groupSnap = useGroup();
 
   useEffect(() => { save(state); }, [state]);
+  useEffect(() => {
+    const onHash = () => { const i = takeInviteFromUrl(); if (i){ setInvite(i); setState(st => ({ ...st, screen: st.screen === "past" ? "setup" : st.screen })); } };
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
   useEffect(() => {
     const on = state.screen === "game";
     keepAwake(on);
@@ -52,6 +61,9 @@ export function App(){
   const track = g ? g.queue[g.trackIdx] ?? null : null;
   const who = g ? g.cast[g.turn] : null;
   const plain = g ? DIFFICULTY[g.difficulty].sound === "full" : false;
+
+  // A finished show goes to the group once; the id makes a resend harmless.
+  useEffect(() => { if (g?.finished) recordResult(g); }, [g?.id, g?.finished]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Warm the next song while this one plays; once a turn is judged the queue
   // has already moved on, so the song at trackIdx is the next one up.
@@ -70,7 +82,8 @@ export function App(){
     setLoading(true); setError("");
     const mode = cast ? g?.mode ?? S.mode : S.mode;
     const roster = cast ?? (mode === "teams" ? state.teams : state.players);
-    const crate = await buildCrate(S.mix, S.eras, DIFFICULTY[S.difficulty].sound, S.difficulty, S.rounds * roster.length);
+    const played = groupSnap.group ? await groupPlayed() : null;
+    const crate = await buildCrate(S.mix, S.eras, DIFFICULTY[S.difficulty].sound, S.difficulty, S.rounds * roster.length, played ?? undefined);
     setLoading(false);
     if (crate.error || !crate.queue){
       setError(crate.error === "safe" ? "Not enough verified music-only clips for this show. Try Easy or fewer rounds, or widen your song picks."
@@ -81,9 +94,10 @@ export function App(){
       return;
     }
     const game: GameState = {
+      id: randomId(),
       queue: crate.queue, trackIdx: 0, turn: 0, round: 1, totalRounds: S.rounds,
       totalSongs: crate.queue.length, source: crate.source ?? "corpus",
-      mode, difficulty: S.difficulty,
+      mode, difficulty: S.difficulty, mix: S.mix,
       cast: roster.map(r => ({ id: r.id, name: r.name, members: [...r.members], score: 0 })),
       history: [], finished: false,
     };
@@ -138,6 +152,7 @@ export function App(){
     setRevealed(track);
     setPhase("reveal");
     markPlayed(track.title);
+    recordPlay(track.title);
     const cast = g.cast.map((c, i) => (i === g.turn ? { ...c, score: c.score + points } : c));
     const trackIdx = g.trackIdx + 1;
     const nextTurn = (g.turn + 1) % cast.length;
@@ -166,6 +181,7 @@ export function App(){
     if (!g || !track) return;
     engine.stop();
     markPlayed(track.title);
+    recordPlay(track.title);
     const trackIdx = g.trackIdx + 1;
     if (trackIdx >= g.queue.length){
       setBoardRound(g.round);
@@ -231,11 +247,15 @@ export function App(){
   if (loading){
     key = "loading";
     screen = <Loading settings={S} />;
-  } else if (state.screen === "setup" || !g){
+  } else if (state.screen === "past" && groupSnap.group){
+    key = "past"; meta = "Past shows";
+    screen = <PastGames group={groupSnap.group} onBack={() => setState(st => ({ ...st, screen: "setup" }))} />;
+  } else if (state.screen === "setup" || state.screen === "past" || !g){
     key = "setup";
     const saved = g && !g.finished ? g : null;
     screen = <Setup error={error} settings={S} upSettings={upSettings} players={state.players} teams={state.teams} setRoster={setRoster}
       blocked={blocked} unblockArtist={unblockArtist} startGame={() => startGame()} savedGame={saved}
+      invite={invite} clearInvite={() => setInvite("")} showPastGames={() => setState(st => ({ ...st, screen: "past" }))}
       resumeGame={async () => {
         if (!g) return;
         if (DIFFICULTY[g.difficulty].sound === "inst"){

@@ -11,11 +11,12 @@
 - `src/lib/constants.js` - search queries, language/era tables, exclusion regex.
 - `src/lib/utils.js` - pure helpers (`songKey`, `displayTitle`, `shuffle`, `safeUrl`, ...).
 - `src/lib/storage.js` - track sanitization, the played-cooldown store and the blocked-artist store.
+- `src/lib/group.ts` - optional group sync: the group invite, the write outbox, the group cooldown fetch and past results (docs/group-sync.md).
 - `src/lib/crate.js` - song loading (`buildCrate`) across the 3 source tiers.
 - `src/lib/engine.js` - the audio engine (songs and synthesised sound effects) and screen wake lock.
 - `src/styles/tokens.css`, `src/styles/global.css` - design tokens (colors, fonts, hard shadows) and the few global classes (`.btn*`, `.display`, `.eyebrow`, `.grain`, `.link`, the debug overlay).
-- `src/components/` - the cinema pieces, each with a CSS Module: `Theatre` (marquee, curtains, seat backs, game menu), `Bulbs` (bulb rows and frames), `Ticket`, `Curtain`, `Stamp`, `SplitFlap`, `Seg` (segmented radio), `Equalizer`, `Reel`, and `DebugLog`.
-- `src/screens/` - one component and CSS Module per screen: `Setup`, `Loading`, `Handover`, `Countdown`, `Playing`, `Reveal`, `Scoreboard`, `Podium`.
+- `src/components/` - the cinema pieces, each with a CSS Module: `Theatre` (marquee, curtains, seat backs, game menu), `Bulbs` (bulb rows and frames), `Ticket`, `Curtain`, `Stamp`, `SplitFlap`, `Seg` (segmented radio), `Equalizer`, `Reel`, `GroupPanel` (the home-screen group card), and `DebugLog`.
+- `src/screens/` - one component and CSS Module per screen: `Setup`, `Loading`, `Handover`, `Countdown`, `Playing`, `Reveal`, `Scoreboard`, `Podium`, `PastGames`.
 - `tsconfig.json` - strict UI type checking; `src/lib/*.js` stays JavaScript with `allowJs` and `checkJs` off.
 
 ## Look and motion
@@ -33,7 +34,7 @@ A `max-height: 760px` pass tightens spacing so every in-game screen fits a short
 
 `App` holds one persisted `state` object: `{ screen, settings, players, teams, game }`.
 `settings` is `{ mix, eras, difficulty, mode, rounds }`; `players` and `teams` are the setup rosters (`{ id, name, members }`, members only used by teams).
-`game` is `{ queue, trackIdx, turn, round, totalRounds, totalSongs, source, mode, difficulty, cast, history, finished }` or null.
+`game` is `{ id, queue, trackIdx, turn, round, totalRounds, totalSongs, source, mode, difficulty, mix, cast, history, finished }` or null; `id` makes the finished show's group result idempotent.
 `cast` is a snapshot of the roster with a `score` each, taken at game start, so editing the roster on the home screen never disturbs a saved game.
 `history` holds one `{ id, song, points, round }` entry per judged turn; the box office derives each round's gains from it.
 Every `state` change is saved to localStorage (`tuneteasers_v7`) by an effect; `loadSaved` restores and sanitizes it on boot.
@@ -47,7 +48,7 @@ Judging a turn updates the saved game in one step (score, history, next turn and
 
 ## Screens and phases
 
-`screen` is one of `setup | game | done`; `done` is the podium.
+`screen` is one of `setup | game | done | past`; `done` is the podium and `past` the group's Past shows list.
 Within `game`, `phase` runs `handover → countdown → cueing → playing ⇄ listened → reveal → (handover | board)`, with `blocked` when the browser refuses to start audio without a tap.
 The screen wrapper is keyed per screen inside `AnimatePresence`, so every screen remounts and cross-fades.
 After the last contestant of a round the box office (`board`) shows; after the final round (or when the crate runs out) it reads "Final count" and leads to the podium.

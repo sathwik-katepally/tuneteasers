@@ -4,6 +4,7 @@ import { ERAS } from "../lib/constants.js";
 import { DIFFICULTY, MAX_CAST, MAX_MEMBERS, NAME_MAX, ROUND_OPTIONS } from "../lib/config";
 import { cleanName, newId } from "../lib/save";
 import { Seg } from "../components/Seg";
+import { GroupPanel } from "../components/GroupPanel";
 import type { Difficulty, GameState, Mix, Mode, RosterEntry, Settings } from "../types";
 import sh from "./shared.module.css";
 import s from "./Setup.module.css";
@@ -21,6 +22,9 @@ interface Props {
   savedGame: GameState | null;
   resumeGame: () => void;
   discardGame: () => void;
+  invite: string;
+  clearInvite: () => void;
+  showPastGames: () => void;
 }
 
 const ERA_ALL = "all";
@@ -42,6 +46,7 @@ export function Setup(p: Props){
   return (
     <div className={sh.stage}>
       {p.error && <div className={s.error} role="alert">{p.error}</div>}
+      {p.invite && <GroupPanel invite={p.invite} clearInvite={p.clearInvite} showPastGames={p.showPastGames} />}
       {p.savedGame && <ResumeCard game={p.savedGame} onResume={p.resumeGame} onDiscard={p.discardGame} />}
 
       <div className={sh.paper}>
@@ -134,6 +139,8 @@ export function Setup(p: Props){
           </div>
         )}
       </div>
+
+      {!p.invite && <GroupPanel invite="" clearInvite={p.clearInvite} showPastGames={p.showPastGames} />}
 
       <div className={sh.actions}>
         <div className={`${s.foot} ${sh.muted}`}>

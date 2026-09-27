@@ -3,6 +3,7 @@
    top of it. Garbage in the old key must not crash the app.
    node e2e/migrate.mjs [--profile=phone|desktop] */
 import { serve, open, args, saved } from "./harness.mjs";
+import { displayTitle } from "../src/lib/utils.js";
 
 const A = args({ profile: "phone" });
 const SAAVN = "https://tuneteasers-saavn.sathwik-katepally.workers.dev/api/search/songs?query=arijit%20singh%20hits&limit=12";
@@ -43,7 +44,7 @@ try {
   const verdict = await page.getByText(/\+\d+ for Rahul, \d+ in total/).textContent();
   const pts = Number(verdict.match(/\+(\d+)/)[1]);
   const title = await page.locator("h2").first().textContent();
-  if (title !== queue[4].title) fail(`resumed at the wrong song: ${title} vs ${queue[4].title}`);
+  if (title !== displayTitle(queue[4].title)) fail(`resumed at the wrong song: ${title} vs ${queue[4].title}`);
   await page.getByText(new RegExp(`\\+${pts} for Rahul, ${100 + pts} in total`)).waitFor();
   await page.waitForTimeout(300);
   const st = await saved(page);

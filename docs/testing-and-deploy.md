@@ -9,15 +9,18 @@ Two profiles: `phone` is WebKit with the iPhone 13 device (390px), `desktop` is 
 
 - `e2e/game.mjs` - plays a whole show through the UI: setup, hand-over, countdown, clip ladder (one "Hear 5s"), hint, Home and Resume mid-turn, the game menu, both one-tap scoring choices, box office after each round, podium.
   It then checks the bookkeeping (every contestant's score equals their history, one history entry per turn, points in range, team members kept), that no page errors were thrown, and that no in-game screen scrolls at that size.
-  Flags: `--profile=phone|desktop --mode=players|teams --mix=bolly|telugu|both --difficulty=easy|medium|hard --rounds=3|5|8 --reduced --shots=<dir>`; `--shots` saves one screenshot per screen for review.
+  Flags: `--profile=phone|desktop --mode=players|teams --mix=bolly|telugu|both --difficulty=easy|medium|hard --rounds=3|5|8 --reduced --no-worker --shots=<dir>`; `--shots` saves one screenshot per screen for review, and `--no-worker` makes the project's Worker unreachable (songs come from the mirror).
 - `e2e/migrate.mjs` - seeds a `tuneteasers_v6` save from the previous release with real Saavn tracks, resumes it, plays a turn and checks names, rescaled scores, settings mapping and that the old key is dropped; then feeds junk into the old key and expects a clean home screen.
 - `e2e/autoplay.mjs` - emulates iOS's per-element autoplay rule in Chromium: the hand-over tap's prime must let the countdown start the clip, and a stricter browser must get a working "Tap to play" fallback; also covers End game.
 - `e2e/offline.mjs` - aborts every song source and expects a visible error on the home screen and the `crate` line in the `?debug=1` overlay.
 - `e2e/safe-snips.mjs` - WebKit phone and Chromium desktop play Easy and Music-only through the final rung and replay, then replace the local index with missing, mismatched-ID, stale, and old-schema variants to confirm the visible shortage state.
+- `e2e/group-sync.mjs` (`npm run e2e:group`) - desktop Chromium makes a group (importing its own history) and phone WebKit joins through the `#join` link; a song played on one is left out of the other's next crate, the desktop's finished show appears in the phone's Past shows, the phone keeps playing with the Worker unreachable and sends its queued plays when it is back, and the owner's delete makes the invite answer 403.
+  It starts its own `wrangler dev` with a fresh local D1 and reroutes the deployed Worker host to it; `--worker=<origin>` points it at a deployed Worker instead (the preview one, see docs/group-sync.md), and `--shots=<dir>` saves the group screens.
+- `e2e/group-edge.mjs` (`npm run e2e:group-edge`) - timing cases the journey cannot hit on purpose, driving `src/lib/group.ts` through the Vite dev server in Chromium against a local `wrangler dev`: switching groups while the old group's upload is in flight, a cooldown read after a failed one, an idle-expired group's invite (403, and a write cannot revive it), and a malformed `#join=` link.
 - `node scripts/corpus-e2e.cjs [repo] [local-worker-origin]` - the corpus tier: games in each language resolve ids through a local `wrangler dev` worker (the deployed worker host is rerouted to it), through the deployed worker, and with no batch endpoint at all (must fall back to `source: "saavn"`); checks every queue track's corpus film/year/tier and the reveal; includes a phone-width WebKit pass.
 
-Package scripts: `npm run e2e:game -- --profile=desktop`, `e2e:migrate`, `e2e:autoplay`, `e2e:offline`.
-A release run is the matrix of `game.mjs` over both profiles, both modes, all three difficulties and all three language mixes (not every combination, but each value at least once per profile), one `--reduced` run, plus the other three scripts.
+Package scripts: `npm run e2e:game -- --profile=desktop`, `e2e:migrate`, `e2e:autoplay`, `e2e:offline`, `e2e:snips`, `e2e:group`, `e2e:group-edge`.
+A release run is the matrix of `game.mjs` over both profiles, both modes, all three difficulties and all three language mixes (not every combination, but each value at least once per profile), one `--reduced` run, one `--no-worker` run, plus the other scripts.
 Playback modes asserted are `snip | plain` (`window.__ttLastMode`); Easy must report `plain`, while Medium and Hard must report `snip` or show a safe-clip shortage.
 Gotchas: screens cross-fade out through `AnimatePresence`, so after a click wait for the old button to detach before looking for the next screen; seed localStorage from a non-app page on the same origin (`/seed.html` 404s, which is fine) so the app's own first save cannot race the seeding.
 
@@ -25,21 +28,23 @@ The older ad-hoc scripts in `/tmp/tt-e2e` (and the obsolete on-device pipeline s
 
 ## Deploy (GitHub Pages via Actions)
 
-`.github/workflows/deploy.yml` checks TypeScript, builds with Vite, and deploys `dist/` to Pages on every push to main; Pages is configured with `build_type=workflow`.
-`.github/workflows/verify.yml` runs the same typecheck and build on pull requests.
+`.github/workflows/deploy.yml` runs on every push to main: its `worker` job applies the D1 migrations (`wrangler d1 migrations apply DB --remote`) and deploys the Worker, then the `deploy` job checks TypeScript, builds with Vite, and deploys `dist/` to Pages; Pages is configured with `build_type=workflow`.
+The Worker goes first so the site never ships ahead of the API it calls; migrations must stay additive so the live site keeps working against the new schema.
+The `worker` job uses the repo secrets `CLOUDFLARE_API_TOKEN` (Workers and D1 edit) and `CLOUDFLARE_ACCOUNT_ID`, set from Automic Vault (`av inject +CLOUDFLARE_API_TOKEN -- sh -c 'printf %s "$CLOUDFLARE_API_TOKEN" | gh secret set CLOUDFLARE_API_TOKEN'`).
+`.github/workflows/verify.yml` runs the same typecheck and build on pull requests, plus a Worker `wrangler deploy --dry-run` and the migrations against a throwaway local D1.
 `vite.config.js` sets `base: "./"` so the build works under the `/tuneteasers/` project path.
 After pushing, verify the workflow succeeded (`gh run watch` or `gh run list`) and smoke-test the live URL.
 
-## Saavn Worker (Cloudflare)
+## Worker (Cloudflare)
 
-`worker/` is a self-hosted JioSaavn search API, deployed to https://tuneteasers-saavn.sathwik-katepally.workers.dev on the free Workers plan.
+`worker/` serves two things: the private group sync API backed by D1 (`src/group.js`, see docs/group-sync.md) and a self-hosted JioSaavn search API (`src/saavn.js`), deployed to https://tuneteasers-saavn.sathwik-katepally.workers.dev on the free Workers plan.
 It exists because the public mirrors come and go (saavn.dev died in 2026); it is the first entry in `SAAVN_BASES` (client and `scripts/build-snips.mjs`).
 It serves `GET /api/search/songs?query=&limit=&page=` (the fallback search tier) and `GET /api/songs?ids=a,b,c` (batch song details, at most 50 ids; how the client and `scripts/build-snips.mjs` resolve corpus ids to streams), plus `/health`, calling JioSaavn's own `api.php` and decrypting `encrypted_media_url` (DES-ECB, the web player's public key) into `aac.saavncdn.com` stream URLs.
 Responses use the saavn.dev shape (the subset the client reads), so any saavn.dev-compatible mirror can sit behind it in `SAAVN_BASES` as a fallback; the public mirror serves both routes, so the client keeps working when a new worker route is not deployed yet (the worker answers 404 and the client moves to the next base).
 Successful responses are cached at the edge for 6 hours.
 
-Deploy is manual (it rarely changes): `cd worker && npm install && npx wrangler deploy`, using the local wrangler OAuth login.
-Test locally with `npx wrangler dev`.
+CI deploys it (see above); do not deploy production by hand.
+Test locally with `npx wrangler d1 migrations apply DB --local && npx wrangler dev`, or deploy the preview copy with `--env preview`.
 
 ## Catalog refresh CI
 
@@ -72,7 +77,7 @@ The client fails closed with a clear Music-only shortage if the index is missing
 
 ### Workflow failure alerts
 
-The production workflows (`deploy.yml`, `refresh-catalog.yml`, `refresh-snips.yml`) end in an `alert` job that `needs` the other job and runs on `if: failure()`.
+The production workflows (`deploy.yml`, including its Worker job, `refresh-catalog.yml`, `refresh-snips.yml`) end in an `alert` job that `needs` the other job and runs on `if: failure()`.
 It POSTs the run URL to `https://ntfy.sh/$NTFY_TOPIC` with the title `<repo>/<workflow> failed`.
 `failure()` is false for cancelled runs, so a deploy superseded by a newer push stays quiet.
 The topic is the shared ops topic (`~/.config/ops/secrets.env`, `OPS_NTFY_TOPIC`), set with `gh secret set NTFY_TOPIC --repo sathwik-katepally/tuneteasers --body <topic>`.
