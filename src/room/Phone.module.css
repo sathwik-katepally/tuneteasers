@@ -252,6 +252,7 @@
 .sub {
   min-height: 2.8em;
   max-width: 320px;
+  margin: 0 auto;
   text-align: center;
   text-wrap: balance;
   font-size: 16px;

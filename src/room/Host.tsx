@@ -295,8 +295,8 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
 
   const game = asGame(view, show);
   const code = show?.code ?? "";
+  // The song count is on the stage itself; the marquee keeps the code in view for latecomers.
   let key: string = phase, screen: React.ReactNode, meta = code ? `Room ${code}` : "Buzz-in show";
-  const songMeta = show ? `Room ${code} · Song ${Math.min(show.songNo + (phase === "reveal" || phase === "board" ? 0 : 1), show.total)} of ${show.total}` : meta;
   switch (phase){
     case "opening":
       screen = <Loading settings={settings} />;
@@ -312,20 +312,17 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
       screen = <Loading settings={settings} />;
       break;
     case "countdown":
-      meta = songMeta;
       // Same key as the song screen: a buzz can land within the cross-fade,
       // and two key changes inside one fade leave AnimatePresence stuck on the old screen.
       key = `song-${show?.idx}`;
       screen = <Countdown onTick={n => engine.sfx(n > 0 ? "tick" : "roll")} onDone={() => playClip(0)} />;
       break;
     case "reveal":
-      meta = songMeta;
       screen = revealed && <Reveal track={revealed.track} name={revealed.verdict.name} verdict={revealed.verdict} note={note}
         onNext={afterReveal} nextLabel={revealed.verdict.finished ? "Final box office" : revealed.verdict.roundOver ? "To the box office" : "Next song"}
         primaryArtist="" artistBlocked={false} onBlockArtist={() => {}} />;
       break;
     case "board":
-      meta = songMeta;
       key = `board-${show?.songNo}`;
       screen = game && <Scoreboard game={game} round={Math.max(1, Math.ceil((show?.songNo ?? 1) / (show?.perRound ?? 1)))} onSettle={() => engine.sfx("flaps")} onNext={leaveBoard} />;
       break;
@@ -334,7 +331,6 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
       screen = game && <Podium cast={game.cast} onAgain={() => { if (show) setShow({ ...show, started: false }); startShow(); }} onNewShow={endShow} />;
       break;
     default:
-      meta = songMeta;
       key = `song-${show?.idx}`;
       screen = view && show && track && (
         <HostPlaying view={view} song={view.song?.n === show.songNo + 1 ? view.song : null} songNo={show.songNo + 1} total={show.total} steps={steps} clip={clip} audio={audio}
