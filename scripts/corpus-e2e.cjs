@@ -21,9 +21,9 @@ const srv = http.createServer((q, s) => {
 });
 
 const SCENARIOS = [
-  { name: "local-worker bolly", mix: "Bollywood", lang: "hindi", localWorker: true, blockMirror: true, expect: "corpus", via: "127.0.0.1" },
+  { name: "local-worker bolly", mix: "Hindi", lang: "hindi", localWorker: true, blockMirror: true, expect: "corpus", via: "127.0.0.1" },
   { name: "local-worker telugu", mix: "Telugu", lang: "telugu", localWorker: true, blockMirror: true, expect: "corpus", via: "127.0.0.1" },
-  { name: "deployed-worker bolly", mix: "Bollywood", lang: "hindi", expect: "corpus", via: DEPLOYED_WORKER },
+  { name: "deployed-worker bolly", mix: "Hindi", lang: "hindi", expect: "corpus", via: DEPLOYED_WORKER },
   { name: "deployed-worker telugu", mix: "Telugu", lang: "telugu", expect: "corpus", via: DEPLOYED_WORKER },
   { name: "no-batch-endpoint both", mix: "Both", blockMirror: true, blockLocalSongs: true, expect: "saavn" },
   { name: "webkit local-worker both", mix: "Both", localWorker: true, blockMirror: true, expect: "corpus", via: "127.0.0.1", browser: "webkit" },
@@ -53,23 +53,27 @@ async function run(sc, url){
   const logs = [];
   p.on("console", m => { if (/crate|play |fallback|fail/.test(m.text())) logs.push(m.text().slice(0, 300)); });
   await p.goto(url);
-  await p.locator("button, [role=button]", { hasText: new RegExp(`^${sc.mix}$`) }).first().click();
-  await p.locator("button", { hasText: "Start the game" }).click({ force: true });
-  await p.locator("button", { hasText: /Play .*snippet/ }).waitFor({ timeout: 45000 });
-  const state = await p.evaluate(() => JSON.parse(localStorage.getItem("tuneteasers_v6")));
+  await p.getByRole("radio", { name: sc.mix, exact: true }).click();
+  await p.getByRole("button", { name: /Start the show/ }).click();
+  const handover = p.getByRole("button", { name: /^It's with me/ });
+  await handover.waitFor({ timeout: 45000 });
+  await p.waitForFunction(() => JSON.parse(localStorage.getItem("tuneteasers_v7") || "{}").game);
+  const state = await p.evaluate(() => JSON.parse(localStorage.getItem("tuneteasers_v7")));
   const queue = state.game.queue;
-  await p.locator("button", { hasText: /Play .*snippet/ }).click();
+  await handover.click();
   await p.waitForFunction(() => window.__ttLastMode, null, { timeout: 25000 });
   const mode = await p.evaluate(() => window.__ttLastMode);
-  await p.locator("button", { hasText: /Reveal/ }).first().click();
-  await p.waitForTimeout(2500);
+  await p.getByRole("button", { name: "I know this one" }).click();
+  await p.getByRole("button", { name: "Show the answer" }).click();
+  await p.getByRole("button", { name: /Got it/ }).waitFor();
+  await p.waitForTimeout(1800);
   const reveal = await p.evaluate(() => document.body.innerText);
   await b.close();
 
   const crate = logs.find(l => l.includes("crate")) || "";
   const problems = [];
   if (!["snip", "muffle", "plain"].includes(mode)) problems.push(`mode=${mode}`);
-  if (!/Got it/.test(reveal)) problems.push("no reveal");
+  if (!/Got it/i.test(reveal)) problems.push("no reveal");
   if (state.game.source !== sc.expect) problems.push(`source=${state.game.source} expected ${sc.expect}`);
   if (sc.expect === "corpus"){
     const langOk = sc.lang ? queue.every(t => t.lang === (sc.lang === "hindi" ? "bolly" : "telugu")) : true;
@@ -80,10 +84,10 @@ async function run(sc, url){
       if (!c || c.year !== t.year || c.film !== t.album || !["easy", "medium", "hard"].includes(t.tier)) mism++;
     }
     if (mism) problems.push(`${mism}/${queue.length} queue tracks do not match corpus film/year/tier`);
-    if (!/From "/.test(reveal) && !/·\s*20\d\d/.test(reveal)) problems.push("reveal lacks film/year");
+    if (!/,\s*(19|20)\d\d/.test(reveal)) problems.push("reveal lacks film/year");
     const songReqs = reqs.filter(u => u.includes("/api/songs?ids="));
     if (!songReqs.length) problems.push("no batch id request");
-    if (sc.via && !songReqs.every(u => u.startsWith(sc.via))) problems.push("batch requests not via " + sc.via);
+    if (sc.via && !songReqs.every(u => u.includes(sc.via))) problems.push("batch requests not via " + sc.via);
   }
   const ok = !problems.length;
   console.log(ok ? "PASS" : "FAIL", sc.name, `| queue=${queue.length} mode=${mode} source=${state.game.source}`, problems.join("; "), "|", crate.slice(0, 160));

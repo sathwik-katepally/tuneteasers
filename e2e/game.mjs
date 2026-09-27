@@ -1,0 +1,168 @@
+/* Plays one full show through the real UI against the real song sources and
+   checks the scoring bookkeeping at the end.
+   node e2e/game.mjs --profile=phone|desktop --mode=players|teams --mix=bolly|telugu|both
+     --difficulty=easy|medium|hard --rounds=3 [--reduced] [--shots=dir] [--url=http://...] */
+import fs from "node:fs";
+import path from "node:path";
+import { serve, open, args, saved } from "./harness.mjs";
+
+const A = args({ profile: "phone", mode: "players", mix: "both", difficulty: "medium", rounds: "3" });
+const shotsDir = A.shots && A.shots !== "true" ? A.shots : null;
+if (shotsDir) fs.mkdirSync(shotsDir, { recursive: true });
+
+const server = A.url ? null : await serve();
+const url = A.url || server.url;
+const { browser, page, errors } = await open(A.profile, { reducedMotion: A.reduced === "true" });
+const taken = new Set();
+const overflow = [];
+async function shot(name, settle = 400){
+  if (taken.has(name)) return;
+  taken.add(name);
+  await page.waitForTimeout(settle);
+  const spill = await page.evaluate(() => document.documentElement.scrollHeight - innerHeight);
+  if (spill > 1 && name !== "01-setup") overflow.push(`${name}+${spill}px`);
+  if (shotsDir) await page.screenshot({ path: path.join(shotsDir, `${A.profile}-${name}.png`) });
+}
+const btn = name => page.getByRole("button", { name });
+const fail = msg => { throw new Error(msg); };
+
+let exit = 0;
+try {
+  await page.goto(url);
+  await page.evaluate(() => localStorage.clear());
+  await page.goto(url);
+  await page.getByRole("radio", { name: A.mode === "teams" ? "Teams" : "Solo" }).click();
+  await page.getByRole("radio", { name: { bolly: "Hindi", telugu: "Telugu", both: "Both" }[A.mix], exact: true }).click();
+  await page.getByRole("radio", { name: A.difficulty, exact: false }).click();
+  await page.getByRole("radio", { name: A.rounds, exact: true }).click();
+  if (A.mode === "teams"){
+    const add = btn("Member").first();
+    await add.click(); await page.keyboard.type("Priya"); await page.keyboard.press("Enter");
+    await btn("Member").first().click(); await page.keyboard.type("Rahul"); await page.keyboard.press("Enter");
+  } else {
+    await btn("Add").click(); await page.keyboard.type("Anu"); await page.keyboard.press("Enter");
+  }
+  await shot("01-setup");
+  await btn(/Start the show/).click();
+  await shot("02-loading", 450);
+
+  let turns = 0, extended = false, hinted = false, skipped = false, resumed = false, deadStreams = 0;
+  const expectMode = A.difficulty === "easy" ? ["plain"] : ["snip", "muffle", "plain"];
+  for (let guard = 0; guard < 80; guard++){
+    const handover = page.getByRole("button", { name: /^It's with me|roll it$/ });
+    const board = page.getByRole("button", { name: /On to round|Roll the credits/ });
+    const podium = btn("Same crowd again");
+    await Promise.race([handover.waitFor(), board.waitFor(), podium.waitFor()].map(p => p.catch(() => {})));
+    if (await podium.isVisible()) break;
+    if (await board.isVisible()){
+      await page.waitForTimeout(1400);
+      await shot("09-scoreboard");
+      await board.click();
+      await board.waitFor({ state: "detached" });
+      continue;
+    }
+    await shot("03-handover", 1500);
+    await page.evaluate(() => { window.__ttLastMode = null; });
+    await handover.click();
+    await page.getByText("Ears on").waitFor();
+    await shot("04-countdown", 900);
+    const know = btn("I know this one");
+    await know.waitFor();
+    // A dead stream is real life on Saavn: the game says so and offers Skip.
+    for (let tries = 0; ; tries++){
+      const dead = page.getByText("This song won't stream right now");
+      await Promise.race([
+        page.waitForFunction(() => window.__ttLastMode, null, { timeout: 30000 }),
+        dead.waitFor({ timeout: 30000 }),
+      ]);
+      if (!(await dead.isVisible())) break;
+      if (tries === 2) fail("three dead streams in a row");
+      deadStreams++;
+      await page.evaluate(() => { window.__ttLastMode = null; });
+      await btn("Skip this song").click();
+    }
+    const mode = await page.evaluate(() => window.__ttLastMode);
+    if (!expectMode.includes(mode)) fail(`turn ${turns}: mode ${mode} not in ${expectMode}`);
+    await shot("05-playing", 1200);
+    if (turns === 2 && !skipped){
+      const who = await page.getByText(/is guessing$/).textContent();
+      await btn("Skip this song").click();
+      await page.getByText("Ears on").waitFor();
+      await know.waitFor();
+      if (await page.getByText(/is guessing$/).textContent() !== who) fail("skip moved the turn on");
+      skipped = true;
+    }
+    if (!extended){
+      await page.getByText("Guess, or hear more").waitFor({ timeout: 20000 });
+      await shot("05b-listened", 200);
+      await btn(/Hear 5s/).click();
+      await page.getByText(/s left/).waitFor({ timeout: 20000 });
+      extended = true;
+    }
+    if (!hinted && turns === 1){
+      await btn(/Hint, costs/).click();
+      await shot("05c-hint", 300);
+      hinted = true;
+    }
+    await know.click();
+    await btn("Show the answer").waitFor();
+    await shot("06-guessing", 700);
+    if (!taken.has("11-menu")){
+      await btn("Game menu").click();
+      await page.getByText("Standings").waitFor();
+      await shot("11-menu", 200);
+      await page.keyboard.press("Escape");
+      await page.getByText("Standings").waitFor({ state: "detached" });
+    }
+    if (turns === 3 && !resumed){
+      await btn("Game menu").click();
+      await btn("Home, keep the game").click();
+      await btn("Resume").click();
+      await handover.click();
+      await know.waitFor();
+      await page.waitForFunction(() => [...document.querySelectorAll("button")].some(b => b.textContent === "I know this one" && !b.disabled), null, { timeout: 25000 });
+      await know.click();
+      resumed = true;
+    }
+    await btn("Show the answer").click();
+    const correct = turns % 3 !== 2;
+    const judge = correct ? btn(/Got it/) : btn("Missed");
+    await judge.waitFor();
+    await page.waitForFunction(() => [...document.querySelectorAll("button")].some(b => /Got it/.test(b.textContent) && !b.disabled), null, { timeout: 5000 });
+    await shot("07-reveal", 100);
+    await judge.click();
+    await shot(correct ? "07b-reveal-correct" : "08-reveal-wrong", 1300);
+    await page.getByRole("button", { name: /Pass it on|box office/ }).click();
+    await btn(/Show the answer|Got it/).first().waitFor({ state: "detached" }).catch(() => {});
+    await page.getByRole("button", { name: /Pass it on|box office/ }).waitFor({ state: "detached" });
+    turns++;
+  }
+  await shot("10-podium", 2600);
+
+  const st = await saved(page);
+  const g = st.game;
+  const cast = g.cast;
+  const expectedTurns = Number(A.rounds) * cast.length;
+  if (!g.finished) fail("game not marked finished");
+  if (g.history.length !== expectedTurns) fail(`history ${g.history.length} != ${expectedTurns}`);
+  for (const c of cast){
+    const sum = g.history.filter(h => h.id === c.id).reduce((n, h) => n + h.points, 0);
+    if (sum !== c.score) fail(`${c.name}: score ${c.score} != history sum ${sum}`);
+  }
+  if (g.history.some(h => h.points !== 0 && (h.points < 10 || h.points > 120))) fail("points out of range");
+  if (A.mode === "teams" && !cast.some(c => c.members.length)) fail("team members lost");
+  const text = await page.locator("body").innerText();
+  if (!/takes it|tie/.test(text)) fail("podium headline missing");
+  if (errors.length) fail("page errors: " + errors.join(" | "));
+  if (overflow.length) fail("screens scroll at this size: " + overflow.join(", "));
+  if (!skipped || !resumed) fail("skip or home/resume path not exercised");
+  console.log("PASS", JSON.stringify(A), `turns=${turns}`, cast.map(c => `${c.name}=${c.score}`).join(" "), `source=${g.source}`, `deadStreams=${deadStreams}`);
+} catch (e){
+  exit = 1;
+  console.log("FAIL", JSON.stringify(A), e.message.split("\n").slice(0, 12).join(" / "));
+  if (shotsDir) await page.screenshot({ path: path.join(shotsDir, `${A.profile}-FAIL.png`) }).catch(() => {});
+} finally {
+  await browser.close();
+  server?.close();
+  process.exit(exit);
+}

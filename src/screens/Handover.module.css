@@ -1,0 +1,54 @@
+.wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 18px;
+}
+
+.eyebrow {
+  composes: eyebrow from global;
+  color: var(--bulb);
+  text-align: center;
+}
+
+.name {
+  composes: display from global;
+  font-size: clamp(44px, 14vw, 64px);
+  color: var(--vermilion);
+  line-height: 1.05;
+  word-break: break-word;
+}
+
+.meta {
+  margin-top: 8px;
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--teal);
+}
+
+.note {
+  text-align: center;
+  text-wrap: balance;
+  color: var(--cream-dim);
+  font-size: 15px;
+}
+
+.prev {
+  align-self: center;
+  padding: 4px 10px;
+  border: 1px dashed var(--cream-shade);
+  color: var(--cream-shade);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.holder {
+  margin-top: 4px;
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--ink);
+}

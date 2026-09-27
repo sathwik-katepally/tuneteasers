@@ -1,0 +1,96 @@
+.viz {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 4px;
+  height: 58px;
+  padding: 6px 10px;
+  background: var(--ink);
+  border-top: 3px solid var(--ink);
+  flex: none;
+}
+
+.bar {
+  position: relative;
+}
+
+.layer {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 3px;
+}
+
+.dot {
+  flex: 1;
+  border-radius: 50%;
+  background: var(--bulb-off);
+}
+
+.lit {
+  background: var(--bulb);
+}
+
+.hot {
+  background: var(--bulb-hot);
+}
+
+.red {
+  background: var(--vermilion);
+}
+
+.level {
+  clip-path: inset(100% 0 0 0);
+}
+
+.on .level {
+  animation: eq0 var(--d) steps(1) var(--o) infinite;
+}
+
+.on .bar:nth-child(3n + 1) .level {
+  animation-name: eq1;
+}
+
+.on .bar:nth-child(3n + 2) .level {
+  animation-name: eq2;
+}
+
+@keyframes eq0 {
+  0% { clip-path: inset(50% 0 0 0); }
+  20% { clip-path: inset(17% 0 0 0); }
+  40% { clip-path: inset(67% 0 0 0); }
+  60% { clip-path: inset(33% 0 0 0); }
+  80% { clip-path: inset(0 0 0 0); }
+}
+
+@keyframes eq1 {
+  0% { clip-path: inset(33% 0 0 0); }
+  25% { clip-path: inset(67% 0 0 0); }
+  50% { clip-path: inset(17% 0 0 0); }
+  75% { clip-path: inset(50% 0 0 0); }
+}
+
+@keyframes eq2 {
+  0% { clip-path: inset(67% 0 0 0); }
+  17% { clip-path: inset(33% 0 0 0); }
+  33% { clip-path: inset(50% 0 0 0); }
+  50% { clip-path: inset(0 0 0 0); }
+  67% { clip-path: inset(33% 0 0 0); }
+  83% { clip-path: inset(83% 0 0 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .on .level,
+  .on .bar:nth-child(n) .level {
+    animation: none;
+    clip-path: inset(50% 0 0 0);
+  }
+}
+
+@media (max-height: 760px) {
+  .viz {
+    height: 44px;
+    padding: 5px 10px;
+  }
+}

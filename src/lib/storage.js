@@ -1,20 +1,13 @@
-/* Persistence: auto-save on every change, auto-resume on load.
-   Everything is device-local (localStorage) — there are no accounts. */
-import { ERAS, DIFFICULTIES } from "./constants.js";
+/* Device-local stores (localStorage), there are no accounts: track
+   sanitization, the recent-play cooldown and the blocked-artist list.
+   The saved game itself lives in save.ts. */
+import { DIFFICULTIES } from "./constants.js";
 import { songKey, safeUrl } from "./utils.js";
 
-const LS_KEY = "tuneteasers_v6";
 const LS_PLAYED = "tt_played";   // { titleKey: lastPlayedMs } — device-local recent-play cooldown
 const LS_BLOCKED = "tt_blocked"; // [ artistName ] — device-local "never play this artist" list
 const lsGet = k => { try { return JSON.parse(localStorage.getItem(k)); } catch(e){ return null; } };
 const lsSet = (k,v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch(e){} };
-
-export const DEFAULTS = {
-  screen: "setup",
-  settings: { mix:"both", sound:"inst", snippetLen:10, eras:[...ERAS], difficulty:"mixed" },
-  players: [{name:"Player 1",score:0},{name:"Player 2",score:0}],
-  game: null, // { queue, trackIdx, turn, round, totalSongs, source }
-};
 
 export function sanitizeTrack(t){
   const stream = safeUrl(t && t.stream); if (!stream) return null;
@@ -31,41 +24,9 @@ export function sanitizeTrack(t){
     ...(DIFFICULTIES.includes(t.tier) && t.tier !== "mixed" ? { tier: t.tier } : {}),
     // verified instrumental-window start (seconds), when the snips index vouched for it
     ...(Number.isFinite(t.snip) ? { snip: Math.max(0, Math.floor(t.snip)) } : {}),
+    ...(t.music ? { music: String(t.music).slice(0,120) } : {}),
   };
 }
-
-export function loadPersisted(){
-  const raw = lsGet(LS_KEY);
-  if (!raw) return DEFAULTS;
-  const s = { ...DEFAULTS };
-  const set = raw.settings || {};
-  const eras = Array.isArray(set.eras) ? ERAS.filter(e=>set.eras.includes(e)) : [];
-  s.settings = {
-    mix: ["bolly","telugu","both"].includes(set.mix) ? set.mix : "both",
-    sound: ["inst","full"].includes(set.sound) ? set.sound : "inst",
-    snippetLen: [5,10,15].includes(set.snippetLen) ? set.snippetLen : 10,
-    eras: eras.length ? eras : [...ERAS],
-    difficulty: DIFFICULTIES.includes(set.difficulty) ? set.difficulty : "mixed",
-  };
-  if (Array.isArray(raw.players) && raw.players.length)
-    s.players = raw.players.slice(0,8).map(p=>({ name:String(p.name||"Player").slice(0,24), score:Math.max(0, Math.round((parseFloat(p.score)||0)*2)/2) }));
-  if (raw.game && Array.isArray(raw.game.queue)){
-    const queue = raw.game.queue.map(sanitizeTrack).filter(Boolean);
-    const trackIdx = Math.max(0, parseInt(raw.game.trackIdx)||0);
-    if (queue.length && trackIdx < queue.length){
-      s.game = {
-        queue, trackIdx,
-        turn: Math.min(Math.max(0, parseInt(raw.game.turn)||0), s.players.length-1),
-        round: Math.max(1, parseInt(raw.game.round)||1),
-        totalSongs: queue.length,
-        source: ["corpus","saavn","catalog","live"].includes(raw.game.source) ? raw.game.source : "catalog",
-      };
-      // Screen stays "setup": the home page offers a Resume card instead of jumping straight in.
-    }
-  }
-  return s;
-}
-export const persist = s => lsSet(LS_KEY, { settings:s.settings, players:s.players, game:s.game });
 
 export const PLAY_COOLDOWN = 7*24*3600*1000; // a song heard on this device sits out for a week
 export function loadPlayed(){

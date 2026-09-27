@@ -1,176 +1,300 @@
-import { useState, useEffect } from "react";
-import { ERAS } from "./lib/constants.js";
-import { loadPersisted, persist, markPlayed, loadBlocked, saveBlocked, normArtist, isBlocked } from "./lib/storage.js";
-import { buildCrate } from "./lib/crate.js";
+import { useEffect, useState } from "react";
+import { AnimatePresence, LazyMotion, MotionConfig, domAnimation } from "motion/react";
+import * as m from "motion/react-m";
+import { loadSaved, save } from "./lib/save";
+import { CLIP_STEPS, DIFFICULTY, hookOffset, pointsNow } from "./lib/config";
+import { markPlayed, loadBlocked, saveBlocked, normArtist, isBlocked } from "./lib/storage.js";
+import { buildCrate as buildCrateJs } from "./lib/crate.js";
 import { engine, keepAwake } from "./lib/engine.js";
 import { log } from "./lib/log.js";
-import { Setup, Loading } from "./screens/Setup";
-import { Game } from "./screens/Game";
-import { Done } from "./screens/Done";
-import type { AppState, Phase, Settings, Snippet, Track } from "./types";
+import { displayTitle } from "./lib/utils.js";
+import { Theatre } from "./components/Theatre";
+import { Setup } from "./screens/Setup";
+import { Loading } from "./screens/Loading";
+import { Handover } from "./screens/Handover";
+import { Countdown } from "./screens/Countdown";
+import { Playing } from "./screens/Playing";
+import { Guessing } from "./screens/Guessing";
+import { Reveal } from "./screens/Reveal";
+import { Scoreboard } from "./screens/Scoreboard";
+import { Podium } from "./screens/Podium";
+import type { AppState, CastMember, Difficulty, GameState, Mode, Phase, RosterEntry, Settings, Track, Turn, Verdict } from "./types";
+
+type Crate = { error?: string; queue?: Track[]; source?: string };
+const buildCrate = buildCrateJs as (mix: string, eras: string[], sound: string, difficulty: Difficulty) => Promise<Crate>;
+
+const freshTurn = (): Turn => ({ rung: 0, clipEndedAt: null, clipStartedAt: 0, playKey: 0, hint: false, locked: 0 });
+const primaryArtistOf = (t: Track | null) => (t ? String(t.artist || "").split(",")[0].trim() : "");
 
 export function App(){
-  const [state, setState] = useState<AppState>(() => loadPersisted() as AppState);
-  const [phase, setPhase] = useState<Phase>("ready");
+  const [state, setState] = useState<AppState>(loadSaved);
+  const [phase, setPhase] = useState<Phase>("handover");
+  const [turn, setTurn] = useState<Turn>(freshTurn);
+  const [revealed, setRevealed] = useState<Track | null>(null);
+  const [verdict, setVerdict] = useState<Verdict | null>(null);
+  const [boardRound, setBoardRound] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [note, setNote] = useState("");
-  const [showBoard, setShowBoard] = useState(false);
-  const [snip, setSnip] = useState<Snippet>({ end:0, lastSecs:10, playSecs:0 });
-  const [blocked, setBlocked] = useState(loadBlocked);
-  const [hint, setHint] = useState(false);
+  const [blocked, setBlocked] = useState<string[]>(loadBlocked);
 
-  useEffect(()=>{ persist(state); }, [state]);
-  useEffect(()=>{
-    keepAwake(state.screen === "game");
-    const vis = ()=>{ if (document.visibilityState==="visible") keepAwake(state.screen==="game"); };
+  useEffect(() => { save(state); }, [state]);
+  useEffect(() => {
+    const on = state.screen === "game";
+    keepAwake(on);
+    const vis = () => { if (document.visibilityState === "visible") keepAwake(on); };
     document.addEventListener("visibilitychange", vis);
-    return ()=>document.removeEventListener("visibilitychange", vis);
+    return () => document.removeEventListener("visibilitychange", vis);
   }, [state.screen]);
 
   const S = state.settings;
   const g = state.game;
-  const track = g ? g.queue[g.trackIdx] : null;
+  const track = g ? g.queue[g.trackIdx] ?? null : null;
+  const who = g ? g.cast[g.turn] : null;
+  const plain = g ? DIFFICULTY[g.difficulty].sound === "full" : false;
 
-  const upSettings = (patch: Partial<Settings>) => setState(st=>({ ...st, settings:{ ...st.settings, ...patch } }));
-  const toggleEra = (e: string) => upSettings({ eras: S.eras.includes(e)
-    ? (S.eras.length>1 ? S.eras.filter(x=>x!==e) : S.eras) // never allow zero eras
-    : ERAS.filter(x=>S.eras.includes(x) || x===e) });
-  const renamePlayer = (i: number, name: string) => setState(st=>({ ...st, players: st.players.map((q,j)=> j===i ? {...q, name:name.slice(0,24)} : q) }));
-  const removePlayer = (i: number) => setState(st=>({ ...st, players: st.players.filter((_,j)=>j!==i) }));
-  const addPlayer = () => setState(st=>({ ...st, players:[...st.players, {name:"Player "+(st.players.length+1), score:0}] }));
+  // Warm the next song while this one plays; once a turn is judged the queue
+  // has already moved on, so the song at trackIdx is the next one up.
+  const upcoming = g && state.screen === "game" ? g.queue[g.trackIdx + (verdict || phase === "board" ? 0 : 1)] : undefined;
+  useEffect(() => { if (upcoming) engine.prefetch(upcoming, plain); }, [upcoming?.stream]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function startGame(){
+  const upSettings = (patch: Partial<Settings>) => setState(st => ({ ...st, settings: { ...st.settings, ...patch } }));
+  const setRoster = (mode: Mode, list: RosterEntry[]) => setState(st => (mode === "teams" ? { ...st, teams: list } : { ...st, players: list }));
+
+  function resetTurn(){
+    setTurn(freshTurn()); setVerdict(null); setRevealed(null); setNote("");
+  }
+
+  async function startGame(cast?: CastMember[]){
     engine.stop();
     setLoading(true); setError("");
-    const crate = await buildCrate(S.mix, S.eras, S.sound) as { error?: string; queue?: Track[]; source?: string };
+    const mode = cast ? g?.mode ?? S.mode : S.mode;
+    const roster = cast ?? (mode === "teams" ? state.teams : state.players);
+    const crate = await buildCrate(S.mix, S.eras, DIFFICULTY[S.difficulty].sound, S.difficulty);
     setLoading(false);
-    if (crate.error){
-      setError(crate.error==="thin"
-        ? "Not enough songs match your filters. Widen the era mix or unblock some artists."
-        : "Couldn't load enough songs. Check your connection and try again.");
-      setState(st=>({ ...st, screen:"setup" }));
+    if (crate.error || !crate.queue){
+      setError(crate.error === "thin"
+        ? "Not enough songs match your picks. Try more eras, or unblock a few artists."
+        : "Couldn't load songs. Check your connection and try again.");
+      setState(st => ({ ...st, screen: "setup" }));
       return;
     }
-    setPhase("ready"); setNote(""); setHint(false); setSnip({ end:0, lastSecs:S.snippetLen, playSecs:0 });
-    const queue = crate.queue!;
-    setState(st=>({ ...st, screen:"game",
-      players: st.players.map(p=>({ ...p, score:0 })),
-      game:{ queue, trackIdx:0, turn:0, round:1, totalSongs:queue.length, source:crate.source! } }));
-    if (S.sound==="inst") engine.prefetch(queue[0]);
+    const game: GameState = {
+      queue: crate.queue, trackIdx: 0, turn: 0, round: 1, totalRounds: S.rounds,
+      totalSongs: crate.queue.length, source: crate.source ?? "corpus",
+      mode, difficulty: S.difficulty,
+      cast: roster.map(r => ({ id: r.id, name: r.name, members: [...r.members], score: 0 })),
+      history: [], finished: false,
+    };
+    resetTurn();
+    setPhase("handover");
+    setState(st => ({ ...st, screen: "game", game }));
   }
 
-  async function playSnippet(secs: number, mode: "fresh" | "replay" | "extend"){
+  function primeCurrent(t: Track | null = track){
+    engine.prime(t, plain);
+    resetTurn();
+  }
+
+  async function playClip(rung: number, replay = false){
     if (!track) return;
-    engine.ac(); // unlock inside the tap
-    const offset = mode==="extend" ? snip.end : 0;
-    const nextSnip = { end: offset + secs, lastSecs: mode==="extend" ? snip.lastSecs : secs, playSecs: secs };
+    engine.ac();
+    const secs = CLIP_STEPS[rung];
     setNote("");
-    const done = ()=>setPhase("guessing");
-    log("snippet", { how: mode, secs, sound: S.sound, title: String(track.title).slice(0, 28) });
-    if (S.sound === "inst"){
-      setPhase("cueing"); // brief: only while the element buffers (12s stall guard inside the engine)
-      const r = await engine.playSnippet(track, offset, secs, done);
-      if (r === "superseded") return;         // user did something newer; obey them
-      if (r === "snip" || r === "muffle"){ setSnip(nextSnip); setPhase("playing"); return; }
-      if (r === "plain"){ // muffle wiring failed; the engine already played it as-is
-        setNote("Couldn't process this one - playing it as-is.");
-        setSnip(nextSnip); setPhase("playing"); return;
-      }
-      log("muffle-fallback", { title: String(track.title).slice(0, 28) }); // vocals will be audible
-      setNote("Couldn't process this one - playing it as-is.");
+    setTurn(t => ({ ...t, rung, clipEndedAt: replay ? t.clipEndedAt : null }));
+    const started = () => {
+      setTurn(t => ({ ...t, clipStartedAt: Date.now(), playKey: t.playKey + 1 }));
+      // A refused play() reports back before playSnippet resolves; keep the tap prompt.
+      setPhase(p => (p === "blocked" ? p : "playing"));
+    };
+    const ended = () => {
+      setTurn(t => ({ ...t, clipEndedAt: t.clipEndedAt ?? Date.now() }));
+      setPhase("listened");
+    };
+    const failed = () => { setNote("This song won't stream right now. Skip it, or show the answer."); ended(); };
+    const cb = { onStart: started, onEnd: ended, onErr: failed, onBlocked: () => setPhase("blocked") };
+    log("snippet", { rung, secs, sound: plain ? "full" : "inst", title: String(track.title).slice(0, 28) });
+    setPhase("cueing");
+    if (plain){
+      engine.playElement(track.stream, hookOffset(track), secs, cb);
+      return;
     }
-    setSnip(nextSnip);
-    setPhase("playing");
-    engine.playElement(track.stream, offset, secs, done,
-      ()=>{ setNote("This track won't stream right now — skip it or reveal."); setPhase("guessing"); });
+    const r = await engine.playSnippet(track, 0, secs, cb);
+    if (r === "superseded") return;
+    if (r === "snip" || r === "muffle"){ started(); return; }
+    setNote("Couldn't take the vocals out of this one, so you'll hear it as it is.");
+    if (r === "plain"){ started(); return; }
+    log("muffle-fallback", { title: String(track.title).slice(0, 28) });
+    engine.playElement(track.stream, 0, secs, cb);
   }
 
-  function revealTrack(){
+  function knowIt(){
+    engine.stop();
+    setTurn(t => ({ ...t, locked: pointsNow(t.rung, t.clipEndedAt, t.hint) }));
+    setPhase("guessing");
+  }
+
+  function showAnswer(){
     if (!track) return;
     setNote("");
-    const offset = track.duration > 35 ? Math.min(45, Math.max(0, track.duration - 60)) : 0;
-    engine.playElement(track.stream, offset, 0, null,
-      ()=>setNote("Couldn't stream the full song."));
-    setPhase("revealed");
+    engine.playElement(track.stream, hookOffset(track), 0, { onErr: () => setNote("Couldn't stream the full song.") });
+    setRevealed(track);
+    setVerdict(null);
+    setPhase("reveal");
   }
 
-  function nextRound(gotIt: boolean | null){
-    engine.stop();
-    if (track) markPlayed(track.title);
-    const pts = hint ? 0.5 : 1; // a hint halves the payout
-    setPhase("ready"); setNote(""); setShowBoard(false); setHint(false);
-    setSnip(s=>({ ...s, end:0, playSecs:0 }));
-    setState(st=>{
-      const gg = st.game!;
-      const players = gotIt===true
-        ? st.players.map((p,i)=> i===gg.turn ? { ...p, score:p.score+pts } : p)
-        : st.players;
-      const turn = gotIt===null ? gg.turn : (gg.turn+1) % players.length; // skip keeps the same player
-      const round = (gotIt!==null && turn===0) ? gg.round+1 : gg.round;
-      const trackIdx = gg.trackIdx + 1;
-      if (trackIdx >= gg.queue.length) return { ...st, players, screen:"done", game:null };
-      return { ...st, players, game:{ ...gg, trackIdx, turn, round } };
-    });
+  function judge(result: "correct" | "wrong"){
+    if (!g || !who || !revealed || verdict) return;
+    markPlayed(revealed.title);
+    const points = result === "correct" ? turn.locked : 0;
+    const cast = g.cast.map((c, i) => (i === g.turn ? { ...c, score: c.score + points } : c));
+    const trackIdx = g.trackIdx + 1;
+    const nextTurn = (g.turn + 1) % cast.length;
+    const roundOver = nextTurn === 0;
+    const finished = (roundOver && g.round >= g.totalRounds) || trackIdx >= g.queue.length;
+    setVerdict({ name: who.name, result, points, total: who.score + points, roundOver: roundOver || finished, finished, completedRound: g.round });
+    setBoardRound(g.round);
+    if (result === "correct") setTimeout(() => engine.sfx("stamp"), 90);
+    else engine.sfx("projector");
+    setState(st => ({ ...st, game: {
+      ...g, cast, trackIdx, finished,
+      turn: finished ? g.turn : nextTurn,
+      round: roundOver && !finished ? g.round + 1 : g.round,
+      history: [...g.history, { id: who.id, song: displayTitle(revealed.title), points, round: g.round }],
+    } }));
   }
-  useEffect(()=>{ // warm the next track's stream behind the current one (one preload="auto" element)
-    if (state.screen!=="game" || !track || S.sound!=="inst") return;
-    const next = g!.queue[g!.trackIdx+1];
-    if (next) engine.prefetch(next);
-  }, [g && g.trackIdx, state.screen]);
+
+  function passOn(){
+    engine.stop();
+    const toBoard = !!verdict?.roundOver;
+    resetTurn();
+    setPhase(toBoard ? "board" : "handover");
+  }
+
+  function skipSong(){
+    if (!g || !track) return;
+    engine.stop();
+    markPlayed(track.title);
+    const trackIdx = g.trackIdx + 1;
+    if (trackIdx >= g.queue.length){
+      setBoardRound(g.round);
+      setState(st => ({ ...st, game: { ...g, trackIdx: g.trackIdx, finished: true } }));
+      resetTurn();
+      setPhase("board");
+      return;
+    }
+    log("skip", { title: String(track.title).slice(0, 28) });
+    primeCurrent(g.queue[trackIdx]);
+    setState(st => ({ ...st, game: { ...g, trackIdx } }));
+    setPhase("countdown");
+  }
+
+  function leaveBoard(){
+    if (g?.finished){
+      engine.ac();
+      engine.sfx("fanfare");
+      setState(st => ({ ...st, screen: "done" }));
+    } else setPhase("handover");
+  }
 
   function blockArtist(){
-    if (!track) return;
-    const primary = String(track.artist||"").split(",")[0].trim();
+    const primary = primaryArtistOf(revealed);
     if (!primary) return;
     const list = loadBlocked();
-    const next = list.some(a=>normArtist(a)===normArtist(primary)) ? list : [...list, primary];
+    const next = list.some((a: string) => normArtist(a) === normArtist(primary)) ? list : [...list, primary];
     saveBlocked(next);
     setBlocked(next);
     const set = new Set(next.map(normArtist));
-    setState(st=>{ // drop the blocked artist's songs still waiting in this crate
-      const gg = st.game; if (!gg) return st;
-      const queue = gg.queue.filter((t,i)=> i<=gg.trackIdx || !isBlocked(t,set));
-      return { ...st, game:{ ...gg, queue, totalSongs:queue.length } };
-    });
+    const gg = state.game;
+    if (!gg) return;
+    // Songs already played stay in the queue; only the ones still waiting are dropped.
+    const queue = gg.queue.filter((t, i) => i < gg.trackIdx || !isBlocked(t, set));
+    const ranOut = gg.trackIdx >= queue.length;
+    if (ranOut) setVerdict(v => (v ? { ...v, roundOver: true, finished: true } : v));
+    setState(st => ({ ...st, game: { ...gg, queue, totalSongs: queue.length, finished: gg.finished || ranOut } }));
   }
   function unblockArtist(name: string){
-    const next = loadBlocked().filter(a=>normArtist(a)!==normArtist(name));
+    const next = loadBlocked().filter((a: string) => normArtist(a) !== normArtist(name));
     saveBlocked(next);
     setBlocked(next);
   }
 
-  function endGame(){
-    if (!confirm("End this game? Scores will be cleared.")) return;
-    engine.stop();
-    setState(st=>({ ...st, screen:"setup", game:null }));
-  }
-  function goHome(){ // back to the home page; the game keeps running and can be resumed from there
+  function goHome(){
     log("go-home", {});
     engine.stop();
-    setPhase("ready"); setNote(""); setShowBoard(false);
-    setSnip(s=>({ ...s, end:0, playSecs:0 }));
-    setState(st=>({ ...st, screen:"setup" }));
+    resetTurn();
+    setPhase("handover");
+    setState(st => ({ ...st, screen: "setup", game: st.game?.finished ? null : st.game }));
+  }
+  function endGame(){
+    engine.stop();
+    resetTurn();
+    setState(st => ({ ...st, screen: "setup", game: null }));
   }
 
-  if (state.screen === "setup"){
-    if (loading) return <Loading />;
-    return <Setup error={error} S={S} upSettings={upSettings} toggleEra={toggleEra}
-      players={state.players} renamePlayer={renamePlayer} removePlayer={removePlayer} addPlayer={addPlayer}
-      blocked={blocked} unblockArtist={unblockArtist} startGame={startGame}
-      savedGame={g} resumeGame={()=>setState(st=>({ ...st, screen:"game" }))}
-      discardGame={()=>setState(st=>({ ...st, game:null, players: st.players.map(p=>({ ...p, score:0 })) }))} />;
-  }
-  if (state.screen === "done"){
-    if (loading) return <Loading />;
-    return <Done players={state.players} startGame={startGame}
-      toSetup={()=>setState(st=>({ ...st, screen:"setup" }))} />;
+  const holder = who && who.members.length && g ? who.members[(g.round - 1) % who.members.length] : "";
+  const primaryArtist = primaryArtistOf(revealed);
+  const artistBlocked = !!primaryArtist && blocked.some(a => normArtist(a) === normArtist(primaryArtist));
+
+  let key: string, screen: React.ReactNode, meta = "Now showing";
+  if (loading){
+    key = "loading";
+    screen = <Loading settings={S} />;
+  } else if (state.screen === "setup" || !g){
+    key = "setup";
+    const saved = g && !g.finished ? g : null;
+    screen = <Setup error={error} settings={S} upSettings={upSettings} players={state.players} teams={state.teams} setRoster={setRoster}
+      blocked={blocked} unblockArtist={unblockArtist} startGame={() => startGame()} savedGame={saved}
+      resumeGame={() => { resetTurn(); setPhase("handover"); setState(st => ({ ...st, screen: "game" })); }}
+      discardGame={() => setState(st => ({ ...st, game: null }))} />;
+  } else if (state.screen === "done"){
+    key = "done"; meta = "The end";
+    screen = <Podium cast={g.cast} onAgain={() => startGame(g.cast)} onNewShow={() => setState(st => ({ ...st, screen: "setup", game: null }))} />;
+  } else {
+    const shownRound = phase === "board" ? boardRound : verdict ? verdict.completedRound : g.round;
+    meta = `Round ${Math.min(shownRound, g.totalRounds)} of ${g.totalRounds}`;
+    switch (phase){
+      case "handover":
+        key = `handover-${g.trackIdx}`;
+        screen = <Handover game={g} holder={holder} onPrime={() => primeCurrent()} onHanded={() => setPhase("countdown")} />;
+        break;
+      case "countdown":
+        key = "countdown";
+        screen = <Countdown onTick={n => engine.sfx(n > 0 ? "tick" : "roll")} onDone={() => playClip(0)} />;
+        break;
+      case "guessing":
+        key = "guessing";
+        screen = <Guessing name={who!.name} turn={turn} onShow={showAnswer} />;
+        break;
+      case "reveal":
+        key = "reveal";
+        screen = <Reveal track={revealed ?? track!} name={verdict?.name ?? who!.name} verdict={verdict} worth={turn.locked} note={note}
+          onJudge={judge} onNext={passOn} primaryArtist={primaryArtist} artistBlocked={artistBlocked} onBlockArtist={blockArtist} />;
+        break;
+      case "board":
+        key = "board";
+        screen = <Scoreboard game={g} round={boardRound} onSettle={() => engine.sfx("flaps")} onNext={leaveBoard} />;
+        break;
+      default:
+        key = "playing";
+        screen = <Playing name={who!.name} track={track!} phase={phase} turn={turn} note={note}
+          onPlay={playClip} onKnow={knowIt} onHint={() => setTurn(t => ({ ...t, hint: true }))} onSkip={skipSong} />;
+    }
   }
 
-  const primaryArtist = track ? String(track.artist||"").split(",")[0].trim() : "";
-  const curArtistBlocked = !!primaryArtist && blocked.some(a=>normArtist(a)===normArtist(primaryArtist));
-  return <Game g={g!} players={state.players} S={S} track={track} phase={phase} snip={snip} note={note}
-    hint={hint} useHint={()=>setHint(true)} showBoard={showBoard} toggleBoard={()=>setShowBoard(v=>!v)}
-    playSnippet={playSnippet} revealTrack={revealTrack} nextRound={nextRound}
-    blockArtist={blockArtist} primaryArtist={primaryArtist} curArtistBlocked={curArtistBlocked} endGame={endGame} goHome={goHome} />;
+  const inGame = state.screen === "game" && !!g && !loading;
+  useEffect(() => { window.scrollTo(0, 0); }, [key]);
+  return (
+    <LazyMotion features={domAnimation} strict>
+      <MotionConfig reducedMotion="user">
+        <Theatre meta={meta} game={inGame ? g : null} onHome={goHome} onEnd={endGame}>
+          <AnimatePresence mode="wait" initial={false}>
+            <m.div key={key} className="screen" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.22 }}>
+              {screen}
+            </m.div>
+          </AnimatePresence>
+        </Theatre>
+      </MotionConfig>
+    </LazyMotion>
+  );
 }

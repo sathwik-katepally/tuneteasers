@@ -1,0 +1,116 @@
+.frame {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.side {
+  position: absolute;
+  display: flex;
+  justify-content: space-between;
+}
+
+.top,
+.bottom {
+  left: var(--inset);
+  right: var(--inset);
+  flex-direction: row;
+}
+
+.top {
+  top: var(--inset);
+  transform: translateY(-50%);
+}
+
+.bottom {
+  bottom: var(--inset);
+  transform: translateY(50%);
+}
+
+.left,
+.right {
+  top: calc(var(--inset) + var(--gap));
+  bottom: calc(var(--inset) + var(--gap));
+  flex-direction: column;
+}
+
+.left {
+  left: var(--inset);
+  transform: translateX(-50%);
+}
+
+.right {
+  right: var(--inset);
+  transform: translateX(50%);
+}
+
+.row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.bulb {
+  width: var(--size, 10px);
+  height: var(--size, 10px);
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, #7a5432, var(--bulb-off) 70%);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.45);
+  flex: none;
+}
+
+.lit {
+  background: radial-gradient(circle at 45% 40%, var(--bulb-hot), var(--bulb) 65%, #e0a63a);
+  box-shadow: 0 0 6px 2px rgba(255, 211, 107, 0.55), inset 0 0 0 1px rgba(120, 70, 0, 0.35);
+}
+
+.chase {
+  animation: chase 0.9s steps(1) infinite;
+  animation-delay: calc(var(--i) * -0.3s);
+}
+
+.fast {
+  animation: chase 0.36s steps(1) infinite;
+  animation-delay: calc(var(--i) * -0.12s);
+}
+
+.twinkle {
+  animation: twinkle 2.4s ease-in-out infinite;
+  animation-delay: calc(var(--t) * -0.22s);
+}
+
+@keyframes chase {
+  0%,
+  33% {
+    background: radial-gradient(circle at 45% 40%, var(--bulb-hot), var(--bulb) 65%, #e0a63a);
+    box-shadow: 0 0 6px 2px rgba(255, 211, 107, 0.55), inset 0 0 0 1px rgba(120, 70, 0, 0.35);
+  }
+  34%,
+  100% {
+    background: radial-gradient(circle at 40% 35%, #7a5432, var(--bulb-off) 70%);
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.45);
+  }
+}
+
+@keyframes twinkle {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+  50% {
+    filter: brightness(0.7);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chase,
+  .fast,
+  .twinkle {
+    animation: none;
+  }
+  .chase,
+  .fast {
+    background: radial-gradient(circle at 45% 40%, var(--bulb-hot), var(--bulb) 65%, #e0a63a);
+    box-shadow: 0 0 6px 2px rgba(255, 211, 107, 0.55), inset 0 0 0 1px rgba(120, 70, 0, 0.35);
+  }
+}
