@@ -1,0 +1,142 @@
+.board {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: #0d0605;
+  border: 3px solid var(--cream-shade);
+  box-shadow: inset 0 0 0 2px var(--ink), var(--shadow-hard);
+  padding: 14px 12px;
+  gap: 10px;
+}
+
+.head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 0 4px 10px;
+  border-bottom: 2px solid var(--cream-shade);
+}
+
+.title {
+  composes: display from global;
+  font-size: 34px;
+  color: var(--bulb);
+  letter-spacing: 0.04em;
+}
+
+.after {
+  composes: eyebrow from global;
+  color: var(--cream-dim);
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 34px 1fr auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 6px;
+  background: #170a08;
+  border: 1px solid #2f1a14;
+}
+
+.rowLead {
+  border-color: var(--bulb);
+}
+
+.rank {
+  composes: display from global;
+  font-size: 26px;
+  color: var(--cream-dim);
+  text-align: center;
+}
+
+.rankLead {
+  color: var(--bulb);
+}
+
+.name {
+  font-weight: 700;
+  font-size: 17px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--cream);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.delta {
+  min-width: 46px;
+  text-align: right;
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--teal-lift);
+}
+
+.deltaZero {
+  color: var(--cream-shade);
+}
+
+.log {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+  padding: 10px 6px 4px;
+  border-top: 1px dashed #3a221b;
+}
+
+.logHead {
+  composes: eyebrow from global;
+  font-size: 11px;
+  color: var(--cream-shade);
+  margin-bottom: 4px;
+}
+
+.logRow {
+  display: grid;
+  grid-template-columns: 76px 1fr auto;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--cream-dim);
+}
+
+.logName {
+  font-weight: 700;
+  color: var(--cream);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.logSong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.logPts {
+  font-weight: 700;
+  color: var(--teal-lift);
+}
+
+.logPts.deltaZero {
+  font-weight: 400;
+  color: var(--cream-shade);
+}
+
+.foot {
+  margin-top: auto;
+  font-size: 13px;
+  color: var(--cream-shade);
+  text-align: center;
+}

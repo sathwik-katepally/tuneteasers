@@ -1,0 +1,45 @@
+.seg {
+  position: relative;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  border: 2px solid var(--ink);
+  background: var(--cream);
+  color: var(--ink);
+}
+
+.opt {
+  position: relative;
+  z-index: 1;
+  min-height: 42px;
+  padding: 0 4px;
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  transition: color 160ms ease;
+}
+
+.opt + .opt {
+  border-left: 2px solid var(--ink);
+}
+
+.on {
+  color: var(--cream);
+}
+
+.pill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: calc(100% / var(--n));
+  transform: translateX(calc(var(--idx) * 100%));
+  background: var(--vermilion);
+  transition: transform 220ms cubic-bezier(0.3, 0.9, 0.3, 1);
+}
+
+.teal .pill {
+  background: var(--teal);
+}

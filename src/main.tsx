@@ -1,8 +1,12 @@
 import { createRoot } from "react-dom/client";
+import "@fontsource/rozha-one/latin-400.css";
+import "@fontsource/mukta/latin-400.css";
+import "@fontsource/mukta/latin-700.css";
+import "./styles/tokens.css";
+import "./styles/global.css";
 import { App } from "./app";
 import { DebugLog } from "./components/DebugLog";
 import { log } from "./lib/log.js";
-import "./styles.css";
 
 // A "boot" with no preceding "pagehide" means the last page instance died
 // without a clean exit (crash / jetsam kill / forced reload).

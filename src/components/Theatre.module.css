@@ -1,0 +1,275 @@
+.theatre {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--maroon);
+}
+
+.marquee {
+  position: relative;
+  z-index: 3;
+  background: var(--ink);
+  color: var(--cream);
+  padding: 12px var(--pad) 12px;
+  border-bottom: 3px solid var(--cream-shade);
+}
+
+.marqueeInner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 1200px;
+  margin: 0 auto;
+  min-height: 34px;
+}
+
+.title {
+  composes: display from global;
+  font-size: 26px;
+  letter-spacing: 0.04em;
+  color: var(--bulb);
+  text-shadow: 2px 2px 0 var(--vermilion-deep);
+  white-space: nowrap;
+}
+
+.marqueeMeta {
+  composes: eyebrow from global;
+  flex: 1;
+  min-width: 0;
+  color: var(--cream-dim);
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bulbsTop,
+.bulbsBottom {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+}
+
+.bulbsTop {
+  top: 3px;
+}
+
+.bulbsBottom {
+  bottom: 3px;
+}
+
+.house {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.curtain {
+  display: none;
+}
+
+.stage {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-height: 0;
+}
+
+.screen {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.seats {
+  display: none;
+}
+
+@media (min-width: 900px) {
+  .marquee {
+    padding: 22px 32px 24px;
+  }
+  .title {
+    font-size: 48px;
+  }
+  .marqueeMeta {
+    font-size: 14px;
+  }
+  .house {
+    position: relative;
+    align-items: stretch;
+    background: var(--maroon-deep);
+  }
+  .curtain {
+    display: block;
+    flex: 1;
+    position: relative;
+    background: repeating-linear-gradient(
+      90deg,
+      var(--vermilion-deep) 0 10px,
+      var(--vermilion) 10px 34px,
+      #ef4a3c 34px 46px,
+      var(--vermilion) 46px 66px,
+      var(--vermilion-deep) 66px 78px
+    );
+    box-shadow: inset 0 -120px 140px -80px rgba(0, 0, 0, 0.75);
+  }
+  .curtain::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    height: 46px;
+    background: var(--vermilion-deep);
+    border-bottom: 4px solid var(--bulb);
+    z-index: 2;
+  }
+  .curtain::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50px;
+    height: 18px;
+    background: radial-gradient(circle at 50% 0, var(--vermilion-deep) 0 16px, transparent 17px) 0 0 / 36px 18px repeat-x;
+    z-index: 2;
+  }
+  .stage {
+    flex: none;
+    width: 560px;
+    min-height: 640px;
+    margin: 0;
+    border-left: 3px solid var(--ink);
+    border-right: 3px solid var(--ink);
+    background: var(--maroon);
+    box-shadow: 0 0 0 6px var(--cream-shade), 0 30px 60px rgba(0, 0, 0, 0.55);
+    z-index: 1;
+  }
+  .seats {
+    display: block;
+    height: 96px;
+    background:
+      radial-gradient(ellipse 34px 30px at 50% 100%, #150807 0 28px, transparent 29px) 0 0 / 72px 40px repeat-x,
+      radial-gradient(ellipse 34px 30px at 50% 100%, #1d0c0a 0 28px, transparent 29px) 36px 24px / 72px 40px repeat-x,
+      radial-gradient(ellipse 34px 30px at 50% 100%, #24100d 0 28px, transparent 29px) 0 52px / 72px 40px repeat-x,
+      var(--maroon-deep);
+    border-top: 3px solid var(--ink);
+  }
+}
+
+.menuWrap {
+  position: relative;
+  flex: none;
+}
+
+.menuBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  color: var(--bulb);
+  border: 2px solid var(--cream-shade);
+  background: var(--maroon-deep);
+}
+
+.menu {
+  composes: grain from global;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 10px);
+  z-index: 20;
+  width: min(300px, calc(100vw - 32px));
+  padding: 14px;
+  background: var(--cream);
+  color: var(--ink);
+  border: 2px solid var(--ink);
+  box-shadow: var(--shadow-hard);
+}
+
+.menuHead {
+  composes: eyebrow from global;
+  color: var(--teal);
+  margin-bottom: 6px;
+}
+
+.standings {
+  margin: 0 0 14px;
+  padding: 0;
+  list-style: none;
+  counter-reset: rank;
+}
+
+.standings li {
+  display: flex;
+  gap: 10px;
+  padding: 5px 0;
+  border-bottom: 1px dashed var(--cream-shade);
+  font-weight: 700;
+  counter-increment: rank;
+}
+
+.standings li::before {
+  content: counter(rank);
+  width: 16px;
+  color: var(--vermilion);
+}
+
+.standings span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.menuActions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.menuActions :global(.btn),
+.confirmRow :global(.btn) {
+  min-height: 48px;
+  font-size: 15px;
+  padding: 0 12px;
+}
+
+.endLink {
+  composes: link from global;
+  color: var(--vermilion);
+}
+
+.confirm p {
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+
+.confirmRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+@media (min-width: 900px) {
+  .menuBtn {
+    width: 42px;
+    height: 42px;
+  }
+}
+
+@media (max-height: 760px) and (max-width: 899px) {
+  .marquee {
+    padding-top: 9px;
+    padding-bottom: 9px;
+  }
+  .title {
+    font-size: 24px;
+  }
+}

@@ -1,0 +1,26 @@
+:root {
+  --maroon: #2a0f0c;
+  --maroon-deep: #1a0806;
+  --maroon-lift: #3d1812;
+  --ink: #1c0b08;
+  --cream: #f4e6c8;
+  --cream-dim: #dcc9a2;
+  --cream-shade: #c4ae86;
+  --vermilion: #d7261e;
+  --vermilion-deep: #a3160f;
+  --bulb: #ffd36b;
+  --bulb-hot: #fff1c9;
+  --bulb-off: #5c3d24;
+  --teal: #0f6e64;
+  --teal-deep: #0a4b44;
+  --teal-lift: #2c9a8d;
+
+  --font-display: 'Rozha One', 'Georgia', 'Times New Roman', serif;
+  --font-body: 'Mukta', system-ui, -apple-system, sans-serif;
+
+  --stage-w: 440px;
+  --pad: 16px;
+  --shadow-hard: 4px 4px 0 var(--ink);
+  --shadow-hard-sm: 2px 2px 0 var(--ink);
+  --safe-b: env(safe-area-inset-bottom, 0px);
+}

@@ -1,0 +1,60 @@
+.stage {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: var(--pad);
+  padding-bottom: calc(var(--pad) + var(--safe-b));
+  min-height: 0;
+}
+
+.actions {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 8px;
+}
+
+.row2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.paper {
+  composes: grain from global;
+  background: var(--cream);
+  color: var(--ink);
+  border: 2px solid var(--ink);
+  box-shadow: var(--shadow-hard);
+}
+
+.eyebrow {
+  composes: eyebrow from global;
+}
+
+.display {
+  composes: display from global;
+}
+
+.center {
+  text-align: center;
+}
+
+.muted {
+  color: var(--cream-dim);
+}
+
+.row2 > .btn,
+.row2 > [class*='btn'] {
+  padding: 0 10px;
+  font-size: 15px;
+  white-space: nowrap;
+}
+
+@media (max-height: 760px) {
+  .stage {
+    gap: 10px;
+  }
+}

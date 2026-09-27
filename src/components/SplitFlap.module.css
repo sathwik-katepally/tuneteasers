@@ -1,0 +1,60 @@
+.board {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.cell {
+  position: relative;
+  width: var(--cell-w, 28px);
+  height: var(--cell-h, 40px);
+  perspective: 300px;
+  background: #0d0605;
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1px #000, 0 1px 0 rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+
+.cell::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 2px;
+  margin-top: -1px;
+  background: #000;
+  z-index: 3;
+}
+
+.char {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-display);
+  font-size: var(--cell-font, 28px);
+  line-height: 1;
+  color: var(--cream);
+  background: linear-gradient(#2a1a14, #1b0e0a 50%, #140a08 50%, #0e0605);
+  transform-origin: 50% 50%;
+  animation: drop 90ms ease-out;
+  backface-visibility: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .char {
+    animation: none;
+  }
+}
+
+@keyframes drop {
+  from {
+    transform: rotateX(-80deg);
+    filter: brightness(1.4);
+  }
+  to {
+    transform: rotateX(0);
+    filter: brightness(1);
+  }
+}

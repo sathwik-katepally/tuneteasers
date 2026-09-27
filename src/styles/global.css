@@ -1,0 +1,251 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--maroon);
+  color: var(--cream);
+  font-family: var(--font-body);
+  font-size: 17px;
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+  -webkit-tap-highlight-color: transparent;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  border: 0;
+  background: none;
+  padding: 0;
+}
+
+input {
+  font: inherit;
+}
+
+.display {
+  font-family: var(--font-display);
+  font-weight: 400;
+  line-height: 1;
+}
+
+.eyebrow {
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 56px;
+  padding: 0 22px;
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: 17px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border: 2px solid var(--ink);
+  box-shadow: var(--shadow-hard);
+  transition: transform 80ms ease, box-shadow 80ms ease;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.btn:active {
+  transform: translate(3px, 3px);
+  box-shadow: 1px 1px 0 var(--ink);
+}
+
+.btn-primary {
+  background: var(--vermilion);
+  color: var(--cream);
+}
+
+.btn-teal {
+  background: var(--teal);
+  color: var(--cream);
+}
+
+.btn-cream {
+  background: var(--cream);
+  color: var(--ink);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--cream);
+  border-color: var(--cream);
+  box-shadow: none;
+}
+
+.btn-ghost:active {
+  transform: none;
+}
+
+.btn-block {
+  width: 100%;
+}
+
+.btn[disabled] {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.btn[disabled]:active {
+  transform: none;
+  box-shadow: var(--shadow-hard);
+}
+
+.grain {
+  position: relative;
+}
+
+.grain::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.35 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  opacity: 0.35;
+  mix-blend-mode: multiply;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+.link {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--cream-shade);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  padding: 6px 4px;
+}
+
+.link[disabled] {
+  text-decoration: none;
+  opacity: 0.8;
+  cursor: default;
+}
+
+:focus-visible {
+  outline: 3px solid var(--bulb);
+  outline-offset: 2px;
+}
+
+.dbg-fab {
+  /* lifted above the zone iOS Safari's bottom toolbar overlays */
+  position: fixed;
+  right: 10px;
+  bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+  z-index: 999;
+  padding: 4px 10px;
+  background: var(--ink);
+  color: var(--bulb);
+  border: 1px solid var(--cream-shade);
+  font: 700 11px/1.4 monospace;
+}
+
+.dbg-panel {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 999;
+  max-height: 45vh;
+  display: flex;
+  flex-direction: column;
+  /* keep the log tail readable above the browser toolbar */
+  padding-bottom: calc(40px + env(safe-area-inset-bottom, 0px));
+  background: rgba(13, 6, 5, 0.96);
+  border-top: 2px solid var(--cream-shade);
+}
+
+.dbg-bar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 10px;
+  color: var(--cream-dim);
+  font: 11px monospace;
+}
+
+.dbg-bar span {
+  flex: 1;
+}
+
+.dbg-bar button {
+  background: var(--maroon-lift);
+  color: var(--cream);
+  padding: 4px 10px;
+  font: 11px monospace;
+}
+
+.dbg-body {
+  margin: 0;
+  padding: 0 10px 10px;
+  overflow: auto;
+  color: #9fe8d9;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.screen {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* Short phones (iPhone mini/SE, or any phone with Safari's toolbars showing):
+   every in-game screen has to fit without scrolling. */
+@media (max-height: 760px) {
+  :root {
+    --pad: 12px;
+  }
+  .btn {
+    min-height: 50px;
+  }
+}

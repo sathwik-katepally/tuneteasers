@@ -12,6 +12,9 @@
     "build:snips": "node scripts/build-snips.mjs"
   },
   "dependencies": {
+    "@fontsource/mukta": "^5.3.0",
+    "@fontsource/rozha-one": "^5.3.0",
+    "lucide-react": "^1.48.0",
     "motion": "^13.4.4",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
