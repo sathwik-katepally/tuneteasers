@@ -337,7 +337,8 @@ export async function categoryCounts(mix, eras, sound, difficulty, minSongs, cat
   if (sound === "inst"){
     if (!snipsCache || Date.now() - snipsCache.at > 300e3) snipsCache = { at: Date.now(), index: await loadSnips() };
     if (!snipsCache.index) return null;
-    safeIds = new Set(Object.keys(snipsCache.index.snips));
+    const index = snipsCache.index;
+    safeIds = new Set(Object.keys(index.snips).filter(id => verifiedSnip({ sourceId:id, duration:Infinity }, index)));
   }
   const blocked = new Set(loadBlocked().map(normArtist));
   const eligible = corpusEligible(corpus, langsOf(mix), eras, blocked, safeIds);
