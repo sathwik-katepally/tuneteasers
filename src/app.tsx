@@ -81,7 +81,7 @@ export function App(){
     }
     const game: GameState = {
       queue: crate.queue, trackIdx: 0, turn: 0, round: 1, totalRounds: S.rounds,
-      totalSongs: crate.queue.length, source: crate.source ?? "saavn",
+      totalSongs: crate.queue.length, source: crate.source ?? "corpus",
       mode, difficulty: S.difficulty,
       cast: roster.map(r => ({ id: r.id, name: r.name, members: [...r.members], score: 0 })),
       history: [], finished: false,

@@ -9,6 +9,7 @@ export interface Track {
   lang: string;
   hook: boolean;
   snip?: number;
+  tier?: string;
   music?: string;
 }
 

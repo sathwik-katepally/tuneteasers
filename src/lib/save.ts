@@ -75,7 +75,7 @@ function parseQueue(raw: Raw): { queue: Track[]; trackIdx: number } | null {
   return queue.length && trackIdx < queue.length ? { queue, trackIdx } : null;
 }
 
-const sourceOf = (v: unknown) => oneOf(v, ["saavn", "catalog", "live"], "catalog");
+const sourceOf = (v: unknown) => oneOf(v, ["corpus", "saavn", "catalog", "live"], "catalog");
 
 function parseGame(raw: Raw, mode: Mode, difficulty: Difficulty): GameState | null {
   const q = parseQueue(raw);

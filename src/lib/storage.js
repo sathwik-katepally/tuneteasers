@@ -1,6 +1,7 @@
 /* Device-local stores (localStorage), there are no accounts: track
    sanitization, the recent-play cooldown and the blocked-artist list.
    The saved game itself lives in save.ts. */
+import { DIFFICULTIES } from "./constants.js";
 import { songKey, safeUrl } from "./utils.js";
 
 const LS_PLAYED = "tt_played";   // { titleKey: lastPlayedMs } — device-local recent-play cooldown
@@ -20,6 +21,7 @@ export function sanitizeTrack(t){
     year: parseInt(t.year)||0,
     lang: t.lang==="telugu" ? "telugu" : "bolly",
     hook: !!t.hook, // true when the stream is a mid-song preview clip, not the intro
+    ...(DIFFICULTIES.includes(t.tier) && t.tier !== "mixed" ? { tier: t.tier } : {}),
     // verified instrumental-window start (seconds), when the snips index vouched for it
     ...(Number.isFinite(t.snip) ? { snip: Math.max(0, Math.floor(t.snip)) } : {}),
     ...(t.music ? { music: String(t.music).slice(0,120) } : {}),

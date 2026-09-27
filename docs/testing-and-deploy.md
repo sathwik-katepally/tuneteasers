@@ -13,6 +13,7 @@ Two profiles: `phone` is WebKit with the iPhone 13 device (390px), `desktop` is 
 - `e2e/migrate.mjs` - seeds a `tuneteasers_v6` save from the previous release with real Saavn tracks, resumes it, plays a turn and checks names, rescaled scores, settings mapping and that the old key is dropped; then feeds junk into the old key and expects a clean home screen.
 - `e2e/autoplay.mjs` - emulates iOS's per-element autoplay rule in Chromium: the hand-over tap's prime must let the countdown start the clip, and a stricter browser must get a working "Tap to play" fallback; also covers End game.
 - `e2e/offline.mjs` - aborts every song source and expects a visible error on the home screen and the `crate` line in the `?debug=1` overlay.
+- `node scripts/corpus-e2e.cjs [repo] [local-worker-origin]` - the corpus tier: games in each language resolve ids through a local `wrangler dev` worker (the deployed worker host is rerouted to it), through the deployed worker/mirror, and with no batch endpoint at all (must fall back to `source: "saavn"`); checks every queue track's corpus film/year/tier and the reveal; includes a phone-width WebKit pass.
 
 Package scripts: `npm run e2e:game -- --profile=desktop`, `e2e:migrate`, `e2e:autoplay`, `e2e:offline`.
 A release run is the matrix of `game.mjs` over both profiles, both modes, all three difficulties and all three language mixes (not every combination, but each value at least once per profile), one `--reduced` run, plus the other three scripts.
@@ -32,8 +33,8 @@ After pushing, verify the workflow succeeded (`gh run watch` or `gh run list`) a
 
 `worker/` is a self-hosted JioSaavn search API, deployed to https://tuneteasers-saavn.sathwik-katepally.workers.dev on the free Workers plan.
 It exists because the public mirrors come and go (saavn.dev died in 2026); it is the first entry in `SAAVN_BASES` (client and `scripts/build-snips.mjs`).
-It serves only `GET /api/search/songs?query=&limit=&page=` (plus `/health`), calling JioSaavn's own `api.php` and decrypting `encrypted_media_url` (DES-ECB, the web player's public key) into `aac.saavncdn.com` stream URLs.
-Responses use the saavn.dev shape (the subset the client reads), so any saavn.dev-compatible mirror can sit behind it in `SAAVN_BASES` as a fallback.
+It serves `GET /api/search/songs?query=&limit=&page=` (the fallback search tier) and `GET /api/songs?ids=a,b,c` (batch song details, at most 50 ids; how the client and `scripts/build-snips.mjs` resolve corpus ids to streams), plus `/health`, calling JioSaavn's own `api.php` and decrypting `encrypted_media_url` (DES-ECB, the web player's public key) into `aac.saavncdn.com` stream URLs.
+Responses use the saavn.dev shape (the subset the client reads), so any saavn.dev-compatible mirror can sit behind it in `SAAVN_BASES` as a fallback; the public mirror serves both routes, so the client keeps working when a new worker route is not deployed yet (the worker answers 404 and the client moves to the next base).
 Successful responses are cached at the edge for 6 hours.
 
 Deploy is manual (it rarely changes): `cd worker && npm install && npx wrangler deploy`, using the local wrangler OAuth login.
@@ -45,10 +46,19 @@ Test locally with `npx wrangler dev`.
 The script must stay sequential with delays (iTunes rate limit) and refuses to write a catalog with fewer than 100 tracks.
 The script imports its search terms and `EXCLUDE_RX` from `src/lib/constants.js`, so it shares the page-side filters described in docs/song-loading.md.
 
+## Corpus refresh CI
+
+`.github/workflows/refresh-corpus.yml` runs `scripts/build-corpus.mjs` weekly (Tue 02:00 UTC) and commits `public/corpus.json` if changed, which triggers a deploy.
+Play counts move every week, so the file practically always changes.
+When it does, the `snips` job dispatches `refresh-snips.yml` (`gh workflow run`), so the snips index scores the newly added songs the same night.
+The script calls the Wikidata SPARQL endpoint (two queries per configured language, ~1 minute total) and JioSaavn's `api.php` (a few hundred playlist fetches and roughly one title search per compilation copy, at concurrency 4); a full build takes about 15 minutes.
+It refuses to write a corpus with fewer than `minSongsPerLanguage` songs in either language, so a broken upstream leaves the last good corpus in place.
+Run it locally with `CORPUS_CACHE=<dir>` to cache upstream responses across reruns and `CORPUS_REPORT=<file>` for a per-song decision log (the input for hand checks).
+
 ## Snips refresh CI
 
-`.github/workflows/refresh-snips.yml` runs `scripts/build-snips.mjs` weekly (offset from the catalog refresh) and commits `public/snips.json` if changed, which in turn triggers a deploy.
-The scorer runs the MusiCNN VAD in a Playwright Chromium page against local assets (`scripts/vad-assets/`), is incremental (existing entries by key are reused), drops entries with winMax >= 0.40, and refuses to write fewer than 80 entries.
+`.github/workflows/refresh-snips.yml` runs `scripts/build-snips.mjs` weekly (Wed 04:30 UTC, after the corpus refresh, which also dispatches it on change) and commits `public/snips.json` if changed, which in turn triggers a deploy.
+The scorer resolves every corpus song to a stream through the worker's batch endpoint (mirror fallback), then runs the MusiCNN VAD in a Playwright Chromium page against local assets (`scripts/vad-assets/`), is incremental (existing entries by key are reused), drops entries with winMax >= 0.40, and refuses to write fewer than 80 entries.
 The client tolerates a missing snips.json, so a failed refresh degrades to muffle-mode playback rather than breaking the game.
 
 ## Monitoring

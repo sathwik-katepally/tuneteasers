@@ -1,7 +1,7 @@
-/* Self-hosted JioSaavn search for TuneTeasers.
-   Serves GET /api/search/songs?query=&limit=&page= in the saavn.dev response
-   shape (the subset the client reads), so it is interchangeable with the
-   public mirrors listed after it in SAAVN_BASES. */
+/* Self-hosted JioSaavn API for TuneTeasers.
+   Serves GET /api/search/songs?query=&limit=&page= and GET /api/songs?ids=
+   in the saavn.dev response shape (the subset the client reads), so it is
+   interchangeable with the public mirrors listed after it in SAAVN_BASES. */
 import forge from "node-forge/lib/forge.js";
 import "node-forge/lib/des.js";
 
@@ -9,6 +9,7 @@ const ORIGIN = "https://www.jiosaavn.com/api.php";
 // JioSaavn's web player ships this DES key; media URLs are encrypted with it.
 const MEDIA_KEY = "38346591";
 const QUALITIES = ["12", "48", "96", "160", "320"];
+const MAX_IDS = 50;
 const EDGE_TTL = 6 * 3600;
 
 const CORS = {
@@ -70,32 +71,43 @@ function toSong(s){
   };
 }
 
+const CACHEABLE = { "cache-control": `public, max-age=3600, s-maxage=${EDGE_TTL}` };
+
+async function upstream(params){
+  const up = new URL(ORIGIN);
+  up.search = new URLSearchParams({ _format: "json", _marker: "0", api_version: "4", ctx: "web6dot0", ...params });
+  const r = await fetch(up, {
+    headers: { "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36", accept: "application/json" },
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!r.ok) return { error: json({ success: false, message: `upstream ${r.status}` }, 502) };
+  // api.php answers with text/html and occasionally a non-JSON error page.
+  try { return { j: JSON.parse(await r.text()) }; }
+  catch { return { error: json({ success: false, message: "upstream sent non-JSON" }, 502) }; }
+}
+
 async function searchSongs(url){
   const query = (url.searchParams.get("query") || "").trim().slice(0, 100);
   if (!query) return json({ success: false, message: "query is required" }, 400);
   const clamp = (v, lo, hi, dflt) => Math.min(hi, Math.max(lo, parseInt(v) || dflt));
   const limit = clamp(url.searchParams.get("limit"), 1, 50, 10);
   const page = clamp(url.searchParams.get("page"), 1, 20, 1);
-
-  const up = new URL(ORIGIN);
-  up.search = new URLSearchParams({
-    __call: "search.getResults", _format: "json", _marker: "0",
-    api_version: "4", ctx: "web6dot0", q: query, n: String(limit), p: String(page),
-  });
-  const r = await fetch(up, {
-    headers: { "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36", accept: "application/json" },
-    signal: AbortSignal.timeout(8000),
-  });
-  if (!r.ok) return json({ success: false, message: `upstream ${r.status}` }, 502);
-  // api.php answers with text/html and occasionally a non-JSON error page.
-  let j;
-  try { j = JSON.parse(await r.text()); } catch { return json({ success: false, message: "upstream sent non-JSON" }, 502); }
+  const { j, error } = await upstream({ __call: "search.getResults", q: query, n: String(limit), p: String(page) });
+  if (error) return error;
   const results = (Array.isArray(j.results) ? j.results : []).filter(s => s.type === "song").map(toSong);
-  return json(
-    { success: true, data: { total: parseInt(j.total) || 0, start: parseInt(j.start) || 0, results } },
-    200,
-    { "cache-control": `public, max-age=3600, s-maxage=${EDGE_TTL}` },
-  );
+  return json({ success: true, data: { total: parseInt(j.total) || 0, start: parseInt(j.start) || 0, results } }, 200, CACHEABLE);
+}
+
+/* Batch song details by JioSaavn id: how the client turns corpus.json
+   entries into stream URLs and art in one request per game. */
+async function songsByIds(url){
+  const ids = [...new Set((url.searchParams.get("ids") || "").split(",").map(s => s.trim()).filter(s => /^[\w-]{1,32}$/.test(s)))];
+  if (!ids.length) return json({ success: false, message: "ids is required" }, 400);
+  if (ids.length > MAX_IDS) return json({ success: false, message: `at most ${MAX_IDS} ids` }, 400);
+  const { j, error } = await upstream({ __call: "song.getDetails", pids: ids.join(",") });
+  if (error) return error;
+  const list = Array.isArray(j.songs) ? j.songs : Object.values(j).filter(s => s && s.type === "song");
+  return json({ success: true, data: list.filter(s => s.type === "song").map(toSong) }, 200, CACHEABLE);
 }
 
 export default {
@@ -104,14 +116,15 @@ export default {
     if (request.method !== "GET") return json({ success: false, message: "method not allowed" }, 405);
     const url = new URL(request.url);
     if (url.pathname === "/health") return json({ success: true });
-    if (url.pathname !== "/api/search/songs") return json({ success: false, message: "not found" }, 404);
+    const handler = url.pathname === "/api/search/songs" ? searchSongs : url.pathname === "/api/songs" ? songsByIds : null;
+    if (!handler) return json({ success: false, message: "not found" }, 404);
 
     const cache = caches.default;
     const cacheKey = new Request(url.toString(), { method: "GET" });
     const hit = await cache.match(cacheKey);
     if (hit) return hit;
     let res;
-    try { res = await searchSongs(url); } catch (e) { res = json({ success: false, message: String(e?.message || e) }, 502); }
+    try { res = await handler(url); } catch (e) { res = json({ success: false, message: String(e?.message || e) }, 502); }
     if (res.status === 200 && res.headers.get("cache-control")) ctx.waitUntil(cache.put(cacheKey, res.clone()));
     return res;
   },

@@ -3,10 +3,9 @@
    offline so the client just seeks and plays (docs/audio.md).
 
    Pipeline:
-   1. Query the Saavn APIs with every SAAVN_QUERIES entry x SAAVN_PAGES (both
-      languages, limit 40) and apply the same filters as the client crate
-      (language, year >= 2000, SAAVN_MIN_PLAYS, EXCLUDE_RX, https stream),
-      deduped by normalized title key.
+   1. Take every song in public/corpus.json (the curated pool the game draws
+      from, see scripts/build-corpus.mjs) and resolve its Saavn id to a stream
+      URL through the batch songs endpoint, deduped by normalized title key.
    2. Score each song not already in snips.json in headless Chromium
       (Playwright) via scripts/snip-harness.html: fetch stream ->
       decodeAudioData -> 16kHz mono render -> MusiCNN p(voice) per ~6s
@@ -16,6 +15,7 @@
 
    Run: node scripts/build-snips.mjs   (CI: .github/workflows/refresh-snips.yml)
    Env:
+     SNIP_CORPUS     corpus.json path override (default public/corpus.json)
      PLAYWRIGHT_DIR  path to a playwright package dir, used when the repo has
                      no playwright devDependency installed
      SNIP_WORKERS    parallel scoring pages (default 3)
@@ -28,10 +28,11 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { songKey } from "../src/lib/utils.js";
-import { SAAVN_BASES, SAAVN_QUERIES, SAAVN_PAGES, SAAVN_MIN_PLAYS, EXCLUDE_RX } from "../src/lib/constants.js";
+import { SAAVN_BASES, CORPUS_BATCH } from "../src/lib/constants.js";
 
 const REPO = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const OUT = process.env.SNIP_OUT || path.join(REPO, "public/snips.json");
+const CORPUS = process.env.SNIP_CORPUS || path.join(REPO, "public/corpus.json");
 const WORKERS = Math.max(1, parseInt(process.env.SNIP_WORKERS) || 3);
 const LIMIT = parseInt(process.env.SNIP_LIMIT) || Infinity;
 const KEEP_MAX = 0.4;    // entries at or above this winMax are dropped
@@ -39,15 +40,8 @@ const MIN_ENTRIES = 80;  // refuse to write a final result thinner than this
 const PAGE_RECYCLE = 10; // songs per page before recycling (decode memory)
 const PROGRESS_EVERY = 20;
 
-/* -- Saavn corpus (filters mirror the crate's loadFromSaavn; the client and
-      this scorer must agree on what a poolable song is) -- */
+/* -- corpus songs -> stream URLs (the same batch endpoint the client uses) -- */
 const keyOf = songKey; // shared with the client — snips.json keys must match the crate's
-/* DOM-free version of the client's `de` (textarea entity decode); Saavn
-   titles only ever carry the basic named + numeric entities. */
-const de = s => String(s || "")
-  .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(parseInt(n, 10)))
-  .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))
-  .replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 let saavnBase = null;
@@ -55,7 +49,7 @@ async function saavnFetch(p){
   const bases = saavnBase ? [saavnBase, ...SAAVN_BASES.filter(b => b !== saavnBase)] : SAAVN_BASES;
   for (const b of bases){
     try {
-      const r = await fetch(b + p, { signal: AbortSignal.timeout(10000) });
+      const r = await fetch(b + p, { signal: AbortSignal.timeout(15000) });
       if (!r.ok) continue;
       const j = await r.json();
       if (j && (j.data || j.results)){ saavnBase = b; return j; }
@@ -79,30 +73,31 @@ const safeUrl = u => {
   return null;
 };
 
+function loadCorpus(){
+  const j = JSON.parse(fs.readFileSync(CORPUS, "utf8"));
+  if (!j || j.v !== 1 || !Array.isArray(j.cols) || !Array.isArray(j.songs)) throw new Error(`${CORPUS} is not a v1 corpus`);
+  return j.songs.map(row => Object.fromEntries(j.cols.map((c, i) => [c, row[i]])));
+}
+
 async function collectSongs(){
-  const seen = new Set(), pool = [];
-  for (const [lang, queries] of Object.entries(SAAVN_QUERIES)){
-    for (const q of queries) for (let page = 1; page <= SAAVN_PAGES; page++){
-      const r = await saavnFetch(`/search/songs?query=${encodeURIComponent(q)}&limit=40&page=${page}`);
-      await sleep(400); // sequential-polite to the mirror API
-      const list = r?.data?.results || r?.results || [];
-      for (const s of list){
-        const name = de(s.name || s.title || "");
-        if (!name) continue;
-        if ((s.language || "").toLowerCase() !== (lang === "bolly" ? "hindi" : "telugu")) continue;
-        if ((parseInt(s.year) || 0) < 2000) continue;
-        const plays = parseInt(s.playCount) || 0;
-        if (plays && plays < SAAVN_MIN_PLAYS) continue;
-        if (EXCLUDE_RX.test(name)) continue;
-        const stream = safeUrl(pickStream(s.downloadUrl));
-        if (!stream) continue;
-        const key = keyOf(name);
-        if (!key || seen.has(key)) continue;
-        seen.add(key);
-        pool.push({ key, title: name, lang, stream });
-      }
+  const corpus = loadCorpus();
+  const lang = s => (s.language === "telugu" ? "telugu" : "bolly");
+  const seen = new Set(), pool = [], unresolved = [];
+  for (let i = 0; i < corpus.length; i += CORPUS_BATCH){
+    const batch = corpus.slice(i, i + CORPUS_BATCH);
+    const r = await saavnFetch(`/songs?ids=${batch.map(s => s.id).join(",")}`);
+    await sleep(300); // sequential-polite to the API
+    const byId = new Map((Array.isArray(r?.data) ? r.data : []).map(x => [x.id, x]));
+    for (const s of batch){
+      const key = keyOf(s.title);
+      if (!key || seen.has(key)) continue;
+      const stream = safeUrl(pickStream(byId.get(s.id)?.downloadUrl));
+      if (!stream){ unresolved.push(s); continue; }
+      seen.add(key);
+      pool.push({ key, title: s.title, lang: lang(s), stream });
     }
   }
+  if (unresolved.length) console.log(`${unresolved.length} corpus songs did not resolve to a stream`);
   return pool;
 }
 
@@ -175,11 +170,11 @@ function writeSnips(entries, { final, prev }){
 
 (async () => {
   const t0 = Date.now();
-  console.log("collecting corpus from saavn...");
+  console.log("resolving corpus songs to streams...");
   const corpus = await collectSongs();
   const perLang = l => corpus.filter(s => s.lang === l).length;
   console.log(`corpus: ${corpus.length} unique songs (${perLang("bolly")} hindi, ${perLang("telugu")} telugu)`);
-  if (!corpus.length){ console.error("no songs from saavn, aborting without touching snips.json"); process.exit(1); }
+  if (!corpus.length){ console.error("no corpus songs resolved, aborting without touching snips.json"); process.exit(1); }
 
   const prev = loadExisting();
   const existing = prev.snips;
