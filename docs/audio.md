@@ -39,6 +39,7 @@ Replay plays everything heard so far, from 0 to the current rung's end.
 The numbers are `CLIP_SEGMENTS` in `src/lib/config.ts`; `rungSpan(rung, replay)` gives the `{ from, to }` seconds a play covers.
 A continuation always seeks, even to where the element already is: Chromium otherwise resumes a paused element about 60ms past its pause point, which would skip audio at the seam.
 The engine stops a clip at a media time, not after a wall-clock delay: a timer re-aims at the end from the element's own clock (and, for Music-only, re-aims the gain gate on the audio clock), so each rung is exact to a few milliseconds and the next one starts where it stopped.
+`currentTime` only moves in steps (100-250ms apart, and a busy WebKit reports a stale value for longer), so between steps the engine extrapolates from when it last saw the value change and polls every 15ms near the end.
 `e2e/ladder.mjs` measures this on the media clock.
 
 ## Playback modes
