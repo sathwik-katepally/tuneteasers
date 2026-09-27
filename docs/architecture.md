@@ -4,7 +4,8 @@
 
 - `index.html` - static shell; React 19 renders all UI into `#root`.
 - `src/main.tsx` - entry point; loads the fonts (`@fontsource` Rozha One and Mukta), global styles, and renders `App` plus the debug overlay.
-- `src/app.tsx` - the single state owner; all game state, actions, and screen routing live here.
+- `src/app.tsx` - the state owner for pass-the-phone and the home screen, and the router into the buzz-in room owners (`screen: "host" | "buzzer"`).
+- `src/room/` - buzz-in rooms (docs/room-mode.md): `Host` (the host screen's state owner, with `Lobby` and `HostPlaying`) and `Phone` (a phone's join, buzzer and answer pad).
 - `src/types.ts` - shared types for saved state, tracks, turns and verdicts.
 - `src/lib/config.ts` - every gameplay number: clip ladder and its rung spans, points per rung, speed bonus, hint cost, round options, difficulty table; also the song category labels.
 - `src/lib/save.ts` - the saved game: `loadSaved` (sanitize, migrate v6) and `save`.
@@ -12,11 +13,13 @@
 - `src/lib/utils.js` - pure helpers (`songKey`, `displayTitle`, `shuffle`, `safeUrl`, ...).
 - `src/lib/storage.js` - track sanitization, the played-cooldown store and the blocked-artist store.
 - `src/lib/group.ts` - optional group sync: the group invite, the write outbox, the group cooldown fetch and past results (docs/group-sync.md).
-- `src/lib/crate.js` - song loading (`buildCrate`) across the 3 source tiers.
+- `src/lib/crate.js` - song loading (`buildCrate`) across the 3 source tiers, and `decoyTitles` for a room's autocomplete.
+- `src/lib/room.ts` - buzz-in room client: `createRoom`, the `#room=` link, `useRoom` (PartySocket), seat and host-show storage.
+- `src/lib/answer.js` - answer folding, matching and autocomplete, shared with the Worker.
 - `src/lib/engine.js` - the audio engine (songs and synthesised sound effects) and screen wake lock.
 - `src/lib/ladder.ts` - `playRung`, which plays a clip ladder rung through the engine.
 - `src/styles/tokens.css`, `src/styles/global.css` - design tokens (colors, fonts, hard shadows) and the few global classes (`.btn*`, `.display`, `.eyebrow`, `.grain`, `.link`, the debug overlay).
-- `src/components/` - the cinema pieces, each with a CSS Module: `Theatre` (marquee, curtains, seat backs, game menu), `Bulbs` (bulb rows and frames), `Ticket`, `Curtain`, `Stamp`, `SplitFlap`, `Seg` (segmented radio), `CategoryPicker` (the setup screen's song-category stubs), `Equalizer`, `Reel`, `GroupPanel` (the home-screen group card), and `DebugLog`.
+- `src/components/` - the cinema pieces, each with a CSS Module: `Theatre` (marquee, curtains, seat backs, game menu), `Bulbs` (bulb rows and frames), `Ticket`, `Curtain`, `Stamp`, `SplitFlap`, `Seg` (segmented radio), `CategoryPicker` (the setup screen's song-category stubs), `Equalizer`, `Reel`, `GroupPanel` (the home-screen group card), `Qr`, `Stage` (the theatre plus the screen cross-fade, used by every state owner), and `DebugLog`.
 - `src/screens/` - one component and CSS Module per screen: `Setup`, `Loading`, `Handover`, `Countdown`, `Playing`, `Reveal`, `Scoreboard`, `Podium`, `PastGames`.
 - `tsconfig.json` - strict UI type checking; `src/lib/*.js` stays JavaScript with `allowJs` and `checkJs` off.
 
@@ -49,9 +52,11 @@ Judging a turn updates the saved game in one step (score, history, next turn and
 
 ## Screens and phases
 
-`screen` is one of `setup | game | done | past`; `done` is the podium and `past` the group's Past shows list.
+`screen` is one of `setup | game | done | past | host | buzzer`; `done` is the podium, `past` the group's Past shows list, and `host` / `buzzer` hand the whole page to `src/room/Host.tsx` or `src/room/Phone.tsx`.
+`settings.play` (`pass | room`) picks the mode on the home screen; a `#room=` link opens `buzzer` directly.
 Within `game`, `phase` runs `handover → countdown → cueing → playing ⇄ listened → reveal → (handover | board)`, with `blocked` when the browser refuses to start audio without a tap.
 The screen wrapper is keyed per screen inside `AnimatePresence`, so every screen remounts and cross-fades.
+Never change the key twice within one cross-fade (220 ms): `AnimatePresence mode="wait"` then stays on the old screen. The room host keys its countdown and song screens alike for this reason, since a buzz can land that fast.
 After the last contestant of a round the box office (`board`) shows; after the final round (or when the crate runs out) it reads "Final count" and leads to the podium.
 Skip keeps the same contestant and goes straight to a new countdown.
 
