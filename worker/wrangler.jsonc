@@ -4,5 +4,52 @@
   "main": "src/index.js",
   "compatibility_date": "2026-09-01",
   "workers_dev": true,
-  "observability": { "enabled": true }
+  "observability": { "enabled": true },
+  // Daily retention sweep for the group tables (see docs/group-sync.md).
+  "triggers": { "crons": ["23 3 * * *"] },
+  "vars": {
+    "ALLOWED_ORIGINS": "https://sathwik-katepally.github.io",
+    "RESULT_TTL_DAYS": "365",
+    "PLAYED_TTL_DAYS": "30",
+    "GROUP_IDLE_TTL_DAYS": "365"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "tuneteasers",
+      "database_id": "6b7b18ae-2962-40c8-928c-b432a72e85d4",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "ratelimits": [
+    { "name": "REQUEST_LIMITER", "namespace_id": "7101", "simple": { "limit": 120, "period": 60 } },
+    { "name": "WRITE_LIMITER", "namespace_id": "7102", "simple": { "limit": 60, "period": 60 } },
+    { "name": "CREATE_LIMITER", "namespace_id": "7103", "simple": { "limit": 5, "period": 60 } }
+  ],
+  "env": {
+    // Non-production copy for testing a branch: its own Worker and D1 database.
+    "preview": {
+      "name": "tuneteasers-saavn-preview",
+      "triggers": { "crons": ["23 3 * * *"] },
+      "vars": {
+        "ALLOWED_ORIGINS": "https://sathwik-katepally.github.io",
+        "RESULT_TTL_DAYS": "365",
+        "PLAYED_TTL_DAYS": "30",
+        "GROUP_IDLE_TTL_DAYS": "365"
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "tuneteasers-preview",
+          "database_id": "da34eaa1-8ea6-46cc-83df-dc359c84d0fe",
+          "migrations_dir": "migrations"
+        }
+      ],
+      "ratelimits": [
+        { "name": "REQUEST_LIMITER", "namespace_id": "7111", "simple": { "limit": 120, "period": 60 } },
+        { "name": "WRITE_LIMITER", "namespace_id": "7112", "simple": { "limit": 60, "period": 60 } },
+        { "name": "CREATE_LIMITER", "namespace_id": "7113", "simple": { "limit": 5, "period": 60 } }
+      ]
+    }
+  }
 }
