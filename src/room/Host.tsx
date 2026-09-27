@@ -16,11 +16,11 @@ import { Scoreboard } from "../screens/Scoreboard";
 import { Podium } from "../screens/Podium";
 import { Lobby, RoomTrouble } from "./Lobby";
 import { HostPlaying, type Audio } from "./HostPlaying";
-import type { Difficulty, GameState, Settings, Track, Verdict } from "../types";
+import type { Category, Difficulty, GameState, Settings, Track, Verdict } from "../types";
 
 type Crate = { error?: string; queue?: Track[] };
-const buildCrate = buildCrateJs as (mix: string, eras: string[], sound: string, difficulty: Difficulty, minSongs: number, played?: Record<string, number>) => Promise<Crate>;
-const decoyTitles = decoyTitlesJs as (mix: string, eras: string[], n: number, exclude: string[]) => Promise<string[]>;
+const buildCrate = buildCrateJs as (mix: string, eras: string[], sound: string, difficulty: Difficulty, minSongs: number, played: Record<string, number> | undefined, categories: Category[]) => Promise<Crate>;
+const decoyTitles = decoyTitlesJs as (mix: string, eras: string[], n: number, exclude: string[], categories: Category[]) => Promise<string[]>;
 
 type Phase = "opening" | "lobby" | "loading" | "countdown" | "song" | "reveal" | "board" | "done" | "failed";
 interface Clip { rung: number; startedAt: number; endedAt: number | null; key: number; cut: boolean }
@@ -60,7 +60,7 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
     createRoom().then(({ code, host }) => {
       if (!on) return;
       setShow({ code, host, queue: [], idx: 0, songNo: 0, total: settings.rounds * ROOM_SONGS_PER_ROUND, perRound: ROOM_SONGS_PER_ROUND,
-        plain: DIFFICULTY[settings.difficulty].sound === "full", difficulty: settings.difficulty, mix: settings.mix, eras: settings.eras, started: false });
+        plain: DIFFICULTY[settings.difficulty].sound === "full", difficulty: settings.difficulty, mix: settings.mix, eras: settings.eras, categories: settings.categories, started: false });
       setPhase("lobby");
     }, e => { if (on){ log("room-create-fail", { msg: String(e?.message || e).slice(0, 60) }); setPhase("failed"); } });
     return () => { on = false; };
@@ -96,17 +96,17 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
     setPhase("loading");
     setError("");
     const played = await groupPlayed();
-    const crate = await buildCrate(show.mix, show.eras, show.plain ? "full" : "inst", show.difficulty, show.total, played ?? undefined);
+    const crate = await buildCrate(show.mix, show.eras, show.plain ? "full" : "inst", show.difficulty, show.total, played ?? undefined, show.categories);
     if (crate.error || !crate.queue){
       setError(crate.error === "safe" ? "Not enough verified music-only clips for this show. Go back and pick Easy or fewer rounds."
-        : crate.error === "thin" ? "Not enough songs match your picks. Go back and pick more eras."
+        : crate.error === "thin" ? `Not enough songs match your picks. Go back and pick more eras${show.categories.length ? " or another kind of song" : ""}.`
         : "Couldn't load songs. Check the connection and try again.");
       setPhase("lobby");
       return;
     }
     const queue = crate.queue;
     const inShow = queue.slice(0, show.total + ROOM_SPARE_SONGS).map(t => displayTitle(t.title));
-    const decoys = await decoyTitles(show.mix, show.eras, show.total * ROOM_DECOYS_PER_SONG, queue.map(t => t.title));
+    const decoys = await decoyTitles(show.mix, show.eras, show.total * ROOM_DECOYS_PER_SONG, queue.map(t => t.title), show.categories);
     const titles = shuffle([...new Set([...inShow, ...decoys])]);
     room.send({ t: "start", titles, total: show.total, perRound: show.perRound, answerSecs: ROOM_ANSWER_SECS });
     const next = { ...show, queue, idx: 0, songNo: 0, started: true };

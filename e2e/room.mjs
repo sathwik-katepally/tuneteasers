@@ -11,15 +11,17 @@
    - a phone that reloads mid-show keeps its seat and score,
    - the podium matches the room, and every phone's final place does too,
    - no phone ever receives the title before its reveal, or any stream URL.
-   node e2e/room.mjs [--host=phone] [--worker=https://...] [--shots=dir] */
+   node e2e/room.mjs [--host=phone] [--categories=item,mass] [--worker=https://...] [--shots=dir] */
 import fs from "node:fs";
 import path from "node:path";
 import { chromium, webkit, devices } from "playwright";
 import { serve, args, localWorker, silenceAudio } from "./harness.mjs";
 import { displayTitle } from "../src/lib/utils.js";
-import { CLIP_POINTS, ROOM_ANSWER_SECS } from "../src/lib/config.ts";
+import { CATEGORIES, CLIP_POINTS, ROOM_ANSWER_SECS } from "../src/lib/config.ts";
+import { songKey } from "../src/lib/utils.js";
 
 const A = args({});
+const categories = A.categories ? A.categories.split(",") : [];
 const shotsDir = A.shots && A.shots !== "true" ? A.shots : null;
 if (shotsDir) fs.mkdirSync(shotsDir, { recursive: true });
 const WORKER_HOST = "tuneteasers-saavn.sathwik-katepally.workers.dev";
@@ -231,6 +233,11 @@ try {
   await host.page.getByRole("radio", { name: "Buzz in" }).click();
   await host.page.getByRole("radio", { name: "Easy", exact: true }).click();
   await host.page.getByRole("radio", { name: "3", exact: true }).click();
+  // --categories=item,mass: the room's crate must honour the home screen's song categories.
+  for (const id of categories){
+    const label = CATEGORIES.find(c => c.id === id)?.label ?? fail(`unknown category ${id}`);
+    await host.page.getByRole("button", { name: new RegExp(`^${label}, \\d+ songs$`) }).click();
+  }
   await shot(host, "host-01-setup");
   await host.page.getByRole("button", { name: "Open a room" }).click();
   await host.page.getByText("Doors open").waitFor({ timeout: 20000 });
@@ -273,6 +280,16 @@ try {
   const titleList = JSON.parse(titles.data).titles;
   const show = await until("host queue", async () => { const s = await hostShow(); return s?.started && s.queue.length ? s : null; });
   if (!show.queue.slice(0, show.total).every(t => titleList.includes(displayTitle(t.title)))) fail("a show title is missing from the autocomplete list");
+  if (categories.length){
+    const corpus = JSON.parse(fs.readFileSync(new URL("../dist/corpus.json", import.meta.url), "utf8"));
+    const lang = { hindi: "bolly", telugu: "telugu" };
+    const tags = new Map(corpus.songs.map(r => Object.fromEntries(corpus.cols.map((c, i) => [c, r[i]])))
+      .map(r => [`${lang[r.language]}|${songKey(r.title)}`, r.tags]));
+    for (const t of show.queue.slice(0, show.total)){
+      const tt = tags.get(`${t.lang}|${songKey(t.title)}`);
+      if (!tt?.some(x => categories.includes(x))) fail(`"${t.title}" is not tagged ${categories}`);
+    }
+  }
   if (titleList.length < show.total * 2) fail(`autocomplete list has no decoys (${titleList.length} titles for ${show.total} songs)`);
 
   // Song 1: a buzz race. Ravi, then Asha, then Meena; Ravi answers wrong,

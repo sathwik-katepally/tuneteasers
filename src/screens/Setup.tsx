@@ -145,7 +145,7 @@ export function Setup(p: Props){
 
         <div className={s.group}>
           <span className={s.labelText}>Kind of songs</span>
-          <CategoryPicker settings={S} need={S.rounds * list.length} blocked={p.blocked} onChange={categories => upSettings({ categories })} />
+          <CategoryPicker settings={S} need={S.rounds * (room ? ROOM_SONGS_PER_ROUND : list.length)} blocked={p.blocked} onChange={categories => upSettings({ categories })} />
         </div>
 
         <div className={s.group}>

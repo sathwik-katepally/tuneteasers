@@ -12,7 +12,7 @@ Autocomplete offers titles from the show plus decoys; if she is right she scores
 
 ## Who owns what
 
-- The host screen (`src/room/Host.tsx`) builds the crate, plays audio through the engine, runs the clip ladder, the reveal, the box office and the podium, and tells the room what is playing.
+- The host screen (`src/room/Host.tsx`) builds the crate (honouring the home screen's languages, eras, difficulty and song categories), plays audio through the engine, runs the clip ladder, the reveal, the box office and the podium, and tells the room what is playing.
   It reuses the pass-the-phone screens: `Countdown`, `Reveal`, `Scoreboard`, `Podium`, `Loading`, plus `Lobby` and `HostPlaying` in `src/room/`.
 - The room (`worker/src/room.js`) is one Durable Object per room code, built on PartyServer with WebSocket hibernation.
   It is the referee: it orders buzzes as they arrive, runs the answer clock, judges answers and holds the scores.
@@ -24,7 +24,7 @@ Autocomplete offers titles from the show plus decoys; if she is right she scores
 
 - The host sends each song's title, film, year and singers to the room when its countdown starts; stream URLs never leave the host.
 - A phone's view carries the answer only once the song is revealed (`song.answer` is null before that), and the results list only holds revealed songs.
-- The autocomplete list is sent once per show: every title in the show (plus spares) shuffled with about three corpus decoys per song (`ROOM_DECOYS_PER_SONG`) from the same languages and eras, so it cannot be read as the song list or the order.
+- The autocomplete list is sent once per show: every title in the show (plus spares) shuffled with about three corpus decoys per song (`ROOM_DECOYS_PER_SONG`) from the same languages, eras and categories, so it cannot be read as the song list or the order.
 - `e2e/room.mjs` records every frame each phone receives and fails if any contains a URL, a stream, or the current title before its reveal.
 
 ## Flow of one song
@@ -90,4 +90,4 @@ So "Main Hu Na" matches "Main Hoon Na" and "kesaria" matches "Kesariya", while "
 
 `npm run e2e:room` (`e2e/room.mjs`) starts a local `wrangler dev` and proxies the room WebSockets to it from Playwright, recording every frame.
 Desktop Chromium hosts (or a WebKit iPhone with `--host=phone`) and three WebKit iPhones in separate contexts play a full 12-song show: join by typed code and by link, a buzz race in arrival order, wrong answer to the next buzzer, right answer at the rung's points, "Hear more" and the automatic ladder after a miss, a typed misspelling, a reload and a leave-and-return keeping the seat, the answer clock running out, everyone locked out, the box office, podium totals against the room's results, each phone's final place, and "Same crowd again".
-`--worker=<origin>` runs it against a deployed Worker (the preview one) instead.
+`--worker=<origin>` runs it against a deployed Worker (the preview one) instead, and `--categories=romantic,...` checks that every song in the show carries one of those tags.

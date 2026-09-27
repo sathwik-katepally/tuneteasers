@@ -7,7 +7,7 @@ import { usePartySocket } from "partysocket/react";
 import { WORKER_API } from "./constants.js";
 import { sanitizeTrack } from "./storage.js";
 import { randomId } from "./group";
-import type { Difficulty, Mix, Track } from "../types";
+import type { Category, Difficulty, Mix, Track } from "../types";
 
 export const ROOM_ORIGIN = String(WORKER_API).replace(/\/api$/, "");
 const CODE_RX = /^[BCDFGHJKLMNPQRSTVWXZ]{4}$/;
@@ -97,13 +97,14 @@ export interface HostShow {
   difficulty: Difficulty;
   mix: Mix;
   eras: string[];
+  categories: Category[];
   started: boolean;
 }
 export function loadHostShow(): HostShow | null {
   const s = lsGet(LS_HOST) as HostShow | null;
   if (!s || !isCode(s.code) || typeof s.host !== "string" || !Array.isArray(s.queue)) return null;
   const queue = s.queue.map(t => sanitizeTrack(t)).filter(Boolean) as Track[];
-  return { ...s, queue };
+  return { ...s, queue, categories: Array.isArray(s.categories) ? s.categories : [] };
 }
 export const saveHostShow = (s: HostShow | null) => (s ? lsSet(LS_HOST, s) : lsDel(LS_HOST));
 
