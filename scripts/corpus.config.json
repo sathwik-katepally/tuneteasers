@@ -1,0 +1,43 @@
+{
+  "languages": {
+    "hindi":  { "lang": "bolly",  "wikidata": "Q1568" },
+    "telugu": { "lang": "telugu", "wikidata": "Q8097" }
+  },
+  "conflictLanguages": {
+    "tamil": "Q5885", "kannada": "Q33673", "malayalam": "Q36236",
+    "marathi": "Q1571", "bengali": "Q9610", "punjabi": "Q58635"
+  },
+  "playlistOwner": "phulki_user",
+  "playlistQueries": {
+    "hindi": [
+      "hindi 2000s", "hindi 2010s", "hindi 2020s", "bollywood 2000s", "bollywood 2010s",
+      "best of 2000s hindi", "best of 2010s hindi", "decade of 2000s hindi", "decade of 2010s hindi",
+      "hits of 2005 hindi", "hits of 2008 hindi", "hits of 2012 hindi", "hits of 2015 hindi", "hits of 2018 hindi",
+      "chartbusters 2016 hindi", "chartbusters 2017 hindi", "chartbusters 2018 hindi", "chartbusters 2019 hindi",
+      "chartbusters 2020 hindi", "chartbusters 2021 hindi", "chartbusters 2022 hindi", "chartbusters 2023 hindi",
+      "chartbusters 2024 hindi", "chartbusters 2025 hindi", "chartbusters 2026 hindi",
+      "romantic hits hindi", "dance hits hindi", "sad songs hindi", "party songs hindi", "wedding songs hindi",
+      "bollywood romance", "bollywood dance", "top 50 hindi", "hindi superhits"
+    ],
+    "telugu": [
+      "telugu 2000s", "telugu 2010s", "telugu 2020s", "tollywood 2000s", "tollywood 2010s",
+      "best of 2000s telugu", "best of 2010s telugu", "decade of 2000s telugu", "decade of 2010s telugu",
+      "hits of 2005 telugu", "hits of 2008 telugu", "hits of 2012 telugu", "hits of 2015 telugu", "hits of 2018 telugu",
+      "chartbusters 2016 telugu", "chartbusters 2017 telugu", "chartbusters 2018 telugu", "chartbusters 2019 telugu",
+      "chartbusters 2020 telugu", "chartbusters 2021 telugu", "chartbusters 2022 telugu", "chartbusters 2023 telugu",
+      "chartbusters 2024 telugu", "chartbusters 2025 telugu", "chartbusters 2026 telugu",
+      "romantic hits telugu", "dance hits telugu", "sad songs telugu", "party songs telugu", "wedding songs telugu",
+      "tollywood romance", "tollywood dance", "top 50 telugu", "telugu superhits", "dsp hits", "thaman hits telugu"
+    ]
+  },
+  "playlistSearchPages": 2,
+  "includeCharts": true,
+  "minYear": 2000,
+  "yearTolerance": 1,
+  "minPlays": 1000000,
+  "playCountTolerance": 0.01,
+  "score": { "playsWeight": 0.8, "playlistsWeight": 0.2 },
+  "tiers": { "easy": 0.3, "medium": 0.4 },
+  "concurrency": 4,
+  "minSongsPerLanguage": 300
+}

@@ -1,6 +1,6 @@
 /* Persistence: auto-save on every change, auto-resume on load.
    Everything is device-local (localStorage) — there are no accounts. */
-import { ERAS } from "./constants.js";
+import { ERAS, DIFFICULTIES } from "./constants.js";
 import { songKey, safeUrl } from "./utils.js";
 
 const LS_KEY = "tuneteasers_v6";
@@ -11,7 +11,7 @@ const lsSet = (k,v) => { try { localStorage.setItem(k, JSON.stringify(v)); } cat
 
 export const DEFAULTS = {
   screen: "setup",
-  settings: { mix:"both", sound:"inst", snippetLen:10, eras:[...ERAS] },
+  settings: { mix:"both", sound:"inst", snippetLen:10, eras:[...ERAS], difficulty:"mixed" },
   players: [{name:"Player 1",score:0},{name:"Player 2",score:0}],
   game: null, // { queue, trackIdx, turn, round, totalSongs, source }
 };
@@ -28,6 +28,7 @@ export function sanitizeTrack(t){
     year: parseInt(t.year)||0,
     lang: t.lang==="telugu" ? "telugu" : "bolly",
     hook: !!t.hook, // true when the stream is a mid-song preview clip, not the intro
+    ...(DIFFICULTIES.includes(t.tier) && t.tier !== "mixed" ? { tier: t.tier } : {}),
     // verified instrumental-window start (seconds), when the snips index vouched for it
     ...(Number.isFinite(t.snip) ? { snip: Math.max(0, Math.floor(t.snip)) } : {}),
   };
@@ -44,6 +45,7 @@ export function loadPersisted(){
     sound: ["inst","full"].includes(set.sound) ? set.sound : "inst",
     snippetLen: [5,10,15].includes(set.snippetLen) ? set.snippetLen : 10,
     eras: eras.length ? eras : [...ERAS],
+    difficulty: DIFFICULTIES.includes(set.difficulty) ? set.difficulty : "mixed",
   };
   if (Array.isArray(raw.players) && raw.players.length)
     s.players = raw.players.slice(0,8).map(p=>({ name:String(p.name||"Player").slice(0,24), score:Math.max(0, Math.round((parseFloat(p.score)||0)*2)/2) }));
@@ -56,7 +58,7 @@ export function loadPersisted(){
         turn: Math.min(Math.max(0, parseInt(raw.game.turn)||0), s.players.length-1),
         round: Math.max(1, parseInt(raw.game.round)||1),
         totalSongs: queue.length,
-        source: ["saavn","catalog","live"].includes(raw.game.source) ? raw.game.source : "catalog",
+        source: ["corpus","saavn","catalog","live"].includes(raw.game.source) ? raw.game.source : "catalog",
       };
       // Screen stays "setup": the home page offers a Resume card instead of jumping straight in.
     }

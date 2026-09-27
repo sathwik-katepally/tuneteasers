@@ -1,8 +1,8 @@
-name: Refresh snips index
+name: Refresh song corpus
 
 on:
   schedule:
-    - cron: "30 4 * * 3"
+    - cron: "0 2 * * 2"
   workflow_dispatch:
 
 jobs:
@@ -10,30 +10,46 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    outputs:
+      changed: ${{ steps.commit.outputs.changed }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: 22
-      - run: npm ci
-      - run: npx playwright install --with-deps chromium
-      - run: node scripts/build-snips.mjs
-      - name: Commit if changed
+      - run: node scripts/build-corpus.mjs
+      - id: commit
+        name: Commit if changed
         run: |
-          if git diff --quiet public/snips.json; then
-            echo "Snips unchanged"
+          if git diff --quiet public/corpus.json; then
+            echo "Corpus unchanged"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add public/snips.json
-          git commit -m "Refresh snips index"
+          git add public/corpus.json
+          git commit -m "Refresh song corpus"
           git push
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+  # A new corpus needs its snips index: hand over to the snips workflow, which
+  # scores only the songs it has not seen and commits the result.
+  snips:
+    needs: [refresh]
+    if: needs.refresh.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run refresh-snips.yml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME"
 
   # Phone alert on failure (ntfy, topic in the NTFY_TOPIC repo secret).
   # failure() is false for a cancelled run, so a superseded run stays quiet.
   alert:
-    needs: [refresh]
+    needs: [refresh, snips]
     if: failure()
     runs-on: ubuntu-latest
     timeout-minutes: 2
