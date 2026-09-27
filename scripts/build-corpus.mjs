@@ -9,8 +9,11 @@
       the album name (cleaned) or a 'From "X"' clause must name a film in
       Wikidata for the song's language. Compilation copies are resolved to the
       original album copy through a title search (all copies of one song share
-      one play count). Songs Saavn tags with a "starring" role are kept
-      unverified when no Wikidata film of another language conflicts.
+      one play count). Diacritics are folded and small spelling differences
+      tolerated within the year window. Songs Saavn tags with a "starring"
+      role are kept unverified when nothing marks them as a dub, a series or
+      a single: no same-named Wikidata film of another language, no film of
+      another language that year with the same cast, no same-named TV series.
    3. Score within language x decade: play-count percentile blended with
       editorial-playlist membership; tier cut-offs from the config.
 
@@ -69,8 +72,9 @@ const saavn = async q => {
   try { return JSON.parse(t); } catch { return null; }
 };
 
-/* -- Wikidata film index: norm(name) -> [{ y, lang, label }] -- */
-const norm = s => de(s).toLowerCase().replace(/&/g, " and ").replace(/[^\p{L}\p{N}]+/gu, "");
+/* -- Wikidata index: films by name (labels + aliases), by language x year
+      (for fuzzy matching), cast member -> films, and TV series names -- */
+const norm = s => de(s).normalize("NFKD").replace(/\p{M}+/gu, "").toLowerCase().replace(/&/g, " and ").replace(/[^\p{L}\p{N}]+/gu, "");
 function parseCsv(text){
   const rows = []; let row = [], field = "", q = false;
   for (let i = 0; i < text.length; i++){
@@ -92,19 +96,50 @@ async function sparql(query){
   return parseCsv(await getText(url, { accept: "text/csv", "user-agent": WD_UA })).slice(1);
 }
 async function loadFilms(){
-  const index = new Map();
-  const add = (name, entry) => { const k = norm(name); if (!k) return; const l = index.get(k) || []; l.push(entry); index.set(k, l); };
+  const byName = new Map(), byLangYear = new Map(), byActor = new Map(), series = new Set();
+  const push = (map, k, v) => { if (!k) return; const l = map.get(k) || []; l.push(v); map.set(k, l); };
   const all = { ...Object.fromEntries(Object.entries(LANGS).map(([k, v]) => [k, v.wikidata])), ...CFG.conflictLanguages };
   for (const [lang, qid] of Object.entries(all)){
     const films = await sparql(`SELECT ?f ?lab (MIN(YEAR(?d)) AS ?y) WHERE { ?f wdt:P31/wdt:P279* wd:Q11424; wdt:P364 wd:${qid}; wdt:P577 ?d. ?f rdfs:label ?lab FILTER(LANG(?lab)="en") } GROUP BY ?f ?lab`);
     const aliases = await sparql(`SELECT ?f ?alt WHERE { ?f wdt:P31/wdt:P279* wd:Q11424; wdt:P364 wd:${qid}; skos:altLabel ?alt FILTER(LANG(?alt)="en") }`);
+    const cast = await sparql(`SELECT ?f ?al WHERE { ?f wdt:P31 wd:Q11424; wdt:P364 wd:${qid}; wdt:P161 ?a. ?a rdfs:label ?al FILTER(LANG(?al)="en") }`);
     const byId = new Map();
-    for (const [f, lab, y] of films){ const e = { y: parseInt(y), lang, label: lab }; byId.set(f, e); add(lab, e); }
-    for (const [f, alt] of aliases){ const e = byId.get(f); if (e) add(alt, e); }
-    console.log(`wikidata ${lang}: ${films.length} films, ${aliases.length} aliases`);
+    for (const [f, lab, y] of films){
+      const e = { y: parseInt(y), lang, label: lab, names: [norm(lab)], cast: new Set() };
+      byId.set(f, e); push(byName, norm(lab), e); push(byLangYear, `${lang}/${e.y}`, e);
+    }
+    for (const [f, alt] of aliases){ const e = byId.get(f); if (!e) continue; const k = norm(alt); if (k && !e.names.includes(k)){ e.names.push(k); push(byName, k, e); } }
+    for (const [f, al] of cast){ const e = byId.get(f); if (!e) continue; const k = norm(al); if (k && !e.cast.has(k)){ e.cast.add(k); push(byActor, k, e); } }
+    console.log(`wikidata ${lang}: ${films.length} films, ${aliases.length} aliases, ${cast.length} cast credits`);
     await sleep(1000);
   }
-  return index;
+  const langQids = Object.values(LANGS).map(v => `wd:${v.wikidata}`).join(" ");
+  for (const [, lab] of await sparql(`SELECT ?s ?lab WHERE { VALUES ?lang { ${langQids} } ?s wdt:P31/wdt:P279* wd:Q5398426; wdt:P364 ?lang; rdfs:label ?lab FILTER(LANG(?lab)="en") }`)) series.add(norm(lab));
+  console.log(`wikidata: ${series.size} hindi/telugu tv series`);
+  return { byName, byLangYear, byActor, series };
+}
+
+/* Small spelling differences ("Badrenath" / "Badrinath", "Pournamy" /
+   "Pournami") within the same language and year window; short names are
+   never fuzzed ("Don" and "Dor" were both 2006 Hindi films). */
+function levenshtein(a, b){
+  const prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++){
+    let diag = prev[0]; prev[0] = i;
+    for (let j = 1; j <= b.length; j++){
+      const tmp = prev[j];
+      prev[j] = Math.min(prev[j] + 1, prev[j - 1] + 1, diag + (a[i - 1] === b[j - 1] ? 0 : 1));
+      diag = tmp;
+    }
+  }
+  return prev[b.length];
+}
+function fuzzyEq(a, b){
+  const [s, l] = a.length <= b.length ? [a, b] : [b, a];
+  if (s.length < 6) return false;
+  const tol = Math.max(1, Math.floor(s.length / 8));
+  if (l.length - s.length > tol) return s.length >= 8 && levenshtein(s, l.slice(0, s.length)) <= tol; // "Aravindha Sametha" vs "Aravinda Sametha Veera Raghava"
+  return levenshtein(s, l) <= tol;
 }
 
 /* -- names: song titles and film names as Saavn writes them -- */
@@ -112,7 +147,7 @@ const LANG_RX = LANG_NAMES.join("|");
 const FROM_RX = /[\(\[]\s*from\s+"([^"]+)"\s*[\)\]]|\s[-–—]\s*from\s+"([^"]+)"\s*$/i;
 const DUB_RX = new RegExp(`\\(\\s*(${LANG_RX})\\s*\\)|\\[\\s*(${LANG_RX})\\s*\\]|\\s[-–—]\\s*(${LANG_RX})\\s*$|\\b(${LANG_RX})\\s+(version|dubbed)\\b|\\bdubbed\\b`, "i");
 const OST_RX = /[\(\[]?\s*\b(original\s+(motion\s+picture\s+)?soundtrack|music\s+from\s+the\s+(motion\s+picture|film)|ost)\b\s*[\)\]]?/i;
-const COMPILATION_RX = /\b(hits|best of|top \d|top\b|collection|jukebox|love songs|romantic|dance|party|playlist|special|essentials|classics|forever|celebrat|superhit|blockbuster|chartbuster|melodies|mix|vol\.?|volume|anthems|songs|favourites|favorites|year|20\d\d|\d0s|retro|non.?stop|the best|greatest|ultimate|trending|viral|mashup|remix)\b/i;
+const COMPILATION_RX = /\b(hits|best of|top \d|top\b|collection|jukebox|love songs|romantic|dance|party|playlist|special|essentials|classics|evergreen|forever|celebrat|superhit|blockbuster|chartbuster|melodies|mix|vol\.?|volume|anthems|songs|favourites|favorites|year|20\d\d|\d0s|retro|non.?stop|the best|greatest|ultimate|trending|viral|mashup|remix)\b/i;
 const cleanTitle = s => de(s).replace(FROM_RX, "").replace(/\s+/g, " ").trim();
 const fromClause = s => { const m = de(s).match(FROM_RX); return m ? (m[1] || m[2]).trim() : null; };
 function cleanAlbum(album){
@@ -186,25 +221,44 @@ const roles = raw => (raw.more_info?.artistMap?.artists || []);
 const names = (raw, role) => [...new Set(roles(raw).filter(a => a.role === role).map(a => de(a.name).trim()).filter(Boolean))];
 const yearOf = raw => parseInt(raw.year) || 0;
 const playsOf = raw => parseInt(raw.play_count) || 0;
+const compilationAlbum = raw => COMPILATION_RX.test(cleanAlbum(raw.more_info?.album).name);
 
 function makeMatcher(index){
   const tol = CFG.yearTolerance;
-  const lookup = (name, lang) => (index.get(norm(name)) || []).filter(f => f.lang === lang);
+  const lookup = (name, lang) => (index.byName.get(norm(name)) || []).filter(f => f.lang === lang);
+  const latest = hits => (hits.length ? hits.reduce((a, b) => (b.y > a.y ? b : a)) : null);
   return {
-    /* film of this language released within +-tol of year */
+    /* film of this language released within +-tol of year, exact name first, then fuzzy */
     exact(name, lang, year){
       const hits = lookup(name, lang).filter(f => Math.abs(f.y - year) <= tol);
-      return hits.length ? hits.reduce((a, b) => (b.y > a.y ? b : a)) : null;
+      if (hits.length) return latest(hits);
+      const k = norm(name), fuzzy = new Set();
+      for (let y = year - tol; y <= year + tol; y++)
+        for (const f of index.byLangYear.get(`${lang}/${y}`) || []) if (f.names.some(n => fuzzyEq(k, n))) fuzzy.add(f);
+      return fuzzy.size === 1 ? [...fuzzy][0] : null;
     },
     /* film of this language by name alone; the latest one not after the song copy */
     byName(name, lang, year){
       const hits = lookup(name, lang).filter(f => f.y <= year + tol);
       return hits.length ? hits.reduce((a, b) => (b.y > a.y ? b : a)) : null;
     },
-    /* a film of another language with this name around this year (a dub source) */
-    conflict(name, lang, year){
-      return (index.get(norm(name)) || []).find(f => f.lang !== lang && Math.abs(f.y - year) <= tol) || null;
+    /* a film of another language this song could be a dub of: same name
+       around this year, same name in any year with one of these actors, or
+       a film of that year sharing the starring actors */
+    conflict(name, lang, year, starring){
+      const cast = new Set(starring.map(norm));
+      const others = (index.byName.get(norm(name)) || []).filter(f => f.lang !== lang);
+      if (others.some(f => Math.abs(f.y - year) <= tol)) return "dub-conflict";
+      if (others.some(f => [...cast].some(a => f.cast.has(a)))) return "dub-cast";
+      const overlap = new Map();
+      for (const a of cast) for (const f of index.byActor.get(a) || []){
+        if (f.lang === lang || Math.abs(f.y - year) > tol) continue;
+        overlap.set(f, (overlap.get(f) || 0) + 1);
+      }
+      for (const [, n] of overlap) if (n >= Math.min(2, cast.size)) return "dub-cast";
+      return null;
     },
+    isSeries: name => index.series.has(norm(name)),
   };
 }
 
@@ -229,21 +283,24 @@ async function classify(raw, M){
   if (EXCLUDE_RX.test(de(raw.title))) return { reject: "excluded-title" };
   if (!playsOf(raw)) return { reject: "no-plays" };
   const copies = [raw];
-  const verdict = (copy, film, f, yv) => ({ copy, film, year: f ? f.y : year, yv, source: f ? "wikidata" : "starring" });
+  const verdict = (copy, film, f, yv) => ({ copy, film: f ? f.label : film, year: f ? f.y : year, yv, source: f ? "wikidata" : "starring" });
 
   const tryExact = copy => {
     for (const c of filmCandidates(copy.title, copy.more_info?.album)){
+      if (c.dub) continue;
       const f = M.exact(c.name, lang, yearOf(copy));
       if (f) return verdict(copy, c.name, f, true);
     }
     return null;
   };
   let v = tryExact(raw);
-  if (!v){
-    // a compilation or re-release copy: find the original album copy by shared play count
+  if (!v || compilationAlbum(raw)){
+    // A compilation or re-release copy is resolved to a matching original album copy by shared play count.
     const sibs = await siblings(raw);
     copies.push(...sibs);
-    for (const s of sibs){ v = tryExact(s); if (v) break; }
+    const original = sibs.find(s => !compilationAlbum(s) && tryExact(s));
+    if (original) v = tryExact(original);
+    else if (compilationAlbum(raw)) return { reject: "no-original-copy" };
   }
   if (!v){
     // the name alone names a film of this language (a re-upload with a later year):
@@ -255,14 +312,19 @@ async function classify(raw, M){
     }
   }
   if (!v){
-    const starring = copies.some(c => names(c, "starring").length);
-    if (!starring) return { reject: "no-film" };
+    const starring = [...new Set(copies.flatMap(c => names(c, "starring")))];
+    if (!starring.length) return { reject: "no-film" };
+    // performers cast in their own video: a single, not a film
+    const performers = new Set(copies.flatMap(c => ["singer", "music", "lyricist"].flatMap(r => names(c, r))).map(norm));
+    if (starring.every(a => performers.has(norm(a)))) return { reject: "no-film" };
     for (const copy of copies){
       const c = filmCandidates(copy.title, copy.more_info?.album)[0];
       if (!c || !isFilmLike(c.name, title)) continue;
       if (c.dub) return { reject: "dub-marker" };
+      if (M.isSeries(c.name)) return { reject: "series" };
       const minYear = Math.min(...copies.map(yearOf).filter(Boolean));
-      if (M.conflict(c.name, lang, minYear)) return { reject: "dub-conflict" };
+      const conflict = M.conflict(c.name, lang, minYear, starring);
+      if (conflict) return { reject: conflict };
       v = verdict(copy, c.name, null, false); v.year = minYear;
       break;
     }
