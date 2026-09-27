@@ -1,6 +1,6 @@
 # Song loading
 
-`buildCrate(mix, eras, sound, difficulty)` in `src/lib/crate.js` assembles the game queue; it returns `{ queue, source }` or `{ error: "load" | "thin" }`.
+`buildCrate(mix, eras, sound, difficulty, minSongs)` in `src/lib/crate.js` assembles the game queue; it returns `{ queue, source }` or `{ error: "load" | "thin" | "safe" }`.
 `difficulty` is `"easy" | "medium" | "hard" | "mixed"` (default `"mixed"`, also `settings.difficulty`).
 It maps to corpus tiers through `DIFFICULTY_TIERS` in `src/lib/constants.js` (easy → easy; medium → easy + medium; hard → medium + hard; mixed → all); when the mapped tiers hold fewer than 10 songs for the chosen languages and eras the crate widens to all tiers before reporting `thin`.
 The uncurated fallback tiers carry no tier and ignore it.
@@ -21,7 +21,8 @@ The uncurated fallback tiers carry no tier and ignore it.
 4. **Live iTunes search** (`loadFromItunes`) - last resort; deliberately throttled to few search terms because Apple rate-limits around 20 searches/min per IP (that rate limit caused the original "Couldn't load enough songs" production bug).
 
 Each tier only runs if the pool still has fewer than 10 songs.
-The snips scorer (`scripts/build-snips.mjs`) scores every corpus song, so any corpus song a game draws has been scored; fallback-tier songs are unscored and play through the muffle graph.
+The snips scorer (`scripts/build-snips.mjs`) scores corpus recordings by Saavn ID.
+Music-only draws only source IDs present in the current verified index; other tiers can contribute only if their exact ID has a valid index entry.
 Dedupe is by canonical title key (`songKey(title)` in `src/lib/utils.js`, which strips bracketed qualifiers, dash suffixes like `- From "Movie"`, and punctuation): each tier dedupes internally, later tiers are filtered against earlier ones, and the assembled pool gets a final dedupe pass (first occurrence wins, so full Saavn songs beat hook clips).
 Tracks from tiers 2 and 3 are 30-second mid-song "hook" clips and carry `hook: true`.
 
@@ -43,7 +44,7 @@ The rule is film songs only, with the film's real release year:
    The top 30% by score is `easy`, the next 40% `medium`, the rest `hard` (cut-offs in the config, baked into the file's `tiers`).
 
 The file is compact: `{ v, built, tiers, cols, songs: [[...], ...] }`, one row per song with columns `id, title, film, year, yearVerified, language, singers, composers, lyricists, starring, albumId, plays, score, tier`; the client expands rows by `cols` and carries composers as `music` for the reveal.
-Songs are deduped by language + `songKey(title)` (highest play count wins) so snips.json keys stay unambiguous.
+Songs are deduped by language + `songKey(title)` (highest play count wins); snips are keyed separately by Saavn ID so similarly titled recordings cannot share an interval.
 The script refuses to write a corpus with fewer than `minSongsPerLanguage` songs in either language.
 
 ## Filters applied to every track
@@ -59,12 +60,12 @@ If filters shrink the pool below 10 the crate returns `{ error: "thin" }` and th
 
 ## Snips annotation and Music-only eligibility
 
-Each crate build fetches `./snips.json` (no-cache); a missing or failed fetch is tolerated and simply yields no annotations.
-A pooled track gets `t.snip = startSec` when its normalized-title key matches an index entry whose `winMax` is below `SNIP_CLEAN_MAX` (see docs/audio.md for the contract).
+Each crate build fetches `./snips.json` (no-cache).
+A pooled track gets an interval only when its Saavn ID matches both the index key and entry, the interval is exactly 10 seconds inside the track, and its maximum patch voice score is below `SNIP_CLEAN_MAX` (see docs/audio.md for the contract).
 The crate log entry records `snips: "ok"|"none"` and `snipped: <count>`.
-In Music-only mode (`sound === "inst"`), the queue is adaptive: if at least 15 annotated tracks survive the filters, the queue uses only annotated tracks (every song plays mode "snip").
-Otherwise annotated tracks lead the queue and unannotated ones follow, playing through the realtime muffle graph (mode "muffle").
-The annotation survives game resume: `sanitizeTrack` preserves a finite `snip` value.
+In Music-only mode (`sound === "inst"`), the queue contains only annotated tracks and must cover the requested rounds and cast size.
+If fewer safe songs survive, the crate returns `safe` and setup explains the shortage.
+On resume, the remaining queue is checked against the current index again; stale entries are removed, and an inadequate queue cannot resume.
 
 ## Played-song cooldown (per device)
 

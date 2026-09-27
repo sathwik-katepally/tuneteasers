@@ -4,13 +4,8 @@
 
    The client no longer downloads/decodes/processes audio buffers: per-song
    instrumental windows are computed offline (scripts/build-snips.mjs) and
-   shipped in snips.json. Playback is plain <audio> elements:
-     "snip"   - track has a verified instrumental window (track.snip): seek
-                to it and play raw. No Web Audio processing at all.
-     "muffle" - no verified window: route the element through a realtime
-                biquad muffle graph (needs crossOrigin="anonymous"; the
-                Saavn and iTunes hosts both serve CORS-readable audio).
-     "plain"  - as-is element playback (vocal-audible fallback, and reveals).
+   shipped in snips.json. Music-only uses a verified interval and an
+   AudioContext gain gate at its end. Easy and reveals play as-is.
    window.__ttLastMode reports the mode that actually played (E2E surface).
    Game sound effects are synthesised on the same AudioContext (sfx), so the
    engine stays the only thing in the app that makes a sound. */
@@ -18,23 +13,8 @@ import { log, errMsg } from "./log.js";
 
 const STALL_MS = 12000; // a dead or stalled stream must not pin the game on "Cueing it up…"
 
-/* Realtime vocal muffle for unverified tracks: the legacy biquad chain,
-   element edition. Element playback has no offline L−R trick, so this is the
-   simple version - bass foundation branch + formant cuts + top-end lowpass. */
-function buildMuffleGraph(c, src){
-  const out = c.createGain();
-  const bass = c.createBiquadFilter(); bass.type="lowpass"; bass.frequency.value=140;
-  const bassG = c.createGain(); bassG.gain.value=0.9;
-  src.connect(bass); bass.connect(bassG); bassG.connect(out);
-  const cut1 = c.createBiquadFilter(); cut1.type="peaking"; cut1.frequency.value=1200; cut1.Q.value=0.9; cut1.gain.value=-10;
-  const cut2 = c.createBiquadFilter(); cut2.type="peaking"; cut2.frequency.value=3000; cut2.Q.value=0.9; cut2.gain.value=-9;
-  const hiLp = c.createBiquadFilter(); hiLp.type="lowpass"; hiLp.frequency.value=6500;
-  src.connect(cut1); cut1.connect(cut2); cut2.connect(hiLp); hiLp.connect(out);
-  return out;
-}
-
 export const engine = {
-  ctx:null, el:null, pre:null, timer:null, session:0,
+  ctx:null, el:null, pre:null, timer:null, boundary:null, session:0,
   ac(){
     if (!this.ctx) this.ctx = new (window.AudioContext||window.webkitAudioContext)();
     if (this.ctx.state === "suspended") this.ctx.resume();
@@ -43,12 +23,14 @@ export const engine = {
   stop(){
     this.session++;
     if (this.timer){ clearTimeout(this.timer); this.timer = null; }
+    if (this.boundary && this.el) this.el.removeEventListener("timeupdate", this.boundary);
+    this.boundary = null;
+    if (this.el?._ttOut) this.el._ttOut.gain.value = 0;
     if (this.el){ this.el.pause(); }
   },
   _mark(m){ try { window.__ttLastMode = m; } catch(e){} }, // E2E/debug surface
   /* Get the playback element for a URL, adopting the prefetched one when it
-     matches. `cors` elements (muffle candidates) are kept separate from plain
-     ones: crossOrigin cannot change after the source has loaded. */
+     matches. CORS and plain elements stay separate after loading. */
   _el(url, cors){
     const want = cors ? "1" : "";
     if (this.el && this.el.dataset.src === url && this.el.dataset.cors === want && !this.el.error) return this.el;
@@ -77,55 +59,67 @@ export const engine = {
       el.addEventListener("error", onErr);
     });
   },
-  /* Snippet playback for Music-only mode.
-     Returns the mode that played ("snip" | "muffle" | "plain") or
-     "failed" | "superseded"; callers must treat "superseded" as "do nothing"
-     (a newer user action owns playback).
-     `offset` is relative to the snip start; the 12s top rung of the clip
-     ladder may run past the ~10-12s verified window (owner-accepted).
-     cb: { onEnd, onBlocked } - onBlocked fires when the browser refuses to
-     start audio without a fresh tap (autoplay policy). */
+  /* Music-only plays only inside a verified 10-second interval.
+     A gain gate cuts output on the AudioContext clock even if JS timers lag. */
   async playSnippet(track, offset, secs, cb = {}){
     this.stop();
     const s = this.session;
+    const snip = track?.snip;
+    if (!snip || !track.sourceId || snip.sourceId !== track.sourceId ||
+        typeof snip.indexBuilt !== "string" || !snip.indexBuilt ||
+        !Number.isFinite(snip.startSec) || !Number.isFinite(snip.endSec) ||
+        snip.startSec < 0 || snip.endSec - snip.startSec !== 10 ||
+        !Number.isFinite(offset) || !Number.isFinite(secs) || offset < 0 || secs <= 0 ||
+        offset + secs > 10) return "failed";
     const url = track.stream;
     const id = url.slice(-24); // enough to correlate log lines without full URLs
-    const snip = Number.isFinite(track.snip) ? track.snip : null;
-    const el = this._el(url, snip === null);
+    const el = this._el(url, true);
     const ok = await this._ready(el);
     if (s !== this.session) return "superseded";
     if (!ok){ log("element-fail", { id, err: el.error ? el.error.code : "stall" }); return "failed"; }
-    let mode = snip === null ? "muffle" : "snip";
-    if (mode === "muffle"){
-      try { // wire the element through the realtime muffle graph; wiring failure means vocals stay audible ("plain")
-        const c = this.ac();
-        if (!el._ttSrc) el._ttSrc = c.createMediaElementSource(el);
-        if (el._ttOut) el._ttOut.disconnect();
-        el._ttSrc.disconnect();
-        el._ttOut = buildMuffleGraph(c, el._ttSrc);
-        el._ttOut.connect(c.destination);
-      } catch(e){ log("muffle-wire-fail", { id, msg: errMsg(e) }); mode = "plain"; }
-    }
-    try { el.currentTime = (snip || 0) + offset; } catch(e){}
+    try {
+      const target = snip.startSec + offset;
+      if (Math.abs(el.currentTime - target) > 0.05) el.currentTime = target;
+      if (el.seeking) await new Promise((resolve, reject) => {
+        const guard = setTimeout(() => { el.removeEventListener("seeked", done); reject(new Error("seek stalled")); }, STALL_MS);
+        const done = () => { clearTimeout(guard); resolve(); };
+        el.addEventListener("seeked", done, { once:true });
+      });
+      if (s !== this.session) return "superseded";
+      if (Math.abs(el.currentTime - target) > 0.1) throw new Error("seek missed interval");
+      const c = this.ac();
+      if (!el._ttSrc) el._ttSrc = c.createMediaElementSource(el);
+      if (el._ttOut) el._ttOut.disconnect();
+      el._ttSrc.disconnect();
+      const gate = c.createGain();
+      gate.gain.setValueAtTime(1, c.currentTime);
+      gate.gain.setValueAtTime(0, c.currentTime + secs);
+      el._ttSrc.connect(gate); gate.connect(c.destination);
+      el._ttOut = gate;
+    } catch(e){ log("snip-fail", { id, msg:errMsg(e) }); return "failed"; }
     el.muted = false;
-    this._play(el, s, id, cb.onBlocked);
-    this._mark(mode);
-    log("play", { id, mode, ...(snip !== null ? { snip } : {}), offset, secs });
-    this.timer = setTimeout(() => { if (s === this.session){ el.pause(); cb.onEnd && cb.onEnd(); } }, secs*1000);
-    return mode;
+    this._play(el, s, id, cb.onBlocked, cb.onErr);
+    this._mark("snip");
+    log("play", { id, mode:"snip", snip:snip.startSec, offset, secs });
+    const finish = () => { if (s !== this.session || !this.boundary) return; el._ttOut.gain.value = 0; el.pause(); clearTimeout(this.timer); this.timer = null; el.removeEventListener("timeupdate", this.boundary); this.boundary = null; cb.onEnd && cb.onEnd(); };
+    this.boundary = () => { if (el.currentTime >= snip.startSec + offset + secs - 0.03) finish(); };
+    el.addEventListener("timeupdate", this.boundary);
+    this.timer = setTimeout(finish, secs*1000);
+    return "snip";
   },
-  _play(el, s, id, onBlocked){
+  _play(el, s, id, onBlocked, onErr){
     const p = el.play();
     if (p) p.catch(e => {
-      if (!e || e.name !== "NotAllowedError" || s !== this.session) return;
-      log("play-blocked", { id });
+      if (s !== this.session) return;
+      log(e?.name === "NotAllowedError" ? "play-blocked" : "element-fail", { id, err:errMsg(e) });
       this.stop();
-      onBlocked && onBlocked();
+      if (e?.name === "NotAllowedError") onBlocked && onBlocked();
+      else onErr && onErr();
     });
   },
   /* Light prefetch: a preload="auto" element for the next track, at most one.
      It never plays; playSnippet/playElement adopt it when the URL matches.
-     `plain` marks a track that will play as-is (With-vocals), which must not
+     `plain` marks a track that will play as-is (Easy), which must not
      be a CORS element or playElement would refetch it. */
   prefetch(track, plain){
     if (!track || !track.stream) return;
@@ -133,7 +127,7 @@ export const engine = {
     if ((this.el && this.el.dataset.src === url) || (this.pre && this.pre.dataset.src === url)) return;
     if (this.pre){ try { this.pre.removeAttribute("src"); this.pre.load(); } catch(e){} } // cancel the old one
     const el = new Audio();
-    const cors = !plain && !Number.isFinite(track.snip); // it would play "muffle", which needs CORS
+    const cors = !plain;
     if (cors) el.crossOrigin = "anonymous";
     el.preload = "auto";
     el.dataset.src = url;
@@ -147,14 +141,15 @@ export const engine = {
   prime(track, plain){
     if (!track || !track.stream) return;
     this.ac();
-    const el = this._el(track.stream, !plain && !Number.isFinite(track.snip));
+    if (!plain && !track.snip) return;
+    const el = this._el(track.stream, !plain);
     const s = this.session;
     el.muted = true;
     const restore = () => { if (s === this.session) el.pause(); el.muted = false; };
     try { const p = el.play(); if (p) p.then(restore, restore); else restore(); } catch(e){ restore(); }
   },
-  /* As-is playback (mode "plain"): reveals, With-vocals snippets, and the
-     vocal-audible fallback. secs=0 plays to the end of the stream.
+  /* As-is playback (mode "plain"): reveals and Easy snippets.
+     secs=0 plays to the end of the stream.
      cb: { onStart, onEnd, onErr, onBlocked } */
   playElement(url, offset, secs, cb = {}){
     this.stop();
@@ -178,7 +173,7 @@ export const engine = {
       }
       try { el.currentTime = offset; } catch(e){}
       el.muted = false;
-      this._play(el, s, url.slice(-24), cb.onBlocked);
+      this._play(el, s, url.slice(-24), cb.onBlocked, cb.onErr);
       this._mark("plain");
       cb.onStart && cb.onStart();
       if (secs) this.timer = setTimeout(() => { if (s === this.session){ el.pause(); cb.onEnd && cb.onEnd(); } }, secs*1000);

@@ -1,17 +1,8 @@
 #!/usr/bin/env node
-/* Build public/snips.json: per-song verified instrumental windows, computed
-   offline so the client just seeks and plays (docs/audio.md).
-
-   Pipeline:
-   1. Take every song in public/corpus.json (the curated pool the game draws
-      from, see scripts/build-corpus.mjs) and resolve its Saavn id to a stream
-      URL through the batch songs endpoint, deduped by normalized title key.
-   2. Score each song not already in snips.json in headless Chromium
-      (Playwright) via scripts/snip-harness.html: fetch stream ->
-      decodeAudioData -> 16kHz mono render -> MusiCNN p(voice) per ~6s
-      patch -> median-of-3 smoothing -> quietest-worst-patch 10s window.
-   3. Write { v: 1, built, snips: { key: [startSec, winMax] } } with only
-      winMax < 0.40 entries, keys sorted; refuse to write fewer than 80.
+/* Build public/snips.json from current Saavn IDs in the curated corpus.
+   Headless Chromium decodes each recording, uses old offsets only as
+   candidates, and accepts a 10-second interval only after overlapping
+   MusiCNN patches cover it continuously below the clean threshold.
 
    Run: node scripts/build-snips.mjs   (CI: .github/workflows/refresh-snips.yml)
    Env:
@@ -20,40 +11,47 @@
                      no playwright devDependency installed
      SNIP_WORKERS    parallel scoring pages (default 3)
      SNIP_OUT        output path override (default public/snips.json)
-     SNIP_LIMIT      score at most N songs (smoke tests; final write refuses
-                     thin results, so pair with SNIP_OUT) */
+     SNIP_HINTS      old v1 index for one-time candidate migration
+     SNIP_MIGRATE_ONLY=1  verify old clean candidates without a wider scan
+     SNIP_LIMIT      score at most N songs (default 300 per scheduled run) */
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { songKey } from "../src/lib/utils.js";
-import { SAAVN_BASES, CORPUS_BATCH } from "../src/lib/constants.js";
+import { SAAVN_BASES, CORPUS_BATCH, SNIP_CLEAN_MAX } from "../src/lib/constants.js";
 
 const REPO = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const OUT = process.env.SNIP_OUT || path.join(REPO, "public/snips.json");
 const CORPUS = process.env.SNIP_CORPUS || path.join(REPO, "public/corpus.json");
+const HINTS = process.env.SNIP_HINTS;
+const MIGRATE_ONLY = process.env.SNIP_MIGRATE_ONLY === "1";
 const WORKERS = Math.max(1, parseInt(process.env.SNIP_WORKERS) || 3);
-const LIMIT = parseInt(process.env.SNIP_LIMIT) || Infinity;
-const KEEP_MAX = 0.4;    // entries at or above this winMax are dropped
+const LIMIT = Math.max(1, parseInt(process.env.SNIP_LIMIT) || 300);
 const MIN_ENTRIES = 80;  // refuse to write a final result thinner than this
+const CHECKED_METHOD = `continuous-v2/${SNIP_CLEAN_MAX}`;
 const PAGE_RECYCLE = 10; // songs per page before recycling (decode memory)
 const PROGRESS_EVERY = 20;
 
 /* -- corpus songs -> stream URLs (the same batch endpoint the client uses) -- */
-const keyOf = songKey; // shared with the client — snips.json keys must match the crate's
+const keyOf = songKey;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-let saavnBase = null;
+let saavnBase = null, lastFetchError = "unknown";
 async function saavnFetch(p){
-  const bases = saavnBase ? [saavnBase, ...SAAVN_BASES.filter(b => b !== saavnBase)] : SAAVN_BASES;
-  for (const b of bases){
-    try {
-      const r = await fetch(b + p, { signal: AbortSignal.timeout(15000) });
-      if (!r.ok) continue;
-      const j = await r.json();
-      if (j && (j.data || j.results)){ saavnBase = b; return j; }
-    } catch (e){}
+  for (let attempt = 0; attempt < 3; attempt++){
+    const bases = saavnBase ? [saavnBase, ...SAAVN_BASES.filter(b => b !== saavnBase)] : SAAVN_BASES;
+    for (const b of bases){
+      try {
+        const r = await fetch(b + p, { signal: AbortSignal.timeout(15000) });
+        if (!r.ok){ lastFetchError = `${new URL(b).host}: HTTP ${r.status}`; continue; }
+        const j = await r.json();
+        if (Array.isArray(j?.data) && j.data.length){ saavnBase = b; return j; }
+        lastFetchError = `${new URL(b).host}: empty or invalid songs response`;
+      } catch (e){ lastFetchError = `${new URL(b).host}: ${e?.name || "fetch error"}`; }
+    }
+    if (attempt < 2) await sleep(1000 * (attempt + 1));
   }
   return null;
 }
@@ -83,37 +81,49 @@ async function collectSongs(){
   const corpus = loadCorpus();
   const lang = s => (s.language === "telugu" ? "telugu" : "bolly");
   const seen = new Set(), pool = [], unresolved = [];
+  let consecutiveEmpty = 0;
   for (let i = 0; i < corpus.length; i += CORPUS_BATCH){
     const batch = corpus.slice(i, i + CORPUS_BATCH);
     const r = await saavnFetch(`/songs?ids=${batch.map(s => s.id).join(",")}`);
+    consecutiveEmpty = r?.data?.length ? 0 : consecutiveEmpty + 1;
+    if (consecutiveEmpty >= 3)
+      throw new Error(`three consecutive corpus batches returned no songs; last endpoint result: ${lastFetchError}`);
     await sleep(300); // sequential-polite to the API
     const byId = new Map((Array.isArray(r?.data) ? r.data : []).map(x => [x.id, x]));
     for (const s of batch){
       const key = keyOf(s.title);
-      if (!key || seen.has(key)) continue;
+      if (!key || !s.id || seen.has(s.id)) continue;
       const stream = safeUrl(pickStream(byId.get(s.id)?.downloadUrl));
       if (!stream){ unresolved.push(s); continue; }
-      seen.add(key);
-      pool.push({ key, title: s.title, lang: lang(s), stream });
+      seen.add(s.id);
+      pool.push({ id:s.id, key, title: s.title, lang: lang(s), stream });
     }
   }
   if (unresolved.length) console.log(`${unresolved.length} corpus songs did not resolve to a stream`);
   return pool;
 }
 
-/* -- existing snips.json: reuse scored entries, carry unseen keys forward
-      (a flaky API week must not throw verified windows away) -- */
+/* -- reuse only source-bound v2 entries for IDs still in the corpus -- */
 function loadExisting(){
   try {
     const j = JSON.parse(fs.readFileSync(OUT, "utf8"));
-    if (j && j.v === 1 && j.snips && typeof j.snips === "object") return { snips: j.snips, built: j.built };
+    if (j && j.v === 2 && j.snips && typeof j.snips === "object"){
+      let hints = {};
+      if (HINTS){
+        const old = JSON.parse(fs.readFileSync(HINTS, "utf8"));
+        if (old.v === 1 && old.snips) hints = old.snips;
+      }
+      return { snips: j.snips, checked:j.checked || {}, corpusIds:j.corpusIds || [], built: j.built, hints };
+    }
+    if (j && j.v === 1 && j.snips && typeof j.snips === "object") return { snips:{}, checked:{}, corpusIds:[], built:null, hints:j.snips };
   } catch (e){}
-  return { snips: {}, built: null };
+  return { snips: {}, checked:{}, corpusIds:[], built: null, hints:{} };
 }
 
 /* -- local harness server -- */
 const ROUTES = {
   "/": [path.join(REPO, "scripts/snip-harness.html"), "text/html"],
+  "/constants.js": [path.join(REPO, "src/lib/constants.js"), "text/javascript"],
   "/vendor/tf.min.js": [path.join(REPO, "node_modules/@tensorflow/tfjs/dist/tf.min.js"), "text/javascript"],
   "/vendor/tf-backend-wasm.min.js": [path.join(REPO, "node_modules/@tensorflow/tfjs-backend-wasm/dist/tf-backend-wasm.min.js"), "text/javascript"],
 };
@@ -151,7 +161,7 @@ function loadPlaywright(){
   throw new Error("playwright not found: npm install it or set PLAYWRIGHT_DIR to a playwright package dir");
 }
 
-function writeSnips(entries, { final, prev }){
+function writeSnips(entries, checked, corpusIds, { final }){
   const keys = Object.keys(entries).sort();
   if (final && keys.length < MIN_ENTRIES){
     console.error(`REFUSING to write ${OUT}: only ${keys.length} entries (< ${MIN_ENTRIES})`);
@@ -159,10 +169,9 @@ function writeSnips(entries, { final, prev }){
   }
   const snips = {};
   for (const k of keys) snips[k] = entries[k];
-  // an unchanged index keeps its old `built` so the weekly CI commit-if-changed
-  // step sees a byte-identical file instead of a timestamp-only diff
-  const unchanged = prev && prev.built && JSON.stringify(prev.snips) === JSON.stringify(snips);
-  const body = JSON.stringify({ v: 1, built: unchanged ? prev.built : new Date().toISOString(), snips });
+  const rejected = {};
+  for (const id of Object.keys(checked).sort()) if (!snips[id]) rejected[id] = checked[id];
+  const body = JSON.stringify({ v: 2, built: new Date().toISOString(), snips, checked:rejected, corpusIds:[...corpusIds].sort() });
   fs.mkdirSync(path.dirname(OUT), { recursive: true });
   fs.writeFileSync(OUT, body + "\n");
   return keys.length;
@@ -178,9 +187,22 @@ function writeSnips(entries, { final, prev }){
 
   const prev = loadExisting();
   const existing = prev.snips;
-  const entries = { ...existing }; // carry-forward + this run's results
-  const todo = corpus.filter(s => !(s.key in existing)).slice(0, LIMIT);
-  const reused = corpus.length - corpus.filter(s => !(s.key in existing)).length;
+  const corpusIds = new Set(corpus.map(s => s.id));
+  const previousIds = new Set(prev.corpusIds);
+  const entries = Object.fromEntries(Object.entries(existing).filter(([id, e]) =>
+    corpusIds.has(id) && e.sourceId === id && e.method === "continuous-v2" &&
+    Number.isFinite(e.startSec) && e.startSec >= 0 && e.endSec - e.startSec === 10 &&
+    Number.isFinite(e.maxVoice) && e.maxVoice < SNIP_CLEAN_MAX));
+  const checked = Object.fromEntries(Object.entries(prev.checked).filter(([id, method]) =>
+    corpusIds.has(id) && method === CHECKED_METHOD));
+  const counts = new Map();
+  for (const s of corpus) counts.set(s.key, (counts.get(s.key) || 0) + 1);
+  const hintScore = s => counts.get(s.key) === 1 && Number.isFinite(prev.hints[s.key]?.[1]) ? prev.hints[s.key][1] : 1;
+  const todo = corpus.filter(s => !(s.id in entries) && checked[s.id] !== CHECKED_METHOD &&
+      (!MIGRATE_ONLY || hintScore(s) < SNIP_CLEAN_MAX))
+    .sort((a,b) => Number(previousIds.has(a.id)) - Number(previousIds.has(b.id)) || hintScore(a) - hintScore(b))
+    .slice(0, LIMIT);
+  const reused = Object.keys(entries).length;
   console.log(`${reused} already scored (reused), ${todo.length} to score`);
 
   const { chromium } = loadPlaywright();
@@ -214,7 +236,9 @@ function writeSnips(entries, { final, prev }){
       }
       let r;
       try {
-        r = await page.evaluate(u => window.__scoreSong(u), s.stream);
+        const hint = counts.get(s.key) === 1 && prev.hints[s.key]?.[1] < 0.4 ? prev.hints[s.key][0] : null;
+        r = await page.evaluate(({u,h,search}) => window.__scoreSong(u,h,search),
+          {u:s.stream,h:hint,search:!MIGRATE_ONLY});
       } catch (e){
         r = { error: String(e && e.message || e).slice(0, 200), stage: "page" };
       }
@@ -226,12 +250,14 @@ function writeSnips(entries, { final, prev }){
         await page.close().catch(() => {}); // a failed job may leave wasm state corrupted
         page = null;
       } else {
-        if (r.winMax < KEEP_MAX){ entries[s.key] = [r.startSec, r.winMax]; kept++; }
-        console.log(`${String(scored).padStart(3)}/${todo.length} [w${id}] ${s.lang} winMax=${r.winMax.toFixed(3)} start=${r.startSec}s dur=${r.dur}s ${r.ms}ms  ${s.title.slice(0, 40)}`);
+        if (r.maxVoice < SNIP_CLEAN_MAX && Number.isFinite(r.startSec)){
+          entries[s.id] = { sourceId:s.id, startSec:r.startSec, endSec:r.endSec, maxVoice:r.maxVoice, method:"continuous-v2" }; kept++;
+        } else checked[s.id] = CHECKED_METHOD;
+        console.log(`${String(scored).padStart(3)}/${todo.length} [w${id}] ${s.lang} maxVoice=${r.maxVoice.toFixed(3)} start=${r.startSec ?? "none"}s dur=${r.dur}s ${r.ms}ms  ${s.title.slice(0, 40)}`);
       }
       if (++sinceWrite >= PROGRESS_EVERY){
         sinceWrite = 0;
-        const n = writeSnips(entries, { final: false, prev });
+        const n = writeSnips(entries, checked, corpusIds, { final: false });
         console.log(`  ...progress written (${n} entries)`);
       }
       await sleep(250); // polite spacing between stream fetches
@@ -253,7 +279,8 @@ function writeSnips(entries, { final, prev }){
         used = 0;
       }
       let r;
-      try { r = await page.evaluate(u => window.__scoreSong(u), s.stream); }
+      try { r = await page.evaluate(({u,h,search}) => window.__scoreSong(u,h,search),
+        {u:s.stream,h:counts.get(s.key) === 1 ? prev.hints[s.key]?.[0] : null,search:!MIGRATE_ONLY}); }
       catch (e){ r = { error: String(e && e.message || e).slice(0, 200), stage: "page" }; }
       used++;
       if (r.error){
@@ -262,8 +289,10 @@ function writeSnips(entries, { final, prev }){
         await page.close().catch(() => {});
         page = null;
       } else {
-        if (r.winMax < KEEP_MAX){ entries[s.key] = [r.startSec, r.winMax]; kept++; }
-        console.log(`  retry ok: winMax=${r.winMax.toFixed(3)} ${s.title.slice(0, 40)}`);
+        if (r.maxVoice < SNIP_CLEAN_MAX && Number.isFinite(r.startSec)){
+          entries[s.id] = { sourceId:s.id, startSec:r.startSec, endSec:r.endSec, maxVoice:r.maxVoice, method:"continuous-v2" }; kept++;
+        } else checked[s.id] = CHECKED_METHOD;
+        console.log(`  retry ok: maxVoice=${r.maxVoice.toFixed(3)} ${s.title.slice(0, 40)}`);
       }
       await sleep(250);
     }
@@ -273,11 +302,12 @@ function writeSnips(entries, { final, prev }){
   await browser.close();
   server.close();
 
-  const n = writeSnips(entries, { final: true, prev });
-  const wins = Object.values(entries).map(e => e[1]);
+  const n = writeSnips(entries, checked, corpusIds, { final: true });
+  const wins = Object.values(entries).map(e => e.maxVoice);
   const under = t => wins.filter(w => w < t).length;
   console.log(`\nwrote ${OUT}: ${n} entries (${kept} new this run) in ${Math.round((Date.now() - t0) / 60000)}min`);
   console.log(`winMax: <0.25 ${under(0.25)} | <0.30 ${under(0.3)} | <0.35 ${under(0.35)} | <0.40 ${under(0.4)}`);
   console.log(`scored ${scored} songs, ${failures.length} failed after retry (${scored ? Math.round(100 * failures.length / scored) : 0}%)`);
+  console.log(`${Object.keys(checked).length} source IDs rejected by ${CHECKED_METHOD}`);
   for (const f of failures) console.log(`  FAILED ${f.lang} ${f.title.slice(0, 44)} (${f.stage}) ${f.error.slice(0, 90)}`);
 })().catch(e => { console.error("build-snips failed:", e); process.exit(1); });

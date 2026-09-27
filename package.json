@@ -13,7 +13,8 @@
     "e2e:game": "node e2e/game.mjs",
     "e2e:migrate": "node e2e/migrate.mjs",
     "e2e:autoplay": "node e2e/autoplay.mjs",
-    "e2e:offline": "node e2e/offline.mjs"
+    "e2e:offline": "node e2e/offline.mjs",
+    "e2e:snips": "node e2e/safe-snips.mjs"
   },
   "dependencies": {
     "@fontsource/mukta": "^5.3.0",

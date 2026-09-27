@@ -2,9 +2,9 @@ import { useEffect, useState } from "react";
 import { AnimatePresence, LazyMotion, MotionConfig, domAnimation } from "motion/react";
 import * as m from "motion/react-m";
 import { loadSaved, save } from "./lib/save";
-import { CLIP_STEPS, DIFFICULTY, hookOffset, pointsNow } from "./lib/config";
+import { CLIP_STEPS, MUSIC_CLIP_STEPS, DIFFICULTY, hookOffset, pointsNow } from "./lib/config";
 import { markPlayed, loadBlocked, saveBlocked, normArtist, isBlocked } from "./lib/storage.js";
-import { buildCrate as buildCrateJs } from "./lib/crate.js";
+import { buildCrate as buildCrateJs, refreshMusicQueue as refreshMusicQueueJs } from "./lib/crate.js";
 import { engine, keepAwake } from "./lib/engine.js";
 import { log } from "./lib/log.js";
 import { displayTitle } from "./lib/utils.js";
@@ -20,7 +20,8 @@ import { Podium } from "./screens/Podium";
 import type { AppState, CastMember, Difficulty, GameState, Mode, Phase, RosterEntry, Settings, Track, Turn, Verdict } from "./types";
 
 type Crate = { error?: string; queue?: Track[]; source?: string };
-const buildCrate = buildCrateJs as (mix: string, eras: string[], sound: string, difficulty: Difficulty) => Promise<Crate>;
+const buildCrate = buildCrateJs as (mix: string, eras: string[], sound: string, difficulty: Difficulty, minSongs: number) => Promise<Crate>;
+const refreshMusicQueue = refreshMusicQueueJs as (queue: Track[]) => Promise<Track[]>;
 
 const freshTurn = (): Turn => ({ rung: 0, clipEndedAt: null, clipStartedAt: 0, playKey: 0, hint: false });
 const primaryArtistOf = (t: Track | null) => (t ? String(t.artist || "").split(",")[0].trim() : "");
@@ -69,10 +70,11 @@ export function App(){
     setLoading(true); setError("");
     const mode = cast ? g?.mode ?? S.mode : S.mode;
     const roster = cast ?? (mode === "teams" ? state.teams : state.players);
-    const crate = await buildCrate(S.mix, S.eras, DIFFICULTY[S.difficulty].sound, S.difficulty);
+    const crate = await buildCrate(S.mix, S.eras, DIFFICULTY[S.difficulty].sound, S.difficulty, S.rounds * roster.length);
     setLoading(false);
     if (crate.error || !crate.queue){
-      setError(crate.error === "thin"
+      setError(crate.error === "safe" ? "Not enough verified music-only clips for this show. Try Easy or fewer rounds, or widen your song picks."
+        : crate.error === "thin"
         ? "Not enough songs match your picks. Try more eras, or unblock a few artists."
         : "Couldn't load songs. Check your connection and try again.");
       setState(st => ({ ...st, screen: "setup" }));
@@ -98,19 +100,22 @@ export function App(){
   async function playClip(rung: number, replay = false){
     if (!track) return;
     engine.ac();
-    const secs = CLIP_STEPS[rung];
+    const secs = (plain ? CLIP_STEPS : MUSIC_CLIP_STEPS)[rung];
     setNote("");
     setTurn(t => ({ ...t, rung, clipEndedAt: replay ? t.clipEndedAt : null }));
     const started = () => {
       setTurn(t => ({ ...t, clipStartedAt: Date.now(), playKey: t.playKey + 1 }));
       // A refused play() reports back before playSnippet resolves; keep the tap prompt.
-      setPhase(p => (p === "blocked" ? p : "playing"));
+      setPhase(p => (p === "blocked" || p === "listened" ? p : "playing"));
     };
     const ended = () => {
       setTurn(t => ({ ...t, clipEndedAt: t.clipEndedAt ?? Date.now() }));
       setPhase("listened");
     };
-    const failed = () => { setNote("This song won't stream right now. Skip it to try another."); ended(); };
+    const failed = () => {
+      setNote(plain ? "This song won't stream right now. Skip it to try another." : "This music-only clip isn't available. Skip it to try another.");
+      ended();
+    };
     const cb = { onStart: started, onEnd: ended, onErr: failed, onBlocked: () => setPhase("blocked") };
     log("snippet", { rung, secs, sound: plain ? "full" : "inst", title: String(track.title).slice(0, 28) });
     setPhase("cueing");
@@ -120,11 +125,8 @@ export function App(){
     }
     const r = await engine.playSnippet(track, 0, secs, cb);
     if (r === "superseded") return;
-    if (r === "snip" || r === "muffle"){ started(); return; }
-    setNote("Couldn't take the vocals out of this one, so you'll hear it as it is.");
-    if (r === "plain"){ started(); return; }
-    log("muffle-fallback", { title: String(track.title).slice(0, 28) });
-    engine.playElement(track.stream, 0, secs, cb);
+    if (r === "snip"){ started(); return; }
+    failed();
   }
 
   function revealAndScore(result: "correct" | "wrong"){
@@ -234,7 +236,20 @@ export function App(){
     const saved = g && !g.finished ? g : null;
     screen = <Setup error={error} settings={S} upSettings={upSettings} players={state.players} teams={state.teams} setRoster={setRoster}
       blocked={blocked} unblockArtist={unblockArtist} startGame={() => startGame()} savedGame={saved}
-      resumeGame={() => { resetTurn(); setPhase("handover"); setState(st => ({ ...st, screen: "game" })); }}
+      resumeGame={async () => {
+        if (!g) return;
+        if (DIFFICULTY[g.difficulty].sound === "inst"){
+          setLoading(true);
+          const queue = await refreshMusicQueue(g.queue.slice(g.trackIdx));
+          setLoading(false);
+          if (queue.length < (g.totalRounds - g.round) * g.cast.length + (g.cast.length - g.turn)){
+            setError("Not enough verified music-only clips remain to resume. Start a new show with Easy or fewer rounds.");
+            return;
+          }
+          setState(st => ({ ...st, screen:"game", game:{ ...g, queue, trackIdx:0, totalSongs:queue.length } }));
+        } else setState(st => ({ ...st, screen:"game" }));
+        resetTurn(); setPhase("handover");
+      }}
       discardGame={() => setState(st => ({ ...st, game: null }))} />;
   } else if (state.screen === "done"){
     key = "done"; meta = "The end";
@@ -262,7 +277,7 @@ export function App(){
         break;
       default:
         key = "playing";
-        screen = <Playing name={who!.name} track={track!} phase={phase} turn={turn} note={note}
+        screen = <Playing name={who!.name} track={track!} plain={plain} phase={phase} turn={turn} note={note}
           onPlay={playClip} onJudge={revealAndScore} onHint={() => setTurn(t => ({ ...t, hint: true }))} onSkip={skipSong} />;
     }
   }

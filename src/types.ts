@@ -8,7 +8,8 @@ export interface Track {
   year: number;
   lang: string;
   hook: boolean;
-  snip?: number;
+  sourceId?: string;
+  snip?: { startSec: number; endSec: number; sourceId: string; indexBuilt: string };
   tier?: string;
   music?: string;
 }

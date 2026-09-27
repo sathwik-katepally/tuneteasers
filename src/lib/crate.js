@@ -4,7 +4,7 @@
    Fallback 1: raw JioSaavn search (unverified years, no tiers).
    Fallback 2: catalog.json baked into the site (rebuilt weekly by CI, 30s hook clips).
    Fallback 3: live iTunes search, throttled to stay under Apple's rate limit. */
-import { SAAVN_BASES, SAAVN_QUERIES, SAAVN_PAGES, SAAVN_MIN_PLAYS, CORPUS_DRAW, CORPUS_BATCH, DIFFICULTY_TIERS, ITUNES_TERMS, ITUNES_LANG_OK, EXCLUDE_RX, ERAS, eraOf, SNIP_CLEAN_MAX } from "./constants.js";
+import { SAAVN_BASES, SAAVN_QUERIES, SAAVN_PAGES, SAAVN_MIN_PLAYS, CORPUS_DRAW, CORPUS_BATCH, DIFFICULTY_TIERS, ITUNES_TERMS, ITUNES_LANG_OK, EXCLUDE_RX, ERAS, eraOf, SNIP_CLEAN_MAX, SNIP_MAX_AGE_MS } from "./constants.js";
 import { de, songKey, shuffle, safeUrl } from "./utils.js";
 import { sanitizeTrack, loadPlayed, loadBlocked, normArtist, isBlocked, PLAY_COOLDOWN } from "./storage.js";
 import { log, ms } from "./log.js";
@@ -55,7 +55,7 @@ const CORPUS_LANG = { hindi:"bolly", telugu:"telugu" };
    "none" (no corpus) and "unresolved" (ids could not be turned into streams)
    fall through to the uncurated tiers; "thin" is a filter problem the user
    must widen, not a reason to play unverified songs. */
-async function loadFromCorpus(langs, eras, difficulty, blocked, played){
+async function loadFromCorpus(langs, eras, difficulty, blocked, played, safeIds, minSongs){
   const corpus = await loadCorpus();
   if (!corpus) return { status:"none", pool:[] };
   const eraSet = Array.isArray(eras) && eras.length && eras.length < ERAS.length ? new Set(eras) : null;
@@ -63,6 +63,7 @@ async function loadFromCorpus(langs, eras, difficulty, blocked, played){
   for (const s of corpus){
     const lang = CORPUS_LANG[s.language];
     if (!langs.includes(lang)) continue;
+    if (safeIds && !safeIds.has(s.id)) continue;
     if (eraSet && !eraSet.has(eraOf(s.year))) continue;
     const artist = (s.singers || []).slice(0,3).join(", ") || "Unknown artist";
     if (blocked.size && isBlocked({ artist }, blocked)) continue;
@@ -70,13 +71,13 @@ async function loadFromCorpus(langs, eras, difficulty, blocked, played){
   }
   const tiers = new Set(DIFFICULTY_TIERS[difficulty] || DIFFICULTY_TIERS.mixed);
   let cands = eligible.filter(s => tiers.has(s.tier));
-  if (cands.length < 10) cands = eligible; // widen before giving up on the curated pool
-  if (cands.length < 10) return { status:"thin", pool:[] };
+  if (!safeIds && cands.length < minSongs) cands = eligible;
+  if (cands.length < minSongs) return { status:"thin", pool:[] };
   const now = Date.now();
   const fresh = [], stale = [];
   for (const s of cands) ((now - (played[songKey(s.title)] || 0)) > PLAY_COOLDOWN ? fresh : stale).push(s);
   stale.sort((a,b) => (played[songKey(a.title)]||0) - (played[songKey(b.title)]||0));
-  const draw = shuffle(fresh).concat(stale).slice(0, CORPUS_DRAW);
+  const draw = shuffle(fresh).concat(stale).slice(0, Math.max(CORPUS_DRAW, minSongs * 2));
   const batches = [];
   for (let i = 0; i < draw.length; i += CORPUS_BATCH) batches.push(draw.slice(i, i + CORPUS_BATCH));
   const results = await Promise.allSettled(batches.map(b => saavnFetch(`/songs?ids=${b.map(s=>s.id).join(",")}`)));
@@ -95,11 +96,11 @@ async function loadFromCorpus(langs, eras, difficulty, blocked, played){
     pool.push(sanitizeTrack({
       title:s.title, artist:s.artist, album:s.film, art:pickArt(r.image), stream,
       duration:parseInt(r.duration)||200, year:s.year, lang:s.lang, tier:s.tier,
-      music:(s.composers||[]).join(", "),
+      music:(s.composers||[]).join(", "), sourceId:r.id === s.id ? s.id : "",
     }));
   }
   const ok = pool.filter(Boolean);
-  return { status: ok.length >= 10 ? "ok" : "unresolved", pool: ok };
+  return { status: ok.length >= minSongs ? "ok" : "unresolved", pool: ok };
 }
 
 async function loadFromSaavn(langs){
@@ -134,7 +135,7 @@ async function loadFromSaavn(langs){
       pool.push(sanitizeTrack({
         title:name, artist:artists.slice(0,3).join(", ")||"Unknown artist",
         album:de(s.album?.name||""), art:pickArt(s.image), stream,
-        duration:parseInt(s.duration)||200, year, lang,
+        duration:parseInt(s.duration)||200, year, lang, sourceId:s.id,
       }));
     }
   }
@@ -198,49 +199,71 @@ async function loadFromItunes(langs){
   return pool.filter(Boolean);
 }
 
-/* The offline-scored instrumental-window index (see docs/audio.md).
-   Fetched fresh per crate build; absence is normal (index not built yet,
-   or fetch failed) and simply means no track gets a verified window. */
+/* The offline-scored source-bound index (see docs/audio.md). */
 async function loadSnips(){
   try {
     const r = await fetch("./snips.json", { cache:"no-cache" });
     if (!r.ok) return null;
     const j = await r.json();
-    return (j && j.snips && typeof j.snips === "object") ? j.snips : null;
+    const age = Date.now() - Date.parse(j?.built);
+    return (j && j.v === 2 && Number.isFinite(age) && age >= 0 && age <= SNIP_MAX_AGE_MS && j.snips &&
+      typeof j.snips === "object" && !Array.isArray(j.snips)) ? j : null;
   } catch(e){ return null; }
 }
 
-/* Returns { queue, source } or { error: "load" | "thin" }.
+function verifiedSnip(t, index){
+  if (!index || !t.sourceId || t.hook) return null;
+  const e = index.snips[t.sourceId];
+  if (!e || e.sourceId !== t.sourceId || e.method !== "continuous-v2" ||
+      !Number.isFinite(e.startSec) || !Number.isFinite(e.endSec) ||
+      !Number.isFinite(e.maxVoice) || e.maxVoice >= SNIP_CLEAN_MAX ||
+      e.startSec < 0 || e.endSec - e.startSec !== 10 ||
+      e.endSec + 1 > t.duration) return null;
+  return { startSec:e.startSec, endSec:e.endSec, sourceId:t.sourceId, indexBuilt:index.built };
+}
+
+export async function refreshMusicQueue(queue){
+  const index = await loadSnips();
+  return queue.map(t => ({ ...t, snip:verifiedSnip(t, index) || undefined })).filter(t => t.snip);
+}
+
+/* Returns { queue, source } or { error: "load" | "thin" | "safe" }.
    difficulty: "easy" | "medium" | "hard" | "mixed" (corpus tiers; the
    uncurated fallback tiers carry no difficulty and ignore it). */
-export async function buildCrate(mix, eras, sound, difficulty = "mixed"){
+export async function buildCrate(mix, eras, sound, difficulty = "mixed", minSongs = 10){
   const t0 = performance.now();
   const langs = mix==="both" ? ["bolly","telugu"] : [mix];
   const key = t => songKey(t.title);
-  const snipsP = loadSnips();
+  const snips = await loadSnips();
+  if (sound === "inst" && (!snips || !Object.keys(snips.snips).length)){
+    log("crate", { mix, difficulty, source:"index", snips:"none", snipped:0, ms:ms(t0) });
+    return { error:"safe" };
+  }
   const blocked = new Set(loadBlocked().map(normArtist));
   const played = loadPlayed();
-  const corpus = await loadFromCorpus(langs, eras, difficulty, blocked, played);
+  const safeIds = sound === "inst" ? new Set(Object.keys(snips?.snips || {})) : null;
+  const corpus = await loadFromCorpus(langs, eras, difficulty, blocked, played, safeIds, minSongs);
   const tiers = { corpus: corpus.status === "ok" ? corpus.pool.length : corpus.status };
   if (corpus.status === "thin"){
     log("crate", { mix, difficulty, source:"corpus", ...tiers, ms: ms(t0) });
-    return { error:"thin" };
+    return { error:sound === "inst" ? "safe" : "thin" };
   }
   let pool = corpus.pool;
   let source = "corpus";
-  if (pool.length < 10){
-    pool = await loadFromSaavn(langs);
-    source = "saavn";
-    tiers.saavn = pool.length;
+  if (pool.length < minSongs){
+    const searched = await loadFromSaavn(langs);
+    pool = sound === "inst" ? pool.concat(searched) : searched;
+    if (sound !== "inst" || !corpus.pool.length) source = "saavn";
+    tiers.saavn = searched.length;
   }
-  if (pool.length < 10){
+  if (pool.length < minSongs && sound !== "inst"){
     const keys = new Set(pool.map(key));
     const backup = (await loadCatalog(langs)).filter(t=>!keys.has(key(t)));
     tiers.catalog = backup.length;
     if (!pool.length) source = "catalog";
     pool = pool.concat(backup);
   }
-  if (pool.length < 10){
+  if (pool.length < minSongs && sound !== "inst"){
     const keys = new Set(pool.map(key));
     const live = (await loadFromItunes(langs)).filter(t=>!keys.has(key(t)));
     tiers.live = live.length;
@@ -254,20 +277,19 @@ export async function buildCrate(mix, eras, sound, difficulty = "mixed"){
     const seen = new Set();
     pool = pool.filter(t => { const k = key(t); if (seen.has(k)) return false; seen.add(k); return true; });
   }
-  // Annotate verified instrumental windows: t.snip = window start in seconds,
-  // set only when the song's index entry is clean enough to trust raw playback.
-  const snips = await snipsP;
+  // Bind intervals only to the recording ID resolved for this crate.
   let snipped = 0;
   if (snips) for (const t of pool){
-    const e = snips[key(t)];
-    if (Array.isArray(e) && Number.isFinite(e[0]) && e[1] < SNIP_CLEAN_MAX){ t.snip = Math.max(0, Math.floor(e[0])); snipped++; }
+    const verified = verifiedSnip(t, snips);
+    if (verified){ t.snip = verified; snipped++; }
   }
   log("crate", { mix, difficulty, source, ...tiers, snips: snips ? "ok" : "none", snipped, ms: ms(t0) });
-  if (pool.length < 10) return { error:"load" };
+  if (pool.length < minSongs && sound !== "inst") return { error:"load" };
   if (Array.isArray(eras) && eras.length && eras.length < ERAS.length)
     pool = pool.filter(t => eras.includes(eraOf(t.year)));
   if (blocked.size) pool = pool.filter(t => !isBlocked(t, blocked));
-  if (pool.length < 10) return { error:"thin" };
+  if (sound === "inst") pool = pool.filter(t => t.snip);
+  if (pool.length < minSongs) return { error:sound === "inst" ? "safe" : "thin" };
   // Recently played songs (this device) sit out; when the fresh pool runs thin,
   // repeats come back least-recently-played first, queued after all fresh songs.
   const now = Date.now();
@@ -275,13 +297,7 @@ export async function buildCrate(mix, eras, sound, difficulty = "mixed"){
   for (const t of pool) ((now - (played[key(t)] || 0)) > PLAY_COOLDOWN ? fresh : stale).push(t);
   stale.sort((a,b) => (played[key(a)]||0) - (played[key(b)]||0));
   let queue = fresh.length >= 15 ? shuffle(fresh) : shuffle(fresh).concat(stale);
-  // Music-only eligibility (adaptive): with enough verified tracks the whole
-  // game plays raw "snip" windows; when verified tracks are scarce they lead
-  // the queue and unverified ones follow, playing through the muffle graph.
-  if (sound === "inst"){
-    const verified = queue.filter(t => Number.isFinite(t.snip));
-    if (verified.length >= 15) queue = verified;
-    else queue = verified.concat(queue.filter(t => !Number.isFinite(t.snip)));
-  }
+  // A full show's worth of verified tracks is required before the game starts.
+  if (queue.length < minSongs) return { error:sound === "inst" ? "safe" : "thin" };
   return { queue, source };
 }

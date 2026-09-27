@@ -2,9 +2,8 @@
 <!-- Offline VAD scoring harness, served locally by scripts/build-snips.mjs and
      driven by Playwright. Loads tfjs (WASM backend), essentia.js and the
      MusiCNN voice/instrumental model, then exposes window.__scoreSong(url):
-     fetch -> decodeAudioData -> 16kHz mono offline render -> mel per kept
-     patch -> MusiCNN p(voice) -> median-of-3 smoothing -> pick the 10s
-     window whose worst patch is quietest.
+     fetch -> decodeAudioData -> 16kHz mono offline render -> find candidate
+     -> verify the whole 10s interval with overlapping patches.
      The extraction is the client vad.worker.js logic with one fix (see
      extractSegment below): essentia's FrameGenerator silently DROPS
      digitally-silent frames, so a song with any pure silence (fade-in head,
@@ -19,11 +18,14 @@
 <script src="/vendor/tf-backend-wasm.min.js"></script>
 <script type="module">
 import { EssentiaTFInputExtractor, TensorflowMusiCNN } from "/essentia/essentia.js-model.es.js";
+import { SNIP_CLEAN_MAX } from "/constants.js";
 
 const MODEL_SR = 16000;
 const PATCH_FRAMES = 187, MEL_HOP = 256; // MusiCNN input geometry
 const PATCH_STRIDE = 2;                  // score every 2nd patch (~5.98s granularity)
 const WINDOW_SEC = 10;                   // verified window length (owner update 2026-08-31)
+const VERIFY_STRIDE = 62;                 // 0.992s; overlapping 2.99s patches cover all 10s
+const VERIFY_PATCHES = 9;
 
 let ready = null;
 function init(){
@@ -119,26 +121,23 @@ function extractKept(extractor, pcm){
   return { kept, features };
 }
 
-/* Median-of-3 smoothing + pick the WINDOW_SEC window whose worst patch is
-   quietest (ties go earlier) - copied from src/lib/vad.js. */
-function pickWindow(probs, hopSec){
-  const sm = Float32Array.from(probs);
-  for (let i = 1; i < probs.length - 1; i++){
-    const a = probs[i-1], b = probs[i], c = probs[i+1];
-    sm[i] = Math.max(Math.min(a, b), Math.min(Math.max(a, b), c));
-  }
-  const winPatches = Math.max(1, Math.min(sm.length, Math.round(WINDOW_SEC / hopSec)));
-  let bestIdx = 0, bestMax = Infinity;
-  for (let i = 0; i + winPatches <= sm.length; i++){
-    let mx = 0;
-    for (let j = i; j < i + winPatches; j++) if (sm[j] > mx) mx = sm[j];
-    if (mx < bestMax - 1e-6){ bestMax = mx; bestIdx = i; }
-  }
-  return { start: bestIdx * hopSec, winMax: bestMax, patches: sm.length, winPatches };
+async function verify(extractor, model, pcm, startSec){
+  const start = Math.floor(startSec * MODEL_SR);
+  const neededFrames = PATCH_FRAMES + (VERIFY_PATCHES - 1) * VERIFY_STRIDE;
+  const neededSamples = (neededFrames + 1) * MEL_HOP;
+  if (start < 0 || start + neededSamples > pcm.length) return null;
+  const features = extractSegment(extractor, pcm.slice(start, start + neededSamples), start, neededFrames);
+  const mel = [];
+  for (let i = 0; i < VERIFY_PATCHES; i++)
+    mel.push(...features.melSpectrum.slice(i * VERIFY_STRIDE, i * VERIFY_STRIDE + PATCH_FRAMES));
+  const acts = await model.predict({ ...features, melSpectrum:mel, frameSize:mel.length }, true);
+  if (acts.length !== VERIFY_PATCHES || acts.some(a => !Number.isFinite(a[1]))) return null;
+  const maxVoice = Math.max(...acts.map(a => a[1]));
+  return maxVoice < SNIP_CLEAN_MAX ? { startSec, endSec:startSec + WINDOW_SEC, maxVoice:Math.round(maxVoice * 1000) / 1000 } : null;
 }
 
 /* Returns { startSec, winMax, patches, dur, ms } or { error, stage }. */
-window.__scoreSong = async function(url){
+window.__scoreSong = async function(url, hint = null, searchAfterHint = true){
   const t0 = performance.now();
   let stage = "init";
   try {
@@ -160,8 +159,16 @@ window.__scoreSong = async function(url){
     const EssentiaWASM = await freshEssentia();
     const extractor = new EssentiaTFInputExtractor(EssentiaWASM, "musicnn", false);
     let kept, features;
-    try { ({ kept, features } = extractKept(extractor, pcm)); }
-    finally { try { extractor.delete(); } catch(e){} }
+    const hinted = Number.isInteger(hint) && hint >= 0 ? await verify(extractor, model, pcm, hint) : null;
+    if (hinted){
+      extractor.delete();
+      return { ...hinted, dur:Math.round(buf.duration), ms:Math.round(performance.now() - t0) };
+    }
+    if (Number.isInteger(hint) && !searchAfterHint){
+      extractor.delete();
+      return { maxVoice:1, dur:Math.round(buf.duration), ms:Math.round(performance.now() - t0) };
+    }
+    ({ kept, features } = extractKept(extractor, pcm));
     stage = "predict";
     // Predict in bounded batches: a 13+ minute song is 130+ patches, and one
     // giant batch blows the tfjs WASM heap ("memory access out of bounds" /
@@ -177,11 +184,29 @@ window.__scoreSong = async function(url){
     stage = "pick";
     if (probs.length < 2) throw new Error("too few patches: " + probs.length);
     const hopSec = (PATCH_FRAMES * MEL_HOP * PATCH_STRIDE) / MODEL_SR; // ~5.98s per kept patch
-    const pick = pickWindow(probs, hopSec);
+    const ranked = [];
+    for (let i = 0; i < probs.length; i++){
+      const startSec = Math.round(i * hopSec);
+      if (startSec + 11 > buf.duration) continue;
+      const max = Math.max(...probs.slice(i, i + 2));
+      ranked.push({ startSec, max });
+    }
+    ranked.sort((a,b) => a.max - b.max);
+    let pick = null;
+    const candidates = [];
+    for (const candidate of ranked){
+      if (candidates.every(c => Math.abs(c.startSec - candidate.startSec) >= 8)) candidates.push(candidate);
+      if (candidates.length === 12) break;
+    }
+    for (const candidate of candidates){
+      pick = await verify(extractor, model, pcm, candidate.startSec);
+      if (pick) break;
+    }
+    extractor.delete();
     return {
-      startSec: Math.round(pick.start),
-      winMax: Math.round(pick.winMax * 1000) / 1000,
-      patches: pick.patches,
+      ...(pick || {}),
+      maxVoice: pick ? pick.maxVoice : 1,
+      patches: probs.length,
       dur: Math.round(buf.duration),
       ms: Math.round(performance.now() - t0),
     };
@@ -192,7 +217,7 @@ window.__scoreSong = async function(url){
 
 window.__harnessInit = init; // let the driver warm the model before the first song
 // debug handles for ad-hoc page.evaluate probes (harmless in production runs)
-window.__dbg = { freshEssentia, EssentiaTFInputExtractor, TensorflowMusiCNN, to16kMono, extractKept, pickWindow, init };
+window.__dbg = { freshEssentia, EssentiaTFInputExtractor, TensorflowMusiCNN, to16kMono, extractKept, verify, init };
 window.__harnessReady = true;
 </script>
 <body>snip scorer harness</body>

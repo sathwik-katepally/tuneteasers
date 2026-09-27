@@ -60,12 +60,9 @@ export const ITUNES_TERMS = {
 export const ITUNES_LANG_OK = { bolly:["bollywood","hindi"], telugu:["telugu","tollywood"] };
 export const EXCLUDE_RX = /(remix|mashup|lo-?fi|slowed|reverb|medley|unplugged|acoustic|cover|karaoke|instrumental|\bbgm\b|jukebox|revisited|reprise|redux|\bclub\b|\bdj\b|mix\b|8d\b|sped up|lounge|\bversion\b|\btheme\b|\bost\b|teaser|prevue)/i;
 
-/* A snips.json entry is trusted (mode "snip", raw playback) only when its
-   winMax - the window's max p(voice) from the offline MusiCNN VAD - is below
-   this. The index ships entries up to 0.40 so this can be tuned client-side
-   without a corpus rebuild. Initial value from the 2026-08-31 experiment run
-   (~22% of real Saavn songs pass at 0.25); the owner calibrates by ear. */
+/* Maximum raw patch voice score accepted across a full 10-second interval. */
 export const SNIP_CLEAN_MAX = 0.25;
+export const SNIP_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 
 export const ERAS = ["2000s","2010s","2020s"];
 export const eraOf = y => y >= 2020 ? "2020s" : y >= 2010 ? "2010s" : "2000s";

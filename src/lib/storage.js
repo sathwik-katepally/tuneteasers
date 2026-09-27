@@ -22,8 +22,11 @@ export function sanitizeTrack(t){
     lang: t.lang==="telugu" ? "telugu" : "bolly",
     hook: !!t.hook, // true when the stream is a mid-song preview clip, not the intro
     ...(DIFFICULTIES.includes(t.tier) && t.tier !== "mixed" ? { tier: t.tier } : {}),
-    // verified instrumental-window start (seconds), when the snips index vouched for it
-    ...(Number.isFinite(t.snip) ? { snip: Math.max(0, Math.floor(t.snip)) } : {}),
+    ...(typeof t.sourceId === "string" && t.sourceId ? { sourceId: t.sourceId } : {}),
+    ...(t.snip && t.sourceId === t.snip.sourceId && typeof t.snip.indexBuilt === "string" &&
+      Number.isFinite(t.snip.startSec) && Number.isFinite(t.snip.endSec) &&
+      t.snip.startSec >= 0 && t.snip.endSec - t.snip.startSec === 10
+      ? { snip: { startSec:t.snip.startSec, endSec:t.snip.endSec, sourceId:t.sourceId, indexBuilt:t.snip.indexBuilt } } : {}),
     ...(t.music ? { music: String(t.music).slice(0,120) } : {}),
   };
 }

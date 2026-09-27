@@ -4,6 +4,7 @@ import type { Difficulty, Track } from "../types";
    the speed bonus, the hint cost and the show length. */
 
 export const CLIP_STEPS = [3, 5, 8, 12] as const;
+export const MUSIC_CLIP_STEPS = [3, 5, 8, 10] as const;
 export const CLIP_POINTS = [100, 70, 50, 30] as const;
 
 export const SPEED_BONUS_MAX = 20;
