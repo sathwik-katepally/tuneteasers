@@ -27,7 +27,7 @@ export const engine = {
     if (this.boundary && this.el) this.el.removeEventListener("playing", this.boundary);
     this.boundary = null;
     if (this.el?._ttOut){ this.el._ttOut.gain.cancelScheduledValues(0); this.el._ttOut.gain.value = 0; }
-    if (this.el){ this.el.pause(); }
+    if (this.el){ if (!this.el.paused) this.el._ttPaused = true; this.el.pause(); }
   },
   _mark(m){ try { window.__ttLastMode = m; } catch(e){} }, // E2E/debug surface
   /* Get the playback element for a URL, adopting the prefetched one when it
@@ -82,10 +82,13 @@ export const engine = {
     let gate;
     const target = snip.startSec + offset;
     try {
-      // Always seek, even to where the element already is: Chromium resumes a
-      // paused element ~60ms past its pause point unless a seek flushes it,
-      // and the tail past the last stop was gated silent anyway.
-      el.currentTime = target;
+      // After a pause, seek even to where the element already is: Chromium
+      // resumes a paused element ~60ms past its pause point unless a seek
+      // flushes it, and the tail past the last stop was gated silent anyway.
+      // An element that never started (a refused autoplay) skips the seek so
+      // "Tap to play" can call play() inside the tap.
+      if (el._ttPaused || Math.abs(el.currentTime - target) > 0.02) el.currentTime = target;
+      el._ttPaused = false;
       if (el.seeking) await new Promise((resolve, reject) => {
         const guard = setTimeout(() => { el.removeEventListener("seeked", done); reject(new Error("seek stalled")); }, STALL_MS);
         const done = () => { clearTimeout(guard); resolve(); };
@@ -121,6 +124,7 @@ export const engine = {
       if (s !== this.session) return;
       if (gate){ gate.gain.cancelScheduledValues(0); gate.gain.value = 0; }
       el.pause();
+      el._ttPaused = true;
       trace.to = el.currentTime;
       if (stalled) log("element-fail", { id, err: "stall" });
       clearTimeout(this.timer); this.timer = null; clearTimeout(startGuard);
