@@ -287,7 +287,7 @@ const ROUTES = {
 
 export const isGroupPath = path => path === "/api/groups" || path === "/api/group" || path.startsWith("/api/group/");
 
-export async function group(request, env, url){
+export async function group(request, env, url, ctx){
   const originHeader = request.headers.get("origin");
   const origin = allowedOrigin(originHeader, env);
   if (originHeader && !origin) return reply({ success: false, message: "origin not allowed" }, 403, null);
@@ -317,6 +317,7 @@ export async function group(request, env, url){
     const auth = await authenticate(request, env);
     if (request.method !== "GET" && await limited(env.WRITE_LIMITER, auth.group.id)) throw new HttpError(429, "this group is sending too fast, try again in a minute");
     const [body, status = 200] = await handler(request, env, auth, url);
+    if (request.method !== "GET") ctx.waitUntil(sweep(env));
     return reply(body, status, origin);
   } catch (e){
     if (e instanceof HttpError) return reply({ success: false, message: e.message }, e.status, origin);
@@ -325,7 +326,18 @@ export async function group(request, env, url){
   }
 }
 
-export async function purgeExpired(env){
+/* Retention runs off group writes, at most hourly per isolate: the free plan's
+   cron triggers are all taken on this account. Reads filter by the same
+   windows, so an expired row is never served even before it is deleted. */
+const SWEEP_EVERY_MS = 3600e3;
+let lastSweep = 0;
+function sweep(env){
+  if (Date.now() - lastSweep < SWEEP_EVERY_MS) return Promise.resolve();
+  lastSweep = Date.now();
+  return purgeExpired(env).catch(e => console.error("retention sweep failed", String(e?.message || e)));
+}
+
+async function purgeExpired(env){
   const now = Date.now();
   const t = ttl(env);
   await env.DB.batch([

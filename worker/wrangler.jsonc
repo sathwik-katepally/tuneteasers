@@ -5,8 +5,6 @@
   "compatibility_date": "2026-09-01",
   "workers_dev": true,
   "observability": { "enabled": true },
-  // Daily retention sweep for the group tables (see docs/group-sync.md).
-  "triggers": { "crons": ["23 3 * * *"] },
   "vars": {
     "ALLOWED_ORIGINS": "https://sathwik-katepally.github.io",
     "RESULT_TTL_DAYS": "365",
@@ -30,7 +28,6 @@
     // Non-production copy for testing a branch: its own Worker and D1 database.
     "preview": {
       "name": "tuneteasers-saavn-preview",
-      "triggers": { "crons": ["23 3 * * *"] },
       "vars": {
         "ALLOWED_ORIGINS": "https://sathwik-katepally.github.io",
         "RESULT_TTL_DAYS": "365",
