@@ -13,14 +13,14 @@ interface Props {
   turn: Turn;
   note: string;
   onPlay: (rung: number, replay?: boolean) => void;
-  onKnow: () => void;
+  onJudge: (result: "correct" | "wrong") => void;
   onHint: () => void;
   onSkip: () => void;
 }
 
 const LINE: Partial<Record<Phase, string>> = { cueing: "Threading the film", playing: "Now playing", listened: "Clip over" };
 
-export function Playing({ name, track, phase, turn, note, onPlay, onKnow, onHint, onSkip }: Props){
+export function Playing({ name, track, phase, turn, note, onPlay, onJudge, onHint, onSkip }: Props){
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), 250);
@@ -85,7 +85,7 @@ export function Playing({ name, track, phase, turn, note, onPlay, onKnow, onHint
         <p className={s.caption}>No rush. A quick answer adds up to {SPEED_BONUS_MAX}.</p>
       </div>
 
-      <div className={sh.actions}>
+      <div className={`${sh.actions} ${s.actions}`}>
         <div className={sh.row2}>
           <button type="button" className="btn btn-cream" onClick={() => nextLen && onPlay(turn.rung + 1)} disabled={!nextLen || cueing}>
             <Plus size={18} strokeWidth={3} /> {nextLen ? `Hear ${nextLen}s` : "Full clip"}
@@ -94,12 +94,16 @@ export function Playing({ name, track, phase, turn, note, onPlay, onKnow, onHint
             <RotateCcw size={17} strokeWidth={2.75} /> Replay
           </button>
         </div>
-        <button type="button" className="btn btn-primary btn-block" onClick={onKnow} disabled={cueing}>I know this one</button>
+        <p className={s.guessPrompt}>Say the song or film out loud, then choose.</p>
+        <div className={`${sh.row2} ${s.judgments}`}>
+          <button type="button" className="btn btn-primary" onClick={() => onJudge("correct")} disabled={cueing}>I know this one</button>
+          <button type="button" className="btn btn-cream" onClick={() => onJudge("wrong")} disabled={cueing}>I don't know this one</button>
+        </div>
         <div className={s.links}>
           <button type="button" className={s.link} onClick={onHint} disabled={turn.hint}>
             <Lightbulb size={15} strokeWidth={2.5} /> {turn.hint ? "Hint shown" : `Hint, costs ${HINT_PENALTY}`}
           </button>
-          <button type="button" className={s.link} onClick={onSkip}>Skip this song</button>
+          {note.includes("won't stream") && <button type="button" className={s.link} onClick={onSkip}>Skip this song</button>}
         </div>
       </div>
     </div>

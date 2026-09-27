@@ -15,7 +15,7 @@
 - `src/lib/engine.js` - the audio engine (songs and synthesised sound effects) and screen wake lock.
 - `src/styles/tokens.css`, `src/styles/global.css` - design tokens (colors, fonts, hard shadows) and the few global classes (`.btn*`, `.display`, `.eyebrow`, `.grain`, `.link`, the debug overlay).
 - `src/components/` - the cinema pieces, each with a CSS Module: `Theatre` (marquee, curtains, seat backs, game menu), `Bulbs` (bulb rows and frames), `Ticket`, `Curtain`, `Stamp`, `SplitFlap`, `Seg` (segmented radio), `Equalizer`, `Reel`, and `DebugLog`.
-- `src/screens/` - one component and CSS Module per screen: `Setup`, `Loading`, `Handover`, `Countdown`, `Playing`, `Guessing`, `Reveal`, `Scoreboard`, `Podium`.
+- `src/screens/` - one component and CSS Module per screen: `Setup`, `Loading`, `Handover`, `Countdown`, `Playing`, `Reveal`, `Scoreboard`, `Podium`.
 - `tsconfig.json` - strict UI type checking; `src/lib/*.js` stays JavaScript with `allowJs` and `checkJs` off.
 
 ## Look and motion
@@ -48,7 +48,7 @@ Judging a turn updates the saved game in one step (score, history, next turn and
 ## Screens and phases
 
 `screen` is one of `setup | game | done`; `done` is the podium.
-Within `game`, `phase` runs `handover → countdown → cueing → playing ⇄ listened → guessing → reveal → (handover | board)`, with `blocked` when the browser refuses to start audio without a tap.
+Within `game`, `phase` runs `handover → countdown → cueing → playing ⇄ listened → reveal → (handover | board)`, with `blocked` when the browser refuses to start audio without a tap.
 The screen wrapper is keyed per screen inside `AnimatePresence`, so every screen remounts and cross-fades.
 After the last contestant of a round the box office (`board`) shows; after the final round (or when the crate runs out) it reads "Final count" and leads to the podium.
 Skip keeps the same contestant and goes straight to a new countdown.
@@ -59,5 +59,6 @@ All numbers are in `src/lib/config.ts`.
 Difficulty: Easy plays popular songs with vocals ("full" sound, from a likely hook), Medium a broader pool as music only, Hard deeper cuts as music only; it is passed to `buildCrate` as its 4th argument.
 Clip ladder: each turn starts with a 3s clip, and "Hear more" steps to 5, 8 and 12s; each rung replays from the start of the clip window.
 Points: 100 / 70 / 50 / 30 by rung, plus a speed bonus of up to 20 that stays full while a clip plays and fades over about 13s once it has ended, minus 20 if the film/year hint was taken, never below 10.
-"I know this one" locks the points in; the room then checks the answer on the reveal and taps Got it or Missed.
+The player says the song or film aloud, then taps "I know this one" to score the current points or "I don't know this one" to score zero.
+Either choice records the turn and reveals the answer immediately.
 Teams: turns rotate through teams; if a team lists members, the phone holder rotates through them round by round.

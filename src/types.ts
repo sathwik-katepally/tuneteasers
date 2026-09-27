@@ -72,7 +72,6 @@ export type Phase =
   | "playing"
   | "listened"
   | "blocked"
-  | "guessing"
   | "reveal"
   | "board";
 
@@ -82,7 +81,6 @@ export interface Turn {
   clipStartedAt: number;
   playKey: number;
   hint: boolean;
-  locked: number;
 }
 
 export interface Verdict {
