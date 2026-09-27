@@ -40,6 +40,15 @@ export const SAAVN_PAGES = 2;
 export const CORPUS_DRAW = 60;
 export const CORPUS_BATCH = 30;
 export const DIFFICULTIES = ["easy", "medium", "hard", "mixed"];
+/* Which corpus tiers each difficulty setting draws from. A setting whose
+   tiers hold too few songs for the chosen languages and eras widens to all
+   tiers before the crate reports "thin". */
+export const DIFFICULTY_TIERS = {
+  easy: ["easy"],
+  medium: ["easy", "medium"],
+  hard: ["medium", "hard"],
+  mixed: ["easy", "medium", "hard"],
+};
 /* Songs JioSaavn reports fewer plays for are mostly dubs and obscure album
    cuts nobody at a party will name. A missing count (0) means unknown, not
    unpopular, and is kept. */

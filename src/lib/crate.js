@@ -4,7 +4,7 @@
    Fallback 1: raw JioSaavn search (unverified years, no tiers).
    Fallback 2: catalog.json baked into the site (rebuilt weekly by CI, 30s hook clips).
    Fallback 3: live iTunes search, throttled to stay under Apple's rate limit. */
-import { SAAVN_BASES, SAAVN_QUERIES, SAAVN_PAGES, SAAVN_MIN_PLAYS, CORPUS_DRAW, CORPUS_BATCH, ITUNES_TERMS, ITUNES_LANG_OK, EXCLUDE_RX, ERAS, eraOf, SNIP_CLEAN_MAX } from "./constants.js";
+import { SAAVN_BASES, SAAVN_QUERIES, SAAVN_PAGES, SAAVN_MIN_PLAYS, CORPUS_DRAW, CORPUS_BATCH, DIFFICULTY_TIERS, ITUNES_TERMS, ITUNES_LANG_OK, EXCLUDE_RX, ERAS, eraOf, SNIP_CLEAN_MAX } from "./constants.js";
 import { de, songKey, shuffle, safeUrl } from "./utils.js";
 import { sanitizeTrack, loadPlayed, loadBlocked, normArtist, isBlocked, PLAY_COOLDOWN } from "./storage.js";
 import { log, ms } from "./log.js";
@@ -59,16 +59,18 @@ async function loadFromCorpus(langs, eras, difficulty, blocked, played){
   const corpus = await loadCorpus();
   if (!corpus) return { status:"none", pool:[] };
   const eraSet = Array.isArray(eras) && eras.length && eras.length < ERAS.length ? new Set(eras) : null;
-  const cands = [];
+  const eligible = [];
   for (const s of corpus){
     const lang = CORPUS_LANG[s.language];
     if (!langs.includes(lang)) continue;
     if (eraSet && !eraSet.has(eraOf(s.year))) continue;
-    if (difficulty !== "mixed" && s.tier !== difficulty) continue;
     const artist = (s.singers || []).slice(0,3).join(", ") || "Unknown artist";
     if (blocked.size && isBlocked({ artist }, blocked)) continue;
-    cands.push({ ...s, lang, artist });
+    eligible.push({ ...s, lang, artist });
   }
+  const tiers = new Set(DIFFICULTY_TIERS[difficulty] || DIFFICULTY_TIERS.mixed);
+  let cands = eligible.filter(s => tiers.has(s.tier));
+  if (cands.length < 10) cands = eligible; // widen before giving up on the curated pool
   if (cands.length < 10) return { status:"thin", pool:[] };
   const now = Date.now();
   const fresh = [], stale = [];
@@ -93,6 +95,7 @@ async function loadFromCorpus(langs, eras, difficulty, blocked, played){
     pool.push(sanitizeTrack({
       title:s.title, artist:s.artist, album:s.film, art:pickArt(r.image), stream,
       duration:parseInt(r.duration)||200, year:s.year, lang:s.lang, tier:s.tier,
+      music:(s.composers||[]).join(", "),
     }));
   }
   const ok = pool.filter(Boolean);
