@@ -26,8 +26,7 @@ const counted = label => page.waitForFunction(l => [...document.querySelectorAll
 async function shot(name){
   if (!shotsDir) return;
   await page.waitForTimeout(300);
-  await page.locator("[aria-label='Song categories']").scrollIntoViewIfNeeded();
-  await page.screenshot({ path: path.join(shotsDir, `${A.profile}-${name}.png`) });
+  await page.screenshot({ path: path.join(shotsDir, `${A.profile}-${name}.png`), fullPage: true });
 }
 async function seed(state){
   await page.goto(server.url + "seed.html");
@@ -60,7 +59,7 @@ try {
 
   // Music-only: item songs rarely have a clean instrumental stretch.
   await page.getByRole("radio", { name: "Medium" }).click();
-  await page.getByText(/Music-only needs a stretch with no singing/).waitFor();
+  await page.getByText(/Music.only needs a stretch with no singing/).waitFor();
   const item = chip("Item songs");
   await page.waitForFunction(() => [...document.querySelectorAll("button")].some(b => /^Item songs, \d+ songs$/.test(b.getAttribute("aria-label") || "") && /only \d+/.test(b.textContent)));
   if (await item.isDisabled()) fail("a chosen thin chip must stay tappable");

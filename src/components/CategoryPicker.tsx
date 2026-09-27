@@ -37,7 +37,8 @@ export function CategoryPicker({ settings: S, need, blocked, onChange }: Props){
   return (
     <>
       <div className={s.grid} role="group" aria-label="Song categories">
-        <button type="button" className={`${s.stub} ${chosen.size ? "" : s.on}`} aria-pressed={!chosen.size} onClick={() => onChange([])}>
+        <button type="button" className={`${s.stub} ${chosen.size ? "" : s.on}`} aria-pressed={!chosen.size} onClick={() => onChange([])}
+          aria-label={counts ? `Any, ${counts.any} songs` : "Any"}>
           <span className={s.name}>Any</span>
           <span className={s.count}>{counts ? counts.any : ""}</span>
         </button>
@@ -60,7 +61,7 @@ export function CategoryPicker({ settings: S, need, blocked, onChange }: Props){
       ) : thin.length > 0 && (
         <p className={s.note}>
           {sound === "inst"
-            ? `Greyed out: not enough songs for ${need} turns. Music-only needs a stretch with no singing, and few dance or item songs have one. Easy plays them with vocals.`
+            ? `Greyed out: not enough songs for ${need} turns. Music\u2011only needs a stretch with no singing, and few dance or item songs have one. Easy plays them with vocals.`
             : `Greyed out: not enough songs for ${need} turns with these languages and eras.`}
         </p>
       )}
