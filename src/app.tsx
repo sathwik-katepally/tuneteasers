@@ -14,7 +14,6 @@ import { Loading } from "./screens/Loading";
 import { Handover } from "./screens/Handover";
 import { Countdown } from "./screens/Countdown";
 import { Playing } from "./screens/Playing";
-import { Guessing } from "./screens/Guessing";
 import { Reveal } from "./screens/Reveal";
 import { Scoreboard } from "./screens/Scoreboard";
 import { Podium } from "./screens/Podium";
@@ -23,7 +22,7 @@ import type { AppState, CastMember, Difficulty, GameState, Mode, Phase, RosterEn
 type Crate = { error?: string; queue?: Track[]; source?: string };
 const buildCrate = buildCrateJs as (mix: string, eras: string[], sound: string, difficulty: Difficulty) => Promise<Crate>;
 
-const freshTurn = (): Turn => ({ rung: 0, clipEndedAt: null, clipStartedAt: 0, playKey: 0, hint: false, locked: 0 });
+const freshTurn = (): Turn => ({ rung: 0, clipEndedAt: null, clipStartedAt: 0, playKey: 0, hint: false });
 const primaryArtistOf = (t: Track | null) => (t ? String(t.artist || "").split(",")[0].trim() : "");
 
 export function App(){
@@ -111,7 +110,7 @@ export function App(){
       setTurn(t => ({ ...t, clipEndedAt: t.clipEndedAt ?? Date.now() }));
       setPhase("listened");
     };
-    const failed = () => { setNote("This song won't stream right now. Skip it, or show the answer."); ended(); };
+    const failed = () => { setNote("This song won't stream right now. Skip it to try another."); ended(); };
     const cb = { onStart: started, onEnd: ended, onErr: failed, onBlocked: () => setPhase("blocked") };
     log("snippet", { rung, secs, sound: plain ? "full" : "inst", title: String(track.title).slice(0, 28) });
     setPhase("cueing");
@@ -128,25 +127,15 @@ export function App(){
     engine.playElement(track.stream, 0, secs, cb);
   }
 
-  function knowIt(){
+  function revealAndScore(result: "correct" | "wrong"){
+    if (!g || !who || !track || verdict || phase === "reveal") return;
+    const points = result === "correct" ? pointsNow(turn.rung, turn.clipEndedAt, turn.hint) : 0;
     engine.stop();
-    setTurn(t => ({ ...t, locked: pointsNow(t.rung, t.clipEndedAt, t.hint) }));
-    setPhase("guessing");
-  }
-
-  function showAnswer(){
-    if (!track) return;
     setNote("");
     engine.playElement(track.stream, hookOffset(track), 0, { onErr: () => setNote("Couldn't stream the full song.") });
     setRevealed(track);
-    setVerdict(null);
     setPhase("reveal");
-  }
-
-  function judge(result: "correct" | "wrong"){
-    if (!g || !who || !revealed || verdict) return;
-    markPlayed(revealed.title);
-    const points = result === "correct" ? turn.locked : 0;
+    markPlayed(track.title);
     const cast = g.cast.map((c, i) => (i === g.turn ? { ...c, score: c.score + points } : c));
     const trackIdx = g.trackIdx + 1;
     const nextTurn = (g.turn + 1) % cast.length;
@@ -160,7 +149,7 @@ export function App(){
       ...g, cast, trackIdx, finished,
       turn: finished ? g.turn : nextTurn,
       round: roundOver && !finished ? g.round + 1 : g.round,
-      history: [...g.history, { id: who.id, song: displayTitle(revealed.title), points, round: g.round }],
+      history: [...g.history, { id: who.id, song: displayTitle(track.title), points, round: g.round }],
     } }));
   }
 
@@ -262,14 +251,10 @@ export function App(){
         key = "countdown";
         screen = <Countdown onTick={n => engine.sfx(n > 0 ? "tick" : "roll")} onDone={() => playClip(0)} />;
         break;
-      case "guessing":
-        key = "guessing";
-        screen = <Guessing name={who!.name} turn={turn} onShow={showAnswer} />;
-        break;
       case "reveal":
         key = "reveal";
-        screen = <Reveal track={revealed ?? track!} name={verdict?.name ?? who!.name} verdict={verdict} worth={turn.locked} note={note}
-          onJudge={judge} onNext={passOn} primaryArtist={primaryArtist} artistBlocked={artistBlocked} onBlockArtist={blockArtist} />;
+        screen = <Reveal track={revealed ?? track!} name={verdict?.name ?? who!.name} verdict={verdict!} note={note}
+          onNext={passOn} primaryArtist={primaryArtist} artistBlocked={artistBlocked} onBlockArtist={blockArtist} />;
         break;
       case "board":
         key = "board";
@@ -278,7 +263,7 @@ export function App(){
       default:
         key = "playing";
         screen = <Playing name={who!.name} track={track!} phase={phase} turn={turn} note={note}
-          onPlay={playClip} onKnow={knowIt} onHint={() => setTurn(t => ({ ...t, hint: true }))} onSkip={skipSong} />;
+          onPlay={playClip} onJudge={revealAndScore} onHint={() => setTurn(t => ({ ...t, hint: true }))} onSkip={skipSong} />;
     }
   }
 

@@ -144,12 +144,15 @@
   color: var(--cream-shade);
 }
 
-.missed {
-  composes: btn from global;
-  background: transparent;
-  color: var(--cream);
-  border-color: var(--vermilion);
-  box-shadow: 4px 4px 0 var(--vermilion-deep);
+@media (max-width: 899px) {
+  .card {
+    gap: 6px;
+    padding-top: 40px;
+  }
+
+  .art {
+    width: min(48vw, 220px, 26vh);
+  }
 }
 
 .block {

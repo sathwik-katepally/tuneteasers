@@ -40,13 +40,10 @@ try {
   await page.getByRole("button", { name: "I know this one" }).waitFor();
   await page.waitForFunction(() => window.__ttLastMode, null, { timeout: 25000 });
   await page.getByRole("button", { name: "I know this one" }).click();
-  await page.getByRole("button", { name: "Show the answer" }).click();
-  const got = page.getByRole("button", { name: /Got it \+\d+/ });
-  await page.waitForFunction(() => [...document.querySelectorAll("button")].some(b => /Got it/.test(b.textContent) && !b.disabled));
-  const pts = Number((await got.textContent()).match(/\+(\d+)/)[1]);
+  const verdict = await page.getByText(/\+\d+ for Rahul, \d+ in total/).textContent();
+  const pts = Number(verdict.match(/\+(\d+)/)[1]);
   const title = await page.locator("h2").first().textContent();
   if (title !== queue[4].title) fail(`resumed at the wrong song: ${title} vs ${queue[4].title}`);
-  await got.click();
   await page.getByText(new RegExp(`\\+${pts} for Rahul, ${100 + pts} in total`)).waitFor();
   await page.waitForTimeout(300);
   const st = await saved(page);

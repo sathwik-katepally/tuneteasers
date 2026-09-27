@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import * as m from "motion/react-m";
 import { useReducedMotion } from "motion/react";
-import { Ban, Check, X } from "lucide-react";
+import { Ban } from "lucide-react";
 import { Curtain } from "../components/Curtain";
 import { Stamp } from "../components/Stamp";
 import { displayTitle } from "../lib/utils.js";
@@ -12,23 +12,20 @@ import sh from "./shared.module.css";
 interface Props {
   track: Track;
   name: string;
-  verdict: Verdict | null;
-  worth: number;
+  verdict: Verdict;
   note: string;
-  onJudge: (r: "correct" | "wrong") => void;
   onNext: () => void;
   primaryArtist: string;
   artistBlocked: boolean;
   onBlockArtist: () => void;
 }
 
-export function Reveal({ track, name, verdict, worth, note, onJudge, onNext, primaryArtist, artistBlocked, onBlockArtist }: Props){
+export function Reveal({ track, name, verdict, note, onNext, primaryArtist, artistBlocked, onBlockArtist }: Props){
   const reduce = useReducedMotion();
-  const [stage, setStage] = useState<"closed" | "open" | "up">("closed");
+  const [open, setOpen] = useState(false);
   useEffect(() => {
-    const a = window.setTimeout(() => setStage("open"), reduce ? 50 : 350);
-    const b = window.setTimeout(() => setStage("up"), reduce ? 300 : 1500);
-    return () => { window.clearTimeout(a); window.clearTimeout(b); };
+    const timer = window.setTimeout(() => setOpen(true), reduce ? 50 : 350);
+    return () => window.clearTimeout(timer);
   }, [reduce]);
 
   const correct = verdict?.result === "correct";
@@ -54,7 +51,7 @@ export function Reveal({ track, name, verdict, worth, note, onJudge, onNext, pri
             {track.music && <><br />Music by {track.music}</>}
           </p>
         </div>
-        <Curtain open={stage !== "closed"} />
+        <Curtain open={open} />
         {correct && <div className={s.stampWrap}><Stamp text="Housefull" sub="Every seat taken" /></div>}
         {wrong && !reduce && <div className={s.scratch} aria-hidden />}
         {wrong && (
@@ -70,29 +67,17 @@ export function Reveal({ track, name, verdict, worth, note, onJudge, onNext, pri
 
       <div className={sh.actions}>
         {note && <p className={s.note}>{note}</p>}
-        {!verdict ? <>
-          <p className={s.line}>Did {name} get it?</p>
-          <div className={sh.row2}>
-            <button type="button" className={s.missed} onClick={() => onJudge("wrong")} disabled={stage !== "up"}>
-              <X size={20} strokeWidth={3} /> Missed
-            </button>
-            <button type="button" className="btn btn-teal" onClick={() => onJudge("correct")} disabled={stage !== "up"}>
-              <Check size={20} strokeWidth={3} /> Got it +{worth}
-            </button>
-          </div>
-        </> : <>
-          <m.p className={s.line} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: reduce ? 0 : 0.4 }}>
-            {correct ? `+${verdict.points} for ${name}, ${verdict.total} in total` : "Better luck next reel"}
-          </m.p>
-          <button type="button" className="btn btn-primary btn-block" onClick={onNext}>
-            {verdict.finished ? "Final box office" : verdict.roundOver ? "To the box office" : "Pass it on"}
+        <m.p className={s.line} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: reduce ? 0 : 0.4 }}>
+          {correct ? `+${verdict.points} for ${name}, ${verdict.total} in total` : "Better luck next reel"}
+        </m.p>
+        <button type="button" className="btn btn-primary btn-block" onClick={onNext}>
+          {verdict.finished ? "Final box office" : verdict.roundOver ? "To the box office" : "Pass it on"}
+        </button>
+        {primaryArtist && (
+          <button type="button" className={s.block} onClick={onBlockArtist} disabled={artistBlocked}>
+            {artistBlocked ? `${primaryArtist} won't come up again` : <><Ban size={14} strokeWidth={2.5} /> Don't play {primaryArtist} again</>}
           </button>
-          {primaryArtist && (
-            <button type="button" className={s.block} onClick={onBlockArtist} disabled={artistBlocked}>
-              {artistBlocked ? `${primaryArtist} won't come up again` : <><Ban size={14} strokeWidth={2.5} /> Don't play {primaryArtist} again</>}
-            </button>
-          )}
-        </>}
+        )}
       </div>
     </div>
   );

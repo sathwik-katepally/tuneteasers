@@ -114,6 +114,25 @@
   gap: 12px;
 }
 
+.guessPrompt {
+  color: var(--cream);
+  text-align: center;
+  font-size: 14px;
+  line-height: 1.2;
+}
+
+.actions {
+  gap: 7px;
+}
+
+.judgments > button {
+  min-width: 0;
+  white-space: normal;
+  font-size: 14px;
+  line-height: 1.15;
+  letter-spacing: 0.02em;
+}
+
 .link {
   composes: link from global;
   display: inline-flex;

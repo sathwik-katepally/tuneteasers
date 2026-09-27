@@ -7,7 +7,7 @@ The harness lives in `e2e/` (plain Node ES modules on the `playwright` dev depen
 Every script serves `dist/` on a free local port the way Pages does, so run `npm run typecheck && npm run build` first.
 Two profiles: `phone` is WebKit with the iPhone 13 device (390px), `desktop` is Chromium at 1440x900.
 
-- `e2e/game.mjs` - plays a whole show through the UI: setup, hand-over, countdown, clip ladder (one "Hear 5s"), hint, skip, Home and Resume mid-turn, the game menu, reveal with Got it and Missed, box office after each round, podium.
+- `e2e/game.mjs` - plays a whole show through the UI: setup, hand-over, countdown, clip ladder (one "Hear 5s"), hint, Home and Resume mid-turn, the game menu, both one-tap scoring choices, box office after each round, podium.
   It then checks the bookkeeping (every contestant's score equals their history, one history entry per turn, points in range, team members kept), that no page errors were thrown, and that no in-game screen scrolls at that size.
   Flags: `--profile=phone|desktop --mode=players|teams --mix=bolly|telugu|both --difficulty=easy|medium|hard --rounds=3|5|8 --reduced --shots=<dir>`; `--shots` saves one screenshot per screen for review.
 - `e2e/migrate.mjs` - seeds a `tuneteasers_v6` save from the previous release with real Saavn tracks, resumes it, plays a turn and checks names, rescaled scores, settings mapping and that the old key is dropped; then feeds junk into the old key and expects a clean home screen.

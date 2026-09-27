@@ -46,7 +46,7 @@ try {
   await btn(/Start the show/).click();
   await shot("02-loading", 450);
 
-  let turns = 0, extended = false, hinted = false, skipped = false, resumed = false, deadStreams = 0;
+  let turns = 0, extended = false, hinted = false, resumed = false, deadStreams = 0;
   const expectMode = A.difficulty === "easy" ? ["plain"] : ["snip", "muffle", "plain"];
   for (let guard = 0; guard < 80; guard++){
     const handover = page.getByRole("button", { name: /^It's with me|roll it$/ });
@@ -84,14 +84,6 @@ try {
     const mode = await page.evaluate(() => window.__ttLastMode);
     if (!expectMode.includes(mode)) fail(`turn ${turns}: mode ${mode} not in ${expectMode}`);
     await shot("05-playing", 1200);
-    if (turns === 2 && !skipped){
-      const who = await page.getByText(/is guessing$/).textContent();
-      await btn("Skip this song").click();
-      await page.getByText("Ears on").waitFor();
-      await know.waitFor();
-      if (await page.getByText(/is guessing$/).textContent() !== who) fail("skip moved the turn on");
-      skipped = true;
-    }
     if (!extended){
       await page.getByText("Guess, or hear more").waitFor({ timeout: 20000 });
       await shot("05b-listened", 200);
@@ -104,9 +96,8 @@ try {
       await shot("05c-hint", 300);
       hinted = true;
     }
-    await know.click();
-    await btn("Show the answer").waitFor();
-    await shot("06-guessing", 700);
+    await page.getByText("Say the song or film out loud, then choose.").waitFor();
+    await btn("I don't know this one").waitFor();
     if (!taken.has("11-menu")){
       await btn("Game menu").click();
       await page.getByText("Standings").waitFor();
@@ -121,19 +112,22 @@ try {
       await handover.click();
       await know.waitFor();
       await page.waitForFunction(() => [...document.querySelectorAll("button")].some(b => b.textContent === "I know this one" && !b.disabled), null, { timeout: 25000 });
-      await know.click();
       resumed = true;
     }
-    await btn("Show the answer").click();
     const correct = turns % 3 !== 2;
-    const judge = correct ? btn(/Got it/) : btn("Missed");
-    await judge.waitFor();
-    await page.waitForFunction(() => [...document.querySelectorAll("button")].some(b => /Got it/.test(b.textContent) && !b.disabled), null, { timeout: 5000 });
+    const before = (await saved(page)).game.history.length;
+    const worth = Number((await page.getByText(/^Worth /).textContent()).match(/\d+/)[0]);
+    await btn(correct ? "I know this one" : "I don't know this one").click();
+    await page.getByRole("button", { name: /Pass it on|box office/ }).waitFor();
+    if (await btn("Show the answer").count()) fail("extra reveal tap returned");
+    if (await btn(/Got it|Missed/).count()) fail("post-reveal grading returned");
+    await page.waitForFunction(n => JSON.parse(localStorage.getItem("tuneteasers_v7")).game.history.length === n + 1, before);
+    const history = (await saved(page)).game.history;
+    const scored = history.at(-1).points;
+    if (correct ? scored > worth || scored < worth - 3 : scored !== 0) fail(`one-tap score ${scored} vs displayed worth ${worth}`);
     await shot("07-reveal", 100);
-    await judge.click();
     await shot(correct ? "07b-reveal-correct" : "08-reveal-wrong", 1300);
     await page.getByRole("button", { name: /Pass it on|box office/ }).click();
-    await btn(/Show the answer|Got it/).first().waitFor({ state: "detached" }).catch(() => {});
     await page.getByRole("button", { name: /Pass it on|box office/ }).waitFor({ state: "detached" });
     turns++;
   }
@@ -155,7 +149,7 @@ try {
   if (!/takes it|tie/.test(text)) fail("podium headline missing");
   if (errors.length) fail("page errors: " + errors.join(" | "));
   if (overflow.length) fail("screens scroll at this size: " + overflow.join(", "));
-  if (!skipped || !resumed) fail("skip or home/resume path not exercised");
+  if (!resumed) fail("home/resume path not exercised");
   console.log("PASS", JSON.stringify(A), `turns=${turns}`, cast.map(c => `${c.name}=${c.score}`).join(" "), `source=${g.source}`, `deadStreams=${deadStreams}`);
 } catch (e){
   exit = 1;
