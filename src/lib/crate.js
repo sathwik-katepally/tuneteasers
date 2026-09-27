@@ -37,10 +37,16 @@ const pickArt = img => Array.isArray(img) && img.length ? (img[img.length-1].url
 /* corpus.json is column-major-compact ({ cols, songs: [[...]] }); expand it
    once per page load. A missing or malformed file is tolerated (fallback tiers). */
 let corpusCache = null;
+let corpusPending = null;
 async function loadCorpus(){
   if (corpusCache && Date.now() - corpusCache.at < 3600e3) return corpusCache.songs;
+  if (corpusPending) return corpusPending;
+  corpusPending = fetchCorpus().finally(() => { corpusPending = null; });
+  return corpusPending;
+}
+async function fetchCorpus(){
   try {
-    const r = await fetch("./corpus.json", { cache:"no-cache" });
+    const r = await fetch("./corpus.json", { cache:"no-cache", keepalive:true });
     if (!r.ok) return null;
     const j = await r.json();
     if (!j || j.v !== 1 || !Array.isArray(j.cols) || !Array.isArray(j.songs)) return null;
@@ -217,14 +223,24 @@ async function loadFromItunes(langs){
 }
 
 /* The offline-scored source-bound index (see docs/audio.md). */
-async function loadSnips(){
+let snipsCache = null;
+let snipsPending = null;
+async function loadSnips(fresh = false){
+  if (!fresh && snipsCache && Date.now() - snipsCache.at < 300e3) return snipsCache.index;
+  if (snipsPending) return snipsPending;
+  snipsPending = fetchSnips().finally(() => { snipsPending = null; });
+  return snipsPending;
+}
+async function fetchSnips(){
   try {
-    const r = await fetch("./snips.json", { cache:"no-cache" });
+    const r = await fetch("./snips.json", { cache:"no-cache", keepalive:true });
     if (!r.ok) return null;
     const j = await r.json();
     const age = Date.now() - Date.parse(j?.built);
-    return (j && j.v === 2 && Number.isFinite(age) && age >= 0 && age <= SNIP_MAX_AGE_MS && j.snips &&
+    const index = (j && j.v === 2 && Number.isFinite(age) && age >= 0 && age <= SNIP_MAX_AGE_MS && j.snips &&
       typeof j.snips === "object" && !Array.isArray(j.snips)) ? j : null;
+    if (index) snipsCache = { at: Date.now(), index };
+    return index;
   } catch(e){ return null; }
 }
 
@@ -240,7 +256,7 @@ function verifiedSnip(t, index){
 }
 
 export async function refreshMusicQueue(queue){
-  const index = await loadSnips();
+  const index = await loadSnips(true);
   return queue.map(t => ({ ...t, snip:verifiedSnip(t, index) || undefined })).filter(t => t.snip);
 }
 
@@ -329,15 +345,13 @@ export async function buildCrate(mix, eras, sound, difficulty = "mixed", minSong
 /* How many corpus songs each category offers the corpus tier for these
    settings, counted the way loadFromCorpus picks them. null when the corpus
    (or, for Music-only, the snips index) is unavailable. */
-let snipsCache = null;
 export async function categoryCounts(mix, eras, sound, difficulty, minSongs, categories){
   const corpus = await loadCorpus();
   if (!corpus) return null;
   let safeIds = null;
   if (sound === "inst"){
-    if (!snipsCache || Date.now() - snipsCache.at > 300e3) snipsCache = { at: Date.now(), index: await loadSnips() };
-    if (!snipsCache.index) return null;
-    const index = snipsCache.index;
+    const index = await loadSnips();
+    if (!index) return null;
     safeIds = new Set(Object.keys(index.snips).filter(id => verifiedSnip({ sourceId:id, duration:Infinity }, index)));
   }
   const blocked = new Set(loadBlocked().map(normArtist));
