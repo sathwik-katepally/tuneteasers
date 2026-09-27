@@ -21,7 +21,7 @@ export function Handover({ game, holder, onPrime, onHanded }: { game: GameState;
     setTimeout(onHanded, reduce ? 0 : TEAR_MS);
   };
   const note = !isTeam ? "Everyone else, eyes off the screen."
-    : holder ? `${holder} holds the phone this time. The rest of ${who.name}, listen in.`
+    : holder ? `${holder} holds the phone. The rest of ${who.name}, listen in.`
     : "One of you holds it, the rest listen in.";
 
   return (

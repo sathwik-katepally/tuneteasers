@@ -2,23 +2,24 @@
 
 ## E2E testing (Playwright)
 
-There is no unit test suite; verification is E2E against a real browser, per the project's bug-fix methodology (reproduce like an end user first).
-The harness lives outside the repo at `/tmp/tt-e2e` (plain Node scripts, `playwright` npm package, Chromium already installed).
-Scripts serve `dist/` on a local port with correct MIME types and drive the full flow: start game → snippet → reveal → score.
+There is no unit test suite; verification is E2E against real browsers and the real song sources, per the project's bug-fix methodology (reproduce like an end user first).
+The harness lives in `e2e/` (plain Node ES modules on the `playwright` dev dependency; run `npx playwright install chromium webkit` once).
+Every script serves `dist/` on a free local port the way Pages does, so run `npm run typecheck && npm run build` first.
+Two profiles: `phone` is WebKit with the iPhone 13 device (390px), `desktop` is Chromium at 1440x900.
 
-- `e2e.js` - core flow; `--block-saavn` / `--block-catalog` flags abort those network tiers to test each fallback.
-- `features.js` - artist blocking, unblock, queue trimming, played-map format and cooldown ordering.
-- `features2.js` - era filter chips and filtering, hint flow, half-point scoring, persistence.
-- `snips.js` - stubbed snips.json and Saavn responses; asserts a verified track plays mode "snip" seeked to its window and an unverified one plays "muffle".
-- `dupes.js` - builds a crate on the Saavn tier and the catalog tier and asserts no two queue entries share a `songKey` (keeps a synced copy of the key function).
-- `webkit-local.js` - iPhone-emulated WebKit run against the local build; asserts a fast cue and a valid mode.
-- `live*.js` - smoke tests against the production URL.
+- `e2e/game.mjs` - plays a whole show through the UI: setup, hand-over, countdown, clip ladder (one "Hear 5s"), hint, skip, Home and Resume mid-turn, the game menu, reveal with Got it and Missed, box office after each round, podium.
+  It then checks the bookkeeping (every contestant's score equals their history, one history entry per turn, points in range, team members kept), that no page errors were thrown, and that no in-game screen scrolls at that size.
+  Flags: `--profile=phone|desktop --mode=players|teams --mix=bolly|telugu|both --difficulty=easy|medium|hard --rounds=3|5|8 --reduced --shots=<dir>`; `--shots` saves one screenshot per screen for review.
+- `e2e/migrate.mjs` - seeds a `tuneteasers_v6` save from the previous release with real Saavn tracks, resumes it, plays a turn and checks names, rescaled scores, settings mapping and that the old key is dropped; then feeds junk into the old key and expects a clean home screen.
+- `e2e/autoplay.mjs` - emulates iOS's per-element autoplay rule in Chromium: the hand-over tap's prime must let the countdown start the clip, and a stricter browser must get a working "Tap to play" fallback; also covers End game.
+- `e2e/offline.mjs` - aborts every song source and expects a visible error on the home screen and the `crate` line in the `?debug=1` overlay.
 
-Playback modes asserted by the suites are `snip | muffle | plain` (`window.__ttLastMode`); no ML/model network requests should ever appear.
-The old on-device pipeline suites `dsp.js`, `pick.js`, `vadtest.js`, and `ml*.js` are obsolete and no longer run.
+Package scripts: `npm run e2e:game -- --profile=desktop`, `e2e:migrate`, `e2e:autoplay`, `e2e:offline`.
+A release run is the matrix of `game.mjs` over both profiles, both modes, all three difficulties and all three language mixes (not every combination, but each value at least once per profile), one `--reduced` run, plus the other three scripts.
+Playback modes asserted are `snip | muffle | plain` (`window.__ttLastMode`); Easy must always report `plain`.
+Gotchas: screens cross-fade out through `AnimatePresence`, so after a click wait for the old button to detach before looking for the next screen; seed localStorage from a non-app page on the same origin (`/seed.html` 404s, which is fine) so the app's own first save cannot race the seeding.
 
-Run `npm run typecheck && npm run build` first; the scripts read `dist/`.
-Gotchas: buttons with the `.pulse` animation need `{ force: true }` clicks; state persists via a React effect, so after a click, `waitForFunction` on localStorage before reading it.
+The older ad-hoc scripts in `/tmp/tt-e2e` (and the obsolete on-device pipeline suites `dsp.js`, `pick.js`, `vadtest.js`, `ml*.js`) drove the pre-cinema UI and no longer apply.
 
 ## Deploy (GitHub Pages via Actions)
 

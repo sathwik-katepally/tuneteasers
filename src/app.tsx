@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AnimatePresence, LazyMotion, MotionConfig } from "motion/react";
+import { AnimatePresence, LazyMotion, MotionConfig, domAnimation } from "motion/react";
 import * as m from "motion/react-m";
 import { loadSaved, save } from "./lib/save";
 import { CLIP_STEPS, DIFFICULTY, hookOffset, pointsNow } from "./lib/config";
@@ -7,6 +7,7 @@ import { markPlayed, loadBlocked, saveBlocked, normArtist, isBlocked } from "./l
 import { buildCrate as buildCrateJs } from "./lib/crate.js";
 import { engine, keepAwake } from "./lib/engine.js";
 import { log } from "./lib/log.js";
+import { displayTitle } from "./lib/utils.js";
 import { Theatre } from "./components/Theatre";
 import { Setup } from "./screens/Setup";
 import { Loading } from "./screens/Loading";
@@ -21,8 +22,6 @@ import type { AppState, CastMember, Difficulty, GameState, Mode, Phase, RosterEn
 
 type Crate = { error?: string; queue?: Track[]; source?: string };
 const buildCrate = buildCrateJs as (mix: string, eras: string[], sound: string, difficulty: Difficulty) => Promise<Crate>;
-
-const loadMotion = () => import("./lib/motion-features").then(r => r.default);
 
 const freshTurn = (): Turn => ({ rung: 0, clipEndedAt: null, clipStartedAt: 0, playKey: 0, hint: false, locked: 0 });
 const primaryArtistOf = (t: Track | null) => (t ? String(t.artist || "").split(",")[0].trim() : "");
@@ -105,7 +104,8 @@ export function App(){
     setTurn(t => ({ ...t, rung, clipEndedAt: replay ? t.clipEndedAt : null }));
     const started = () => {
       setTurn(t => ({ ...t, clipStartedAt: Date.now(), playKey: t.playKey + 1 }));
-      setPhase("playing");
+      // A refused play() reports back before playSnippet resolves; keep the tap prompt.
+      setPhase(p => (p === "blocked" ? p : "playing"));
     };
     const ended = () => {
       setTurn(t => ({ ...t, clipEndedAt: t.clipEndedAt ?? Date.now() }));
@@ -160,7 +160,7 @@ export function App(){
       ...g, cast, trackIdx, finished,
       turn: finished ? g.turn : nextTurn,
       round: roundOver && !finished ? g.round + 1 : g.round,
-      history: [...g.history, { id: who.id, song: revealed.title, points, round: g.round }],
+      history: [...g.history, { id: who.id, song: displayTitle(revealed.title), points, round: g.round }],
     } }));
   }
 
@@ -283,8 +283,9 @@ export function App(){
   }
 
   const inGame = state.screen === "game" && !!g && !loading;
+  useEffect(() => { window.scrollTo(0, 0); }, [key]);
   return (
-    <LazyMotion features={loadMotion} strict>
+    <LazyMotion features={domAnimation} strict>
       <MotionConfig reducedMotion="user">
         <Theatre meta={meta} game={inGame ? g : null} onHome={goHome} onEnd={endGame}>
           <AnimatePresence mode="wait" initial={false}>

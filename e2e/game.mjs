@@ -46,7 +46,7 @@ try {
   await btn(/Start the show/).click();
   await shot("02-loading", 450);
 
-  let turns = 0, extended = false, hinted = false;
+  let turns = 0, extended = false, hinted = false, skipped = false, resumed = false, deadStreams = 0;
   const expectMode = A.difficulty === "easy" ? ["plain"] : ["snip", "muffle", "plain"];
   for (let guard = 0; guard < 80; guard++){
     const handover = page.getByRole("button", { name: /^It's with me|roll it$/ });
@@ -68,10 +68,30 @@ try {
     await shot("04-countdown", 900);
     const know = btn("I know this one");
     await know.waitFor();
-    await page.waitForFunction(() => window.__ttLastMode, null, { timeout: 25000 });
+    // A dead stream is real life on Saavn: the game says so and offers Skip.
+    for (let tries = 0; ; tries++){
+      const dead = page.getByText("This song won't stream right now");
+      await Promise.race([
+        page.waitForFunction(() => window.__ttLastMode, null, { timeout: 30000 }),
+        dead.waitFor({ timeout: 30000 }),
+      ]);
+      if (!(await dead.isVisible())) break;
+      if (tries === 2) fail("three dead streams in a row");
+      deadStreams++;
+      await page.evaluate(() => { window.__ttLastMode = null; });
+      await btn("Skip this song").click();
+    }
     const mode = await page.evaluate(() => window.__ttLastMode);
     if (!expectMode.includes(mode)) fail(`turn ${turns}: mode ${mode} not in ${expectMode}`);
     await shot("05-playing", 1200);
+    if (turns === 2 && !skipped){
+      const who = await page.getByText(/is guessing$/).textContent();
+      await btn("Skip this song").click();
+      await page.getByText("Ears on").waitFor();
+      await know.waitFor();
+      if (await page.getByText(/is guessing$/).textContent() !== who) fail("skip moved the turn on");
+      skipped = true;
+    }
     if (!extended){
       await page.getByText("Guess, or hear more").waitFor({ timeout: 20000 });
       await shot("05b-listened", 200);
@@ -87,6 +107,23 @@ try {
     await know.click();
     await btn("Show the answer").waitFor();
     await shot("06-guessing", 700);
+    if (!taken.has("11-menu")){
+      await btn("Game menu").click();
+      await page.getByText("Standings").waitFor();
+      await shot("11-menu", 200);
+      await page.keyboard.press("Escape");
+      await page.getByText("Standings").waitFor({ state: "detached" });
+    }
+    if (turns === 3 && !resumed){
+      await btn("Game menu").click();
+      await btn("Home, keep the game").click();
+      await btn("Resume").click();
+      await handover.click();
+      await know.waitFor();
+      await page.waitForFunction(() => [...document.querySelectorAll("button")].some(b => b.textContent === "I know this one" && !b.disabled), null, { timeout: 25000 });
+      await know.click();
+      resumed = true;
+    }
     await btn("Show the answer").click();
     const correct = turns % 3 !== 2;
     const judge = correct ? btn(/Got it/) : btn("Missed");
@@ -118,7 +155,8 @@ try {
   if (!/takes it|tie/.test(text)) fail("podium headline missing");
   if (errors.length) fail("page errors: " + errors.join(" | "));
   if (overflow.length) fail("screens scroll at this size: " + overflow.join(", "));
-  console.log("PASS", JSON.stringify(A), `turns=${turns}`, cast.map(c => `${c.name}=${c.score}`).join(" "), `source=${g.source}`);
+  if (!skipped || !resumed) fail("skip or home/resume path not exercised");
+  console.log("PASS", JSON.stringify(A), `turns=${turns}`, cast.map(c => `${c.name}=${c.score}`).join(" "), `source=${g.source}`, `deadStreams=${deadStreams}`);
 } catch (e){
   exit = 1;
   console.log("FAIL", JSON.stringify(A), e.message.split("\n").slice(0, 12).join(" / "));

@@ -50,7 +50,16 @@
   margin-top: 8px;
 }
 
+.titleLong {
+  font-size: clamp(24px, 6.5vw, 30px);
+  overflow-wrap: anywhere;
+}
+
 .film {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-weight: 700;
   font-size: 16px;
   text-transform: uppercase;

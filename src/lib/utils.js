@@ -20,11 +20,19 @@ export function songKey(s){
     .replace(/[^\p{L}\p{N}]+/gu, " ")
     .trim();
 }
-export const fmtScore = n => n % 1 ? `${Math.floor(n)}½` : String(n);
 export const shuffle = a => { a=[...a]; for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; };
 export function safeUrl(u){
   if (typeof u !== "string") return null;
   if (/^https:\/\//i.test(u)) return u;
   if (/^http:\/\//i.test(u)) return "https://" + u.slice(7);
   return null;
+}
+/* A title for people to read: drops the 'From "Movie"' qualifiers sources
+   append (the film is shown on its own line anyway). */
+export function displayTitle(s){
+  const t = String(s||"")
+    .replace(/\s*[\(\[]\s*from\b.*$/i, "")
+    .replace(/\s+-\s+from\s+".*$/i, "")
+    .trim();
+  return t || String(s||"");
 }

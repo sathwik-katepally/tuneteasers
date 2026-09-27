@@ -29,6 +29,10 @@ p {
   margin: 0;
 }
 
+p {
+  text-wrap: pretty;
+}
+
 button {
   font: inherit;
   color: inherit;
@@ -111,13 +115,16 @@ input {
 }
 
 .btn[disabled] {
-  opacity: 0.45;
+  background: transparent;
+  color: var(--cream-shade);
+  border: 2px dashed var(--cream-shade);
+  box-shadow: none;
   cursor: default;
 }
 
 .btn[disabled]:active {
   transform: none;
-  box-shadow: var(--shadow-hard);
+  box-shadow: none;
 }
 
 .grain {

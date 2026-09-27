@@ -4,6 +4,7 @@ import { useReducedMotion } from "motion/react";
 import { Ban, Check, X } from "lucide-react";
 import { Curtain } from "../components/Curtain";
 import { Stamp } from "../components/Stamp";
+import { displayTitle } from "../lib/utils.js";
 import type { Track, Verdict } from "../types";
 import s from "./Reveal.module.css";
 import sh from "./shared.module.css";
@@ -33,6 +34,7 @@ export function Reveal({ track, name, verdict, worth, note, onJudge, onNext, pri
   const correct = verdict?.result === "correct";
   const wrong = verdict?.result === "wrong";
   const film = track.album || "";
+  const title = displayTitle(track.title);
   return (
     <div className={sh.stage}>
       <m.div
@@ -44,8 +46,8 @@ export function Reveal({ track, name, verdict, worth, note, onJudge, onNext, pri
           <span className={s.starring}>Starring</span>
           {track.art
             ? <img className={s.art} src={track.art} alt={film ? `${film} cover` : "Album cover"} width={220} height={220} />
-            : <div className={`${s.art} ${s.noArt}`} aria-hidden>{(film || track.title).slice(0, 1)}</div>}
-          <h2 className={s.title}>{track.title}</h2>
+            : <div className={`${s.art} ${s.noArt}`} aria-hidden>{(film || title).slice(0, 1)}</div>}
+          <h2 className={`${s.title} ${title.length > 22 ? s.titleLong : ""}`}>{title}</h2>
           {(film || track.year > 0) && <p className={s.film}>{[film, track.year || ""].filter(Boolean).join(", ")}</p>}
           <p className={s.credits}>
             Sung by {track.artist}
