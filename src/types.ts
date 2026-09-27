@@ -17,11 +17,13 @@ export interface Track {
 export type Difficulty = "easy" | "medium" | "hard";
 export type Mode = "players" | "teams";
 export type Mix = "bolly" | "telugu" | "both";
+export type Category = "dance" | "romantic" | "sad" | "item" | "mass";
 
 export interface Settings {
   mix: Mix;
   eras: string[];
   difficulty: Difficulty;
+  categories: Category[];
   mode: Mode;
   rounds: number;
 }

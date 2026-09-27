@@ -19,10 +19,10 @@ import { Reveal } from "./screens/Reveal";
 import { Scoreboard } from "./screens/Scoreboard";
 import { Podium } from "./screens/Podium";
 import { PastGames } from "./screens/PastGames";
-import type { AppState, CastMember, Difficulty, GameState, Mode, Phase, RosterEntry, Settings, Track, Turn, Verdict } from "./types";
+import type { AppState, CastMember, Category, Difficulty, GameState, Mode, Phase, RosterEntry, Settings, Track, Turn, Verdict } from "./types";
 
 type Crate = { error?: string; queue?: Track[]; source?: string };
-const buildCrate = buildCrateJs as (mix: string, eras: string[], sound: string, difficulty: Difficulty, minSongs: number, played?: Record<string, number>) => Promise<Crate>;
+const buildCrate = buildCrateJs as (mix: string, eras: string[], sound: string, difficulty: Difficulty, minSongs: number, played?: Record<string, number>, categories?: Category[]) => Promise<Crate>;
 const refreshMusicQueue = refreshMusicQueueJs as (queue: Track[]) => Promise<Track[]>;
 
 const freshTurn = (): Turn => ({ rung: 0, clipEndedAt: null, clipStartedAt: 0, playKey: 0, hint: false });
@@ -83,12 +83,12 @@ export function App(){
     const mode = cast ? g?.mode ?? S.mode : S.mode;
     const roster = cast ?? (mode === "teams" ? state.teams : state.players);
     const played = groupSnap.group ? await groupPlayed() : null;
-    const crate = await buildCrate(S.mix, S.eras, DIFFICULTY[S.difficulty].sound, S.difficulty, S.rounds * roster.length, played ?? undefined);
+    const crate = await buildCrate(S.mix, S.eras, DIFFICULTY[S.difficulty].sound, S.difficulty, S.rounds * roster.length, played ?? undefined, S.categories);
     setLoading(false);
     if (crate.error || !crate.queue){
       setError(crate.error === "safe" ? "Not enough verified music-only clips for this show. Try Easy or fewer rounds, or widen your song picks."
         : crate.error === "thin"
-        ? "Not enough songs match your picks. Try more eras, or unblock a few artists."
+        ? `Not enough songs match your picks. Try more eras${S.categories.length ? ", another kind of song" : ""}, or unblock a few artists.`
         : "Couldn't load songs. Check your connection and try again.");
       setState(st => ({ ...st, screen: "setup" }));
       return;
