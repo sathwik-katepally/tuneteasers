@@ -31,8 +31,29 @@ function buildMuffleGraph(c, src){
   return out;
 }
 
+function buildPrototypeGraph(c, src){
+  const muffle = buildMuffleGraph(c, src);
+  const split = c.createChannelSplitter(2);
+  const right = c.createGain(); right.gain.value = -1;
+  const difference = c.createGain(); difference.gain.value = 0.75;
+  const mono = c.createChannelMerger(2);
+  src.connect(split);
+  split.connect(difference, 0);
+  split.connect(right, 1); right.connect(difference);
+  difference.connect(mono, 0, 0);
+  difference.connect(mono, 0, 1);
+  const outputs = { low: muffle, cancel: mono, full: src };
+  const gains = {};
+  for (const [stage, output] of Object.entries(outputs)){
+    const gain = c.createGain(); gain.gain.value = 0;
+    output.connect(gain); gain.connect(c.destination);
+    gains[stage] = gain;
+  }
+  return { gains, nodes: [muffle, split, right, difference, mono, ...Object.values(gains)] };
+}
+
 export const engine = {
-  ctx:null, el:null, pre:null, timer:null, session:0,
+  ctx:null, el:null, pre:null, timer:null, session:0, prototype:null,
   ac(){
     if (!this.ctx) this.ctx = new (window.AudioContext||window.webkitAudioContext)();
     if (this.ctx.state === "suspended") this.ctx.resume();
@@ -42,6 +63,54 @@ export const engine = {
     this.session++;
     if (this.timer){ clearTimeout(this.timer); this.timer = null; }
     if (this.el){ this.el.pause(); }
+    if (this.prototype){
+      this.prototype.el.removeEventListener("ended", this.prototype.onEnd);
+      this.prototype.el.removeEventListener("pause", this.prototype.onEnd);
+      this.prototype.src.disconnect();
+      for (const node of this.prototype.nodes) node.disconnect();
+      this.prototype = null;
+    }
+  },
+  setPrototypeStage(stage){
+    if (!this.prototype || !this.prototype.gains[stage]) return false;
+    const now = this.ac().currentTime;
+    for (const [name, gain] of Object.entries(this.prototype.gains)){
+      gain.gain.cancelScheduledValues(now);
+      gain.gain.setTargetAtTime(name === stage ? 1 : 0, now, 0.015);
+    }
+    this.prototype.stage = stage;
+    return true;
+  },
+  async playPrototype(track, stage, onEnd){
+    this.stop();
+    const session = this.session;
+    const el = this._el(track.stream, true);
+    const ready = await this._ready(el);
+    if (session !== this.session) return "superseded";
+    if (!ready) return "stream-failed";
+    try {
+      const c = this.ac();
+      if (!el._ttSrc) el._ttSrc = c.createMediaElementSource(el);
+      if (el._ttOut){ el._ttOut.disconnect(); el._ttOut = null; }
+      el._ttSrc.disconnect();
+      const graph = buildPrototypeGraph(c, el._ttSrc);
+      let reportedEnd = false;
+      const ended = () => {
+        if (!reportedEnd && el.ended && session === this.session){ reportedEnd = true; onEnd(); }
+      };
+      el.addEventListener("ended", ended);
+      el.addEventListener("pause", ended);
+      this.prototype = { el, onEnd: ended, src: el._ttSrc, ...graph, stage };
+      this.setPrototypeStage(stage);
+      el.currentTime = 0;
+      await el.play();
+      if (session !== this.session) return "superseded";
+      return "playing";
+    } catch(e){
+      if (session === this.session) this.stop();
+      log("prototype-fail", { msg: errMsg(e) });
+      return "audio-failed";
+    }
   },
   _mark(m){ try { window.__ttLastMode = m; } catch(e){} }, // E2E/debug surface
   /* Get the playback element for a URL, adopting the prefetched one when it

@@ -90,6 +90,17 @@ input:focus, button:focus-visible { outline:2px solid var(--marigold); outline-o
 .footnote { text-align:center; color:var(--dim); font-size:12px; margin-top:18px; }
 .footnote a { color:var(--dim); }
 .notice { text-align:center; color:var(--dim); font-size:12px; margin:8px 0; }
+.prototype { padding-top: 18px; }
+.prototype-back { display:inline-block; color:var(--marigold); margin-bottom:28px; }
+.prototype .sub { margin:12px 0 24px; }
+.prototype select { width:100%; background:var(--surface2); color:var(--cream); border:1px solid var(--dim); border-radius:12px; padding:12px; font:inherit; }
+.prototype-source { color:var(--dim); font-size:12px; margin-top:10px; }
+.prototype-stages { display:grid; gap:10px; }
+.prototype-stage { width:100%; text-align:left; background:var(--surface2); border:2px solid transparent; border-radius:14px; color:var(--cream); padding:14px; font:inherit; cursor:pointer; }
+.prototype-stage.selected { border-color:var(--marigold); }
+.prototype-stage strong, .prototype-stage span { display:block; }
+.prototype-stage span { color:var(--dim); font-size:13px; margin-top:4px; line-height:1.35; }
+.prototype-status { min-height:42px; margin:16px 0; color:var(--marigold); }
 
 /* ?debug=1 diagnostics overlay */
 .dbg-fab {

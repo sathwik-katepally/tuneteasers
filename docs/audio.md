@@ -4,6 +4,16 @@ All playback goes through the `engine` singleton in `src/lib/engine.js`; it is t
 The client does no audio analysis or processing of its own beyond a realtime filter graph.
 Per-song facts (where the song is instrumental) are computed once, offline, by `scripts/build-snips.mjs` and shipped as `public/snips.json`; the client just seeks an `<audio>` element and plays.
 
+## Hint ladder prototype
+
+Open `/?audio-prototype` on the dev server to compare three realtime Web Audio stages using existing CORS-readable catalog previews.
+The prototype is outside gameplay and does not persist settings or download, decode, store, or serve stems.
+The first stage uses the existing muffle filter, the second subtracts the right channel from the left and sends that difference to both speakers, and the third passes the original stereo stream through.
+Switching stages crossfades gain without seeking or restarting the song.
+The status shows elapsed time from Play tap to the browser's playback promise resolving; it is a startup measurement, not an audio output latency measurement.
+Centre cancellation depends on the recording's stereo mix: it can leave vocals, remove centred instruments, or sound thin or nearly silent.
+Browser playback still depends on CORS, Web Audio support, and a user gesture on iPhone Safari.
+
 ## Session rule (concurrency safety)
 
 Every `stop()`/play call bumps `engine.session`; async continuations capture the session number and abort if it changed.

@@ -1,5 +1,6 @@
 import { createRoot } from "react-dom/client";
 import { App } from "./app";
+import { AudioPrototype } from "./screens/AudioPrototype";
 import { DebugLog } from "./components/DebugLog";
 import { log } from "./lib/log.js";
 import "./styles.css";
@@ -10,4 +11,4 @@ import "./styles.css";
 // its status ("snips") and the verified-track count ("snipped").
 log("boot", { ua: navigator.userAgent.replace(/^Mozilla\/5\.0 /, "").slice(0, 80) });
 
-createRoot(document.getElementById("root")!).render(<><App /><DebugLog /></>);
+createRoot(document.getElementById("root")!).render(<>{new URLSearchParams(location.search).has("audio-prototype") ? <AudioPrototype /> : <App />}<DebugLog /></>);
