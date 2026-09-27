@@ -147,7 +147,7 @@ const LANG_RX = LANG_NAMES.join("|");
 const FROM_RX = /[\(\[]\s*from\s+"([^"]+)"\s*[\)\]]|\s[-–—]\s*from\s+"([^"]+)"\s*$/i;
 const DUB_RX = new RegExp(`\\(\\s*(${LANG_RX})\\s*\\)|\\[\\s*(${LANG_RX})\\s*\\]|\\s[-–—]\\s*(${LANG_RX})\\s*$|\\b(${LANG_RX})\\s+(version|dubbed)\\b|\\bdubbed\\b`, "i");
 const OST_RX = /[\(\[]?\s*\b(original\s+(motion\s+picture\s+)?soundtrack|music\s+from\s+the\s+(motion\s+picture|film)|ost)\b\s*[\)\]]?/i;
-const COMPILATION_RX = /\b(hits|best of|top \d|top\b|collection|jukebox|love songs|romantic|dance|party|playlist|special|essentials|classics|evergreen|forever|celebrat|superhit|blockbuster|chartbuster|melodies|mix|vol\.?|volume|anthems|songs|favourites|favorites|year|20\d\d|\d0s|retro|non.?stop|the best|greatest|ultimate|trending|viral|mashup|remix)\b/i;
+const COMPILATION_RX = /\b(hits|best of|top \d|top\b|collection|jukebox|love songs|romantic|dance|party|playlist|special|essentials|classics|evergreen|forever|celebrat|superhit|blockbuster|chartbuster|melodies|mix|rewind|vol\.?|volume|anthems|songs|favourites|favorites|20\d\d|\d0s|retro|non.?stop|the best|greatest|ultimate|trending|viral|mashup|remix)\b/i;
 const cleanTitle = s => de(s).replace(FROM_RX, "").replace(/\s+/g, " ").trim();
 const fromClause = s => { const m = de(s).match(FROM_RX); return m ? (m[1] || m[2]).trim() : null; };
 function cleanAlbum(album){
@@ -293,13 +293,23 @@ async function classify(raw, M){
     }
     return null;
   };
+  const tryFilmCopy = copy => {
+    const exact = tryExact(copy);
+    if (exact) return exact;
+    for (const c of filmCandidates(copy.title, copy.more_info?.album)){
+      if (c.dub || !isFilmLike(c.name, title)) continue;
+      const f = M.byName(c.name, lang, yearOf(copy));
+      if (f) return verdict(copy, c.name, f, true);
+    }
+    return null;
+  };
   let v = tryExact(raw);
   if (!v || compilationAlbum(raw)){
     // A compilation or re-release copy is resolved to a matching original album copy by shared play count.
     const sibs = await siblings(raw);
     copies.push(...sibs);
-    const original = sibs.find(s => !compilationAlbum(s) && tryExact(s));
-    if (original) v = tryExact(original);
+    const canonical = sibs.map(s => !compilationAlbum(s) ? tryFilmCopy(s) : null).find(Boolean);
+    if (canonical) v = canonical;
     else if (compilationAlbum(raw)) return { reject: "no-original-copy" };
   }
   if (!v){
