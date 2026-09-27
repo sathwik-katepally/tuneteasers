@@ -34,6 +34,12 @@ export const SAAVN_QUERIES = {
   ],
 };
 export const SAAVN_PAGES = 2;
+/* The curated corpus (public/corpus.json, docs/song-loading.md). A game draws
+   CORPUS_DRAW candidates and resolves them to stream URLs in batches of
+   CORPUS_BATCH ids per request (the worker caps a batch at 50). */
+export const CORPUS_DRAW = 60;
+export const CORPUS_BATCH = 30;
+export const DIFFICULTIES = ["easy", "medium", "hard", "mixed"];
 /* Songs JioSaavn reports fewer plays for are mostly dubs and obscure album
    cuts nobody at a party will name. A missing count (0) means unknown, not
    unpopular, and is kept. */

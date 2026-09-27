@@ -1,8 +1,10 @@
 /* Song loading.
-   Primary: JioSaavn mirror (full songs, snippets start at the intro).
-   Fallback 1: catalog.json baked into the site (rebuilt weekly by CI, 30s hook clips).
-   Fallback 2: live iTunes search, throttled to stay under Apple's rate limit. */
-import { SAAVN_BASES, SAAVN_QUERIES, SAAVN_PAGES, SAAVN_MIN_PLAYS, ITUNES_TERMS, ITUNES_LANG_OK, EXCLUDE_RX, ERAS, eraOf, SNIP_CLEAN_MAX } from "./constants.js";
+   Primary: the curated corpus (corpus.json, verified film songs with difficulty
+   tiers), resolved to JioSaavn streams by id (full songs, snippets start at the intro).
+   Fallback 1: raw JioSaavn search (unverified years, no tiers).
+   Fallback 2: catalog.json baked into the site (rebuilt weekly by CI, 30s hook clips).
+   Fallback 3: live iTunes search, throttled to stay under Apple's rate limit. */
+import { SAAVN_BASES, SAAVN_QUERIES, SAAVN_PAGES, SAAVN_MIN_PLAYS, CORPUS_DRAW, CORPUS_BATCH, ITUNES_TERMS, ITUNES_LANG_OK, EXCLUDE_RX, ERAS, eraOf, SNIP_CLEAN_MAX } from "./constants.js";
 import { de, songKey, shuffle, safeUrl } from "./utils.js";
 import { sanitizeTrack, loadPlayed, loadBlocked, normArtist, isBlocked, PLAY_COOLDOWN } from "./storage.js";
 import { log, ms } from "./log.js";
@@ -31,6 +33,71 @@ const pickStream = dl => {
   const any = dl.find(x=>x.url||x.link); return any ? (any.url||any.link) : null;
 };
 const pickArt = img => Array.isArray(img) && img.length ? (img[img.length-1].url||img[img.length-1].link||null) : null;
+
+/* corpus.json is column-major-compact ({ cols, songs: [[...]] }); expand it
+   once per page load. A missing or malformed file is tolerated (fallback tiers). */
+let corpusCache = null;
+async function loadCorpus(){
+  if (corpusCache && Date.now() - corpusCache.at < 3600e3) return corpusCache.songs;
+  try {
+    const r = await fetch("./corpus.json", { cache:"no-cache" });
+    if (!r.ok) return null;
+    const j = await r.json();
+    if (!j || j.v !== 1 || !Array.isArray(j.cols) || !Array.isArray(j.songs)) return null;
+    const songs = j.songs.map(row => Object.fromEntries(j.cols.map((c,i)=>[c,row[i]])));
+    corpusCache = { at: Date.now(), songs };
+    return songs;
+  } catch(e){ return null; }
+}
+const CORPUS_LANG = { hindi:"bolly", telugu:"telugu" };
+
+/* Returns { status: "ok" | "none" | "thin" | "unresolved", pool }.
+   "none" (no corpus) and "unresolved" (ids could not be turned into streams)
+   fall through to the uncurated tiers; "thin" is a filter problem the user
+   must widen, not a reason to play unverified songs. */
+async function loadFromCorpus(langs, eras, difficulty, blocked, played){
+  const corpus = await loadCorpus();
+  if (!corpus) return { status:"none", pool:[] };
+  const eraSet = Array.isArray(eras) && eras.length && eras.length < ERAS.length ? new Set(eras) : null;
+  const cands = [];
+  for (const s of corpus){
+    const lang = CORPUS_LANG[s.language];
+    if (!langs.includes(lang)) continue;
+    if (eraSet && !eraSet.has(eraOf(s.year))) continue;
+    if (difficulty !== "mixed" && s.tier !== difficulty) continue;
+    const artist = (s.singers || []).slice(0,3).join(", ") || "Unknown artist";
+    if (blocked.size && isBlocked({ artist }, blocked)) continue;
+    cands.push({ ...s, lang, artist });
+  }
+  if (cands.length < 10) return { status:"thin", pool:[] };
+  const now = Date.now();
+  const fresh = [], stale = [];
+  for (const s of cands) ((now - (played[songKey(s.title)] || 0)) > PLAY_COOLDOWN ? fresh : stale).push(s);
+  stale.sort((a,b) => (played[songKey(a.title)]||0) - (played[songKey(b.title)]||0));
+  const draw = shuffle(fresh).concat(stale).slice(0, CORPUS_DRAW);
+  const batches = [];
+  for (let i = 0; i < draw.length; i += CORPUS_BATCH) batches.push(draw.slice(i, i + CORPUS_BATCH));
+  const results = await Promise.allSettled(batches.map(b => saavnFetch(`/songs?ids=${b.map(s=>s.id).join(",")}`)));
+  const byId = new Map();
+  for (const res of results){
+    if (res.status !== "fulfilled" || !res.value) continue;
+    const list = Array.isArray(res.value.data) ? res.value.data : [];
+    for (const r of list) if (r && r.id) byId.set(r.id, r);
+  }
+  const pool = [];
+  for (const s of draw){
+    const r = byId.get(s.id);
+    if (!r) continue;
+    const stream = safeUrl(pickStream(r.downloadUrl));
+    if (!stream) continue;
+    pool.push(sanitizeTrack({
+      title:s.title, artist:s.artist, album:s.film, art:pickArt(r.image), stream,
+      duration:parseInt(r.duration)||200, year:s.year, lang:s.lang, tier:s.tier,
+    }));
+  }
+  const ok = pool.filter(Boolean);
+  return { status: ok.length >= 10 ? "ok" : "unresolved", pool: ok };
+}
 
 async function loadFromSaavn(langs){
   const jobs = [];
@@ -140,15 +207,29 @@ async function loadSnips(){
   } catch(e){ return null; }
 }
 
-/* Returns { queue, source } or { error: "load" | "thin" }. */
-export async function buildCrate(mix, eras, sound){
+/* Returns { queue, source } or { error: "load" | "thin" }.
+   difficulty: "easy" | "medium" | "hard" | "mixed" (corpus tiers; the
+   uncurated fallback tiers carry no difficulty and ignore it). */
+export async function buildCrate(mix, eras, sound, difficulty = "mixed"){
   const t0 = performance.now();
   const langs = mix==="both" ? ["bolly","telugu"] : [mix];
   const key = t => songKey(t.title);
   const snipsP = loadSnips();
-  let pool = await loadFromSaavn(langs);
-  let source = "saavn";
-  const tiers = { saavn: pool.length };
+  const blocked = new Set(loadBlocked().map(normArtist));
+  const played = loadPlayed();
+  const corpus = await loadFromCorpus(langs, eras, difficulty, blocked, played);
+  const tiers = { corpus: corpus.status === "ok" ? corpus.pool.length : corpus.status };
+  if (corpus.status === "thin"){
+    log("crate", { mix, difficulty, source:"corpus", ...tiers, ms: ms(t0) });
+    return { error:"thin" };
+  }
+  let pool = corpus.pool;
+  let source = "corpus";
+  if (pool.length < 10){
+    pool = await loadFromSaavn(langs);
+    source = "saavn";
+    tiers.saavn = pool.length;
+  }
   if (pool.length < 10){
     const keys = new Set(pool.map(key));
     const backup = (await loadCatalog(langs)).filter(t=>!keys.has(key(t)));
@@ -178,16 +259,14 @@ export async function buildCrate(mix, eras, sound){
     const e = snips[key(t)];
     if (Array.isArray(e) && Number.isFinite(e[0]) && e[1] < SNIP_CLEAN_MAX){ t.snip = Math.max(0, Math.floor(e[0])); snipped++; }
   }
-  log("crate", { mix, source, ...tiers, snips: snips ? "ok" : "none", snipped, ms: ms(t0) });
+  log("crate", { mix, difficulty, source, ...tiers, snips: snips ? "ok" : "none", snipped, ms: ms(t0) });
   if (pool.length < 10) return { error:"load" };
   if (Array.isArray(eras) && eras.length && eras.length < ERAS.length)
     pool = pool.filter(t => eras.includes(eraOf(t.year)));
-  const blocked = new Set(loadBlocked().map(normArtist));
   if (blocked.size) pool = pool.filter(t => !isBlocked(t, blocked));
   if (pool.length < 10) return { error:"thin" };
   // Recently played songs (this device) sit out; when the fresh pool runs thin,
   // repeats come back least-recently-played first, queued after all fresh songs.
-  const played = loadPlayed();
   const now = Date.now();
   const fresh = [], stale = [];
   for (const t of pool) ((now - (played[key(t)] || 0)) > PLAY_COOLDOWN ? fresh : stale).push(t);
