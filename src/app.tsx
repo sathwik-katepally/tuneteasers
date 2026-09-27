@@ -1,6 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { AnimatePresence, LazyMotion, MotionConfig, domAnimation } from "motion/react";
-import * as m from "motion/react-m";
 import { loadSaved, save } from "./lib/save";
 import { DIFFICULTY, hookOffset, pointsNow, rungSpan } from "./lib/config";
 import { playRung } from "./lib/ladder";
@@ -10,7 +8,10 @@ import { engine, keepAwake } from "./lib/engine.js";
 import { log } from "./lib/log.js";
 import { displayTitle } from "./lib/utils.js";
 import { groupPlayed, randomId, recordPlay, recordResult, takeInviteFromUrl, useGroup } from "./lib/group";
-import { Theatre } from "./components/Theatre";
+import { loadHostShow, roomFromUrl, saveHostShow } from "./lib/room";
+import { Stage } from "./components/Stage";
+import { Host } from "./room/Host";
+import { Phone } from "./room/Phone";
 import { Setup } from "./screens/Setup";
 import { Loading } from "./screens/Loading";
 import { Handover } from "./screens/Handover";
@@ -30,7 +31,10 @@ const freshTurn = (): Turn => ({ rung: 0, span: rungSpan(0, false), clipEndedAt:
 const primaryArtistOf = (t: Track | null) => (t ? String(t.artist || "").split(",")[0].trim() : "");
 
 export function App(){
-  const [state, setState] = useState<AppState>(loadSaved);
+  const [roomCode, setRoomCode] = useState(roomFromUrl);
+  const [state, setState] = useState<AppState>(() => ({ ...loadSaved(), ...(roomCode ? { screen: "buzzer" as const } : {}) }));
+  const [hostResume, setHostResume] = useState(false);
+  const [hostShow, setHostShow] = useState(loadHostShow);
   const [phase, setPhase] = useState<Phase>("handover");
   const [turn, setTurn] = useState<Turn>(freshTurn);
   const [revealed, setRevealed] = useState<Track | null>(null);
@@ -46,7 +50,11 @@ export function App(){
 
   useEffect(() => { save(state); }, [state]);
   useEffect(() => {
-    const onHash = () => { const i = takeInviteFromUrl(); if (i){ setInvite(i); setState(st => ({ ...st, screen: st.screen === "past" ? "setup" : st.screen })); } };
+    const onHash = () => {
+      const code = roomFromUrl();
+      if (code){ setRoomCode(code); setState(st => (st.screen === "setup" || st.screen === "past" ? { ...st, screen: "buzzer" } : st)); return; }
+      const i = takeInviteFromUrl(); if (i){ setInvite(i); setState(st => ({ ...st, screen: st.screen === "past" ? "setup" : st.screen })); }
+    };
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
@@ -253,6 +261,18 @@ export function App(){
   const primaryArtist = primaryArtistOf(revealed);
   const artistBlocked = !!primaryArtist && blocked.some(a => normArtist(a) === normArtist(primaryArtist));
 
+  if (state.screen === "host"){
+    return <Host settings={S} resume={hostResume} onExit={keep => {
+      setHostShow(keep ? loadHostShow() : null);
+      if (!keep) saveHostShow(null);
+      setHostResume(false);
+      setState(st => ({ ...st, screen: "setup" }));
+    }} />;
+  }
+  if (state.screen === "buzzer"){
+    return <Phone code={roomCode} onExit={() => { setRoomCode(""); setState(st => ({ ...st, screen: "setup" })); }} />;
+  }
+
   let key: string, screen: React.ReactNode, meta = "Now showing";
   if (loading){
     key = "loading";
@@ -266,6 +286,11 @@ export function App(){
     screen = <Setup error={error} settings={S} upSettings={upSettings} players={state.players} teams={state.teams} setRoster={setRoster}
       blocked={blocked} unblockArtist={unblockArtist} startGame={() => startGame()} savedGame={saved}
       invite={invite} clearInvite={() => setInvite("")} showPastGames={() => setState(st => ({ ...st, screen: "past" }))}
+      hostShow={hostShow?.started ? hostShow : null}
+      openRoom={() => { engine.ac(); saveHostShow(null); setHostShow(null); setHostResume(false); setState(st => ({ ...st, screen: "host" })); }}
+      resumeRoom={() => { engine.ac(); setHostResume(true); setState(st => ({ ...st, screen: "host" })); }}
+      discardRoom={() => { saveHostShow(null); setHostShow(null); }}
+      joinRoom={() => { setRoomCode(""); setState(st => ({ ...st, screen: "buzzer" })); }}
       resumeGame={async () => {
         if (!g) return;
         if (DIFFICULTY[g.difficulty].sound === "inst"){
@@ -313,19 +338,9 @@ export function App(){
   }
 
   const inGame = state.screen === "game" && !!g && !loading;
-  useEffect(() => { window.scrollTo(0, 0); }, [key]);
   return (
-    <LazyMotion features={domAnimation} strict>
-      <MotionConfig reducedMotion="user">
-        <Theatre meta={meta} game={inGame ? g : null} onHome={goHome} onEnd={endGame}>
-          <AnimatePresence mode="wait" initial={false}>
-            <m.div key={key} className="screen" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.22 }}
-              onAnimationComplete={key === "playing" ? shown : undefined}>
-              {screen}
-            </m.div>
-          </AnimatePresence>
-        </Theatre>
-      </MotionConfig>
-    </LazyMotion>
+    <Stage screenKey={key} meta={meta} game={inGame ? g : null} onHome={goHome} onEnd={endGame} onShown={key === "playing" ? shown : undefined}>
+      {screen}
+    </Stage>
   );
 }

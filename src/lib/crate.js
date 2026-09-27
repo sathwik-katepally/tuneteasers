@@ -359,3 +359,26 @@ export async function categoryCounts(mix, eras, sound, difficulty, minSongs, cat
   const count = cats => difficultyCands(eligible.filter(s => inCategories(s, cats)), difficulty, safeIds, minSongs).length;
   return Object.fromEntries([...categories.map(c => [c, count([c])]), ["any", count([])]]);
 }
+
+/* Titles for a buzz-in room's autocomplete that are not in the show, drawn
+   from the corpus in the same languages and eras, so the list cannot be
+   read as "these are the songs". Empty when the corpus is unavailable. */
+export async function decoyTitles(mix, eras, n, exclude, categories = []){
+  const corpus = await loadCorpus();
+  if (!corpus) return [];
+  const langs = langsOf(mix);
+  const eraSet = Array.isArray(eras) && eras.length && eras.length < ERAS.length ? new Set(eras) : null;
+  const skip = new Set(exclude.map(songKey));
+  const seen = new Set();
+  const pool = [];
+  for (const s of corpus){
+    if (!langs.includes(CORPUS_LANG[s.language])) continue;
+    if (eraSet && !eraSet.has(eraOf(s.year))) continue;
+    if (!inCategories(s, categories)) continue;
+    const k = songKey(s.title);
+    if (!k || skip.has(k) || seen.has(k)) continue;
+    seen.add(k);
+    pool.push(s.title);
+  }
+  return shuffle(pool).slice(0, n);
+}

@@ -309,7 +309,6 @@ const HOST = {
     if (r.phase !== "show") return "not-started";
     const title = clean(m.title, LIMITS.title);
     if (!title || !intIn(m.n, 1, LIMITS.songs)) return "bad-song";
-    if (r.song && r.song.n === m.n && r.song.answer.title === title) return SAME;
     r.song = {
       n: m.n, rung: -1, points: 0, state: "cue",
       answer: { title, film: clean(m.film, LIMITS.title), year: intIn(m.year, 0, 3000) ? m.year : 0, artist: clean(m.artist, LIMITS.title) },

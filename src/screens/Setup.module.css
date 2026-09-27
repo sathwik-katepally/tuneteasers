@@ -210,3 +210,27 @@
     font-size: 34px;
   }
 }
+
+.joinStrip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 10px 10px 14px;
+  background: var(--ink);
+  border: 2px solid var(--teal-lift);
+  box-shadow: 4px 4px 0 var(--teal-deep);
+}
+
+.joinText {
+  font-size: 14px;
+  line-height: 1.25;
+  color: var(--cream-dim);
+}
+
+.joinBtn {
+  flex: none;
+  min-height: 42px;
+  padding: 0 12px;
+  font-size: 14px;
+}

@@ -313,6 +313,9 @@ const SFX = {
   },
   // split-flap board settling
   flaps: (c, out, t, n) => { for (let i = 0; i < 9; i++) burst(c, out, t + i * 0.055 + Math.random() * 0.02, n, { dur: 0.018, vol: 0.28, type: "highpass", freq: 2600, q: 0.7 }); },
+  // buzz-in rooms: a game-show buzzer (two detuned square waves) and a dull "not it"
+  buzz: (c, out, t) => { tone(c, out, t, { type: "square", from: 150, dur: 0.42, vol: 0.09 }); tone(c, out, t, { type: "square", from: 156, dur: 0.42, vol: 0.09 }); },
+  nope: (c, out, t) => { tone(c, out, t, { type: "triangle", from: 330, to: 220, dur: 0.18, vol: 0.18 }); tone(c, out, t + 0.16, { type: "triangle", from: 220, to: 140, dur: 0.3, vol: 0.18 }); },
   fanfare: (c, out, t) => { [523, 659, 784, 1047].forEach((f, i) => tone(c, out, t + i * 0.12, { type: "triangle", from: f, dur: i === 3 ? 0.7 : 0.2, vol: 0.14 })); },
 };
 

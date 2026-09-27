@@ -1,0 +1,449 @@
+.center {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 16px;
+}
+
+.reel {
+  align-self: center;
+  color: var(--bulb);
+  animation: spin 2.4s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.status {
+  composes: eyebrow from global;
+  text-align: center;
+  color: var(--cream-dim);
+}
+
+.eyebrow {
+  composes: eyebrow from global;
+  color: var(--bulb);
+  text-align: center;
+}
+
+.note {
+  text-align: center;
+  text-wrap: balance;
+  color: var(--cream-dim);
+  font-size: 15px;
+}
+
+.others {
+  text-align: center;
+  font-size: 14px;
+  color: var(--cream-shade);
+}
+
+.ticketName {
+  composes: display from global;
+  font-size: clamp(40px, 12vw, 56px);
+  color: var(--vermilion);
+  line-height: 1.05;
+  word-break: break-word;
+}
+
+.ticketMeta {
+  margin-top: 8px;
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--teal);
+}
+
+.leave {
+  align-self: center;
+}
+
+/* Join */
+.joinCard {
+  display: flex;
+  flex-direction: column;
+}
+
+.joinHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 14px 8px;
+  border-bottom: 2px solid var(--ink);
+}
+
+.joinTitle {
+  composes: display from global;
+  font-size: 28px;
+  color: var(--vermilion);
+}
+
+.joinMeta {
+  composes: eyebrow from global;
+  font-size: 11px;
+  color: var(--teal);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px 0;
+}
+
+.label {
+  composes: eyebrow from global;
+  color: inherit;
+}
+
+.input {
+  width: 100%;
+  min-height: 50px;
+  padding: 6px 12px;
+  font-weight: 700;
+  font-size: 18px;
+  color: var(--ink);
+  background: #fff8e8;
+  border: 2px solid var(--ink);
+  border-radius: 0;
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.input:focus {
+  border-color: var(--teal);
+  box-shadow: 0 0 0 2px var(--teal-lift);
+}
+
+.codeInput {
+  composes: display from global;
+  min-height: 64px;
+  font-size: 40px;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  text-align: center;
+  /* the tracking trails the last letter; match it on the left to stay centred */
+  padding: 10px 12px 6px calc(12px + 0.3em);
+}
+
+.codeInput::placeholder {
+  color: var(--cream-shade);
+}
+
+.hint {
+  padding: 12px 14px 14px;
+  font-size: 13px;
+  color: #6b4a3a;
+}
+
+.notice {
+  padding: 10px 14px;
+  background: var(--ink);
+  color: var(--cream);
+  border: 2px solid var(--vermilion);
+  box-shadow: 4px 4px 0 var(--vermilion-deep);
+  font-weight: 700;
+  font-size: 15px;
+}
+
+/* In the show */
+.top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.meName {
+  composes: eyebrow from global;
+  min-width: 0;
+  color: var(--bulb);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.score {
+  flex: none;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--cream-dim);
+}
+
+.score b {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: 20px;
+  letter-spacing: 0;
+  color: var(--bulb);
+}
+
+.buzzWrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+}
+
+/* The buzzer: a lit marquee block while buzzing is open, a dark dead one otherwise. */
+.buzz {
+  position: relative;
+  width: min(78vw, 46vh, 330px);
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #170a08;
+  border: 3px dashed var(--cream-shade);
+  color: var(--cream-shade);
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  cursor: default;
+}
+
+.buzzLive {
+  background: radial-gradient(circle at 50% 42%, #ef4a3c, var(--vermilion) 55%, var(--vermilion-deep));
+  border: 4px solid var(--ink);
+  box-shadow: 0 0 0 4px var(--bulb), 8px 8px 0 var(--ink);
+  color: var(--cream);
+  cursor: pointer;
+  transition: transform 70ms ease, box-shadow 70ms ease;
+}
+
+.buzzLive:active {
+  transform: translate(5px, 5px);
+  box-shadow: 0 0 0 4px var(--bulb), 3px 3px 0 var(--ink);
+}
+
+.buzzIn {
+  background: var(--ink);
+  border: 4px solid var(--bulb);
+  color: var(--bulb);
+}
+
+.buzzText {
+  composes: display from global;
+  position: relative;
+  font-size: clamp(64px, 22vw, 104px);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  padding-top: 0.12em;
+}
+
+.buzzLive .buzzText {
+  text-shadow: 4px 4px 0 var(--ink);
+}
+
+.sub {
+  min-height: 2.8em;
+  max-width: 320px;
+  text-align: center;
+  text-wrap: balance;
+  font-size: 16px;
+  color: var(--cream-dim);
+}
+
+/* Answer pad. Kept mounted (just stowed) so the buzz tap can give its input
+   focus, which is what lets iOS raise the keyboard. */
+.pad {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  background: var(--cream);
+  color: var(--ink);
+  border: 3px solid var(--ink);
+  box-shadow: 0 0 0 3px var(--bulb), var(--shadow-hard);
+}
+
+.stowed {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  box-shadow: none;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.padHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.secs {
+  composes: display from global;
+  font-size: 28px;
+  color: var(--teal);
+}
+
+.secsLow {
+  color: var(--vermilion);
+}
+
+.hints {
+  display: flex;
+  flex-direction: column;
+  border: 2px solid var(--ink);
+  background: #fff8e8;
+}
+
+.hint_ {
+  min-height: 46px;
+  padding: 8px 12px;
+  text-align: left;
+  font-weight: 700;
+  font-size: 16px;
+  line-height: 1.2;
+}
+
+.hint_ + .hint_ {
+  border-top: 1px dashed var(--cream-shade);
+}
+
+.hint_:active {
+  background: var(--bulb);
+}
+
+/* Reveal on the phone */
+.resultWrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 16px;
+}
+
+.result {
+  composes: grain from global;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 26px 18px 30px;
+  text-align: center;
+  color: var(--ink);
+  background: radial-gradient(ellipse at 50% 30%, #fbf1d8, var(--cream) 70%);
+  border: 3px solid var(--ink);
+  box-shadow: 0 0 0 4px var(--cream-shade), var(--shadow-hard);
+}
+
+.resultWho {
+  composes: eyebrow from global;
+  color: var(--teal);
+}
+
+.resultTitle {
+  composes: display from global;
+  font-size: clamp(32px, 10vw, 44px);
+  color: var(--vermilion);
+  line-height: 1.08;
+  overflow-wrap: anywhere;
+}
+
+.resultFilm {
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.resultStamp {
+  margin-top: 10px;
+}
+
+.worth {
+  font-size: 14px;
+  color: #6b4a3a;
+}
+
+/* Final standings */
+.final {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 10px;
+}
+
+.finalPlace {
+  composes: display from global;
+  text-align: center;
+  font-size: clamp(44px, 13vw, 60px);
+  color: var(--bulb);
+  text-shadow: 3px 3px 0 var(--vermilion);
+}
+
+.finalScore {
+  text-align: center;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--cream-dim);
+}
+
+.ranks {
+  margin: 8px 0;
+  padding: 10px 12px;
+  list-style: none;
+  counter-reset: rank;
+  background: #0d0605;
+  border: 2px solid var(--cream-shade);
+}
+
+.ranks li {
+  display: flex;
+  gap: 10px;
+  padding: 6px 0;
+  font-weight: 700;
+  counter-increment: rank;
+  border-bottom: 1px dashed #3a221b;
+}
+
+.ranks li:last-child {
+  border-bottom: 0;
+}
+
+.ranks li::before {
+  content: counter(rank);
+  width: 18px;
+  color: var(--cream-shade);
+}
+
+.ranks span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ranks b {
+  color: var(--bulb);
+}
+
+.rankMe span {
+  color: var(--bulb);
+}

@@ -6,7 +6,7 @@ import { ERAS } from "./constants.js";
 import { sanitizeTrack } from "./storage.js";
 import { isResultId, randomId } from "./group";
 import { CATEGORIES, DEFAULT_ROUNDS, LEGACY_SCORE_SCALE, MAX_CAST, MAX_MEMBERS, NAME_MAX, ROUND_OPTIONS } from "./config";
-import type { AppState, CastMember, Category, Difficulty, GameState, HistoryEntry, Mix, Mode, RosterEntry, Settings, Track } from "../types";
+import type { AppState, CastMember, Category, Difficulty, GameState, HistoryEntry, Mix, Mode, Play, RosterEntry, Settings, Track } from "../types";
 
 const KEY = "tuneteasers_v7";
 const LEGACY_KEY = "tuneteasers_v6";
@@ -27,7 +27,7 @@ export const cleanName = (v: unknown, fallback: string) => String(v ?? "").trim(
 
 export const DEFAULTS: AppState = {
   screen: "setup",
-  settings: { mix: "both", eras: [...ERAS], difficulty: "medium", categories: [], mode: "players", rounds: DEFAULT_ROUNDS },
+  settings: { play: "pass", mix: "both", eras: [...ERAS], difficulty: "medium", categories: [], mode: "players", rounds: DEFAULT_ROUNDS },
   players: [
     { id: "p1", name: "Player 1", members: [] },
     { id: "p2", name: "Player 2", members: [] },
@@ -51,6 +51,7 @@ function parseCategories(v: unknown): Category[] {
 
 function parseSettings(raw: Raw): Settings {
   return {
+    play: oneOf<Play>(raw.play, ["pass", "room"], "pass"),
     mix: oneOf<Mix>(raw.mix, ["bolly", "telugu", "both"], "both"),
     eras: parseEras(raw.eras),
     difficulty: oneOf<Difficulty>(raw.difficulty, ["easy", "medium", "hard"], "medium"),

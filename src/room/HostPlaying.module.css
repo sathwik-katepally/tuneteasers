@@ -1,0 +1,207 @@
+.screen {
+  min-height: 210px;
+}
+
+.answering {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 0 18px;
+}
+
+.onBuzzer {
+  composes: eyebrow from global;
+  color: var(--teal);
+}
+
+.name {
+  composes: display from global;
+  max-width: 100%;
+  font-size: clamp(44px, 13vw, 64px);
+  color: var(--vermilion);
+  text-shadow: 4px 4px 0 var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding-top: 4px;
+}
+
+.nameLong {
+  font-size: clamp(32px, 9vw, 44px);
+}
+
+.clock {
+  position: relative;
+  width: min(100%, 300px);
+  height: 30px;
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--ink);
+  border: 2px solid var(--ink);
+  overflow: hidden;
+}
+
+.clockFill {
+  position: absolute;
+  inset: 0;
+  background: var(--vermilion);
+  transform-origin: left;
+  transition: transform 200ms linear;
+}
+
+.clockText {
+  position: relative;
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--cream);
+}
+
+.next {
+  font-size: 14px;
+  color: #6b4a3a;
+}
+
+.wrong {
+  position: absolute;
+  top: 10px;
+  left: 12px;
+  right: 12px;
+  padding: 6px 10px;
+  font-size: 15px;
+  text-align: center;
+  color: var(--cream);
+  background: var(--ink);
+  box-shadow: 3px 3px 0 var(--vermilion-deep);
+  z-index: 2;
+  animation: drop 260ms cubic-bezier(0.3, 1.4, 0.5, 1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nope {
+  margin-left: 6px;
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--bulb);
+}
+
+@keyframes drop {
+  from {
+    transform: translateY(-14px);
+    opacity: 0;
+  }
+}
+
+.anyone {
+  composes: display from global;
+  margin-top: 6px;
+  font-size: 30px;
+  color: var(--teal);
+}
+
+.anyone b {
+  font-weight: 400;
+  color: var(--vermilion);
+}
+
+.seats {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+  gap: 6px;
+}
+
+.seat {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 10px;
+  background: #170a08;
+  border: 1px solid #3a221b;
+  color: var(--cream);
+  transition: background 160ms ease, border-color 160ms ease;
+}
+
+.seatName {
+  min-width: 0;
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.seatScore {
+  composes: display from global;
+  font-size: 18px;
+  color: var(--bulb);
+}
+
+.seatOn {
+  background: var(--vermilion);
+  border-color: var(--bulb);
+  box-shadow: 0 0 0 2px var(--bulb);
+}
+
+.seatOn .seatScore {
+  color: var(--cream);
+}
+
+.seatOut {
+  opacity: 0.45;
+}
+
+.seatOut .seatName {
+  text-decoration: line-through;
+  text-decoration-thickness: 2px;
+}
+
+.seatAway {
+  border-style: dashed;
+  color: var(--cream-shade);
+}
+
+.caption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--cream-shade);
+}
+
+.caption b {
+  color: var(--bulb);
+  letter-spacing: 0.12em;
+}
+
+.skip {
+  margin-left: auto;
+}
+
+@media (min-width: 900px) {
+  .screen {
+    min-height: 280px;
+  }
+}
+
+@media (max-height: 760px) {
+  .screen {
+    min-height: 170px;
+  }
+  .seat {
+    padding: 4px 8px;
+  }
+}

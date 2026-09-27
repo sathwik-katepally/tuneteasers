@@ -18,8 +18,10 @@ export type Difficulty = "easy" | "medium" | "hard";
 export type Mode = "players" | "teams";
 export type Mix = "bolly" | "telugu" | "both";
 export type Category = "dance" | "romantic" | "sad" | "item" | "mass";
+export type Play = "pass" | "room";
 
 export interface Settings {
+  play: Play;
   mix: Mix;
   eras: string[];
   difficulty: Difficulty;
@@ -63,7 +65,7 @@ export interface GameState {
 }
 
 export interface AppState {
-  screen: "setup" | "game" | "done" | "past";
+  screen: "setup" | "game" | "done" | "past" | "host" | "buzzer";
   settings: Settings;
   players: RosterEntry[];
   teams: RosterEntry[];
