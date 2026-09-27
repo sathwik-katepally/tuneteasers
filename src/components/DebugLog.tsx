@@ -1,8 +1,10 @@
 /* On-device diagnostics overlay. Enable with ?debug=1 in the URL (sticky via
    localStorage; ?debug=0 turns it off). Shows the pipeline log live, with
    copy-to-clipboard so a phone user can paste evidence into a bug report. */
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useState } from "react";
 import { logDump, logClear, onLog } from "../lib/log.js";
+
+type LogEntry = { n: number; t: string; tag: string; [key: string]: unknown };
 
 function debugEnabled(){
   try {
@@ -13,7 +15,7 @@ function debugEnabled(){
   } catch(e){ return false; }
 }
 
-const fmt = e => {
+const fmt = (e: LogEntry) => {
   const { n, t, tag, ...rest } = e;
   const kv = Object.entries(rest).map(([k, v]) => `${k}=${v}`).join(" ");
   return `${t} ${tag}${kv ? " " + kv : ""}`;
@@ -29,7 +31,7 @@ export function DebugLog(){
   });
   const [copied, setCopied] = useState(false);
   const [, bump] = useState(0);
-  useEffect(() => { if (on && open) return onLog(() => bump(x => x + 1)); }, [on, open]);
+  useEffect(() => { if (on && open) { const off = onLog(() => bump(x => x + 1)); return () => { off(); }; } }, [on, open]);
   if (!on) return null;
   const copy = async () => {
     try {
@@ -37,16 +39,16 @@ export function DebugLog(){
       setCopied(true); setTimeout(() => setCopied(false), 1500);
     } catch(e){}
   };
-  if (!open) return <button class="dbg-fab" onClick={() => setOpen(true)}>log</button>;
+  if (!open) return <button className="dbg-fab" onClick={() => setOpen(true)}>log</button>;
   return (
-    <div class="dbg-panel">
-      <div class="dbg-bar">
+    <div className="dbg-panel">
+      <div className="dbg-bar">
         <span>pipeline log ({logDump().length})</span>
         <button onClick={copy}>{copied ? "copied" : "copy"}</button>
         <button onClick={() => { logClear(); bump(x => x + 1); }}>clear</button>
         <button onClick={() => setOpen(false)}>close</button>
       </div>
-      <pre class="dbg-body">{logDump().slice(-60).map(fmt).join("\n")}</pre>
+      <pre className="dbg-body">{logDump().slice(-60).map(fmt).join("\n")}</pre>
     </div>
   );
 }

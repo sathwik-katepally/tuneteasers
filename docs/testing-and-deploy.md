@@ -17,12 +17,12 @@ Scripts serve `dist/` on a local port with correct MIME types and drive the full
 Playback modes asserted by the suites are `snip | muffle | plain` (`window.__ttLastMode`); no ML/model network requests should ever appear.
 The old on-device pipeline suites `dsp.js`, `pick.js`, `vadtest.js`, and `ml*.js` are obsolete and no longer run.
 
-Run `npm run build` first; the scripts read `dist/`.
-Gotchas: buttons with the `.pulse` animation need `{ force: true }` clicks; state persists via a Preact effect, so after a click, `waitForFunction` on localStorage before reading it.
+Run `npm run typecheck && npm run build` first; the scripts read `dist/`.
+Gotchas: buttons with the `.pulse` animation need `{ force: true }` clicks; state persists via a React effect, so after a click, `waitForFunction` on localStorage before reading it.
 
 ## Deploy (GitHub Pages via Actions)
 
-`.github/workflows/deploy.yml` builds with Vite and deploys `dist/` to Pages on every push to main; Pages is configured with `build_type=workflow`.
+`.github/workflows/deploy.yml` checks TypeScript, builds with Vite, and deploys `dist/` to Pages on every push to main; Pages is configured with `build_type=workflow`.
 `vite.config.js` sets `base: "./"` so the build works under the `/tuneteasers/` project path.
 After pushing, verify the workflow succeeded (`gh run watch` or `gh run list`) and smoke-test the live URL.
 

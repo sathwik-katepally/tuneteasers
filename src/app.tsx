@@ -1,21 +1,22 @@
-import { useState, useEffect } from "preact/hooks";
+import { useState, useEffect } from "react";
 import { ERAS } from "./lib/constants.js";
 import { loadPersisted, persist, markPlayed, loadBlocked, saveBlocked, normArtist, isBlocked } from "./lib/storage.js";
 import { buildCrate } from "./lib/crate.js";
 import { engine, keepAwake } from "./lib/engine.js";
 import { log } from "./lib/log.js";
-import { Setup, Loading } from "./screens/Setup.jsx";
-import { Game } from "./screens/Game.jsx";
-import { Done } from "./screens/Done.jsx";
+import { Setup, Loading } from "./screens/Setup";
+import { Game } from "./screens/Game";
+import { Done } from "./screens/Done";
+import type { AppState, Phase, Settings, Snippet, Track } from "./types";
 
 export function App(){
-  const [state, setState] = useState(loadPersisted);
-  const [phase, setPhase] = useState("ready");        // ready | cueing | playing | guessing | revealed
+  const [state, setState] = useState<AppState>(() => loadPersisted() as AppState);
+  const [phase, setPhase] = useState<Phase>("ready");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [note, setNote] = useState("");
   const [showBoard, setShowBoard] = useState(false);
-  const [snip, setSnip] = useState({ end:0, lastSecs:10, playSecs:0 });
+  const [snip, setSnip] = useState<Snippet>({ end:0, lastSecs:10, playSecs:0 });
   const [blocked, setBlocked] = useState(loadBlocked);
   const [hint, setHint] = useState(false);
 
@@ -31,18 +32,18 @@ export function App(){
   const g = state.game;
   const track = g ? g.queue[g.trackIdx] : null;
 
-  const upSettings = patch => setState(st=>({ ...st, settings:{ ...st.settings, ...patch } }));
-  const toggleEra = e => upSettings({ eras: S.eras.includes(e)
+  const upSettings = (patch: Partial<Settings>) => setState(st=>({ ...st, settings:{ ...st.settings, ...patch } }));
+  const toggleEra = (e: string) => upSettings({ eras: S.eras.includes(e)
     ? (S.eras.length>1 ? S.eras.filter(x=>x!==e) : S.eras) // never allow zero eras
     : ERAS.filter(x=>S.eras.includes(x) || x===e) });
-  const renamePlayer = (i,name) => setState(st=>({ ...st, players: st.players.map((q,j)=> j===i ? {...q, name:name.slice(0,24)} : q) }));
-  const removePlayer = i => setState(st=>({ ...st, players: st.players.filter((_,j)=>j!==i) }));
+  const renamePlayer = (i: number, name: string) => setState(st=>({ ...st, players: st.players.map((q,j)=> j===i ? {...q, name:name.slice(0,24)} : q) }));
+  const removePlayer = (i: number) => setState(st=>({ ...st, players: st.players.filter((_,j)=>j!==i) }));
   const addPlayer = () => setState(st=>({ ...st, players:[...st.players, {name:"Player "+(st.players.length+1), score:0}] }));
 
   async function startGame(){
     engine.stop();
     setLoading(true); setError("");
-    const crate = await buildCrate(S.mix, S.eras, S.sound);
+    const crate = await buildCrate(S.mix, S.eras, S.sound) as { error?: string; queue?: Track[]; source?: string };
     setLoading(false);
     if (crate.error){
       setError(crate.error==="thin"
@@ -52,13 +53,14 @@ export function App(){
       return;
     }
     setPhase("ready"); setNote(""); setHint(false); setSnip({ end:0, lastSecs:S.snippetLen, playSecs:0 });
+    const queue = crate.queue!;
     setState(st=>({ ...st, screen:"game",
       players: st.players.map(p=>({ ...p, score:0 })),
-      game:{ queue:crate.queue, trackIdx:0, turn:0, round:1, totalSongs:crate.queue.length, source:crate.source } }));
-    if (S.sound==="inst") engine.prefetch(crate.queue[0]);
+      game:{ queue, trackIdx:0, turn:0, round:1, totalSongs:queue.length, source:crate.source! } }));
+    if (S.sound==="inst") engine.prefetch(queue[0]);
   }
 
-  async function playSnippet(secs, mode){ // mode: fresh | replay | extend
+  async function playSnippet(secs: number, mode: "fresh" | "replay" | "extend"){
     if (!track) return;
     engine.ac(); // unlock inside the tap
     const offset = mode==="extend" ? snip.end : 0;
@@ -93,14 +95,14 @@ export function App(){
     setPhase("revealed");
   }
 
-  function nextRound(gotIt){
+  function nextRound(gotIt: boolean | null){
     engine.stop();
     if (track) markPlayed(track.title);
     const pts = hint ? 0.5 : 1; // a hint halves the payout
     setPhase("ready"); setNote(""); setShowBoard(false); setHint(false);
     setSnip(s=>({ ...s, end:0, playSecs:0 }));
     setState(st=>{
-      const gg = st.game;
+      const gg = st.game!;
       const players = gotIt===true
         ? st.players.map((p,i)=> i===gg.turn ? { ...p, score:p.score+pts } : p)
         : st.players;
@@ -113,7 +115,7 @@ export function App(){
   }
   useEffect(()=>{ // warm the next track's stream behind the current one (one preload="auto" element)
     if (state.screen!=="game" || !track || S.sound!=="inst") return;
-    const next = g.queue[g.trackIdx+1];
+    const next = g!.queue[g!.trackIdx+1];
     if (next) engine.prefetch(next);
   }, [g && g.trackIdx, state.screen]);
 
@@ -132,7 +134,7 @@ export function App(){
       return { ...st, game:{ ...gg, queue, totalSongs:queue.length } };
     });
   }
-  function unblockArtist(name){
+  function unblockArtist(name: string){
     const next = loadBlocked().filter(a=>normArtist(a)!==normArtist(name));
     saveBlocked(next);
     setBlocked(next);
@@ -167,7 +169,7 @@ export function App(){
 
   const primaryArtist = track ? String(track.artist||"").split(",")[0].trim() : "";
   const curArtistBlocked = !!primaryArtist && blocked.some(a=>normArtist(a)===normArtist(primaryArtist));
-  return <Game g={g} players={state.players} S={S} track={track} phase={phase} snip={snip} note={note}
+  return <Game g={g!} players={state.players} S={S} track={track} phase={phase} snip={snip} note={note}
     hint={hint} useHint={()=>setHint(true)} showBoard={showBoard} toggleBoard={()=>setShowBoard(v=>!v)}
     playSnippet={playSnippet} revealTrack={revealTrack} nextRound={nextRound}
     blockArtist={blockArtist} primaryArtist={primaryArtist} curArtistBlocked={curArtistBlocked} endGame={endGame} goHome={goHome} />;

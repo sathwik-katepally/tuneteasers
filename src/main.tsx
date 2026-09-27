@@ -1,6 +1,6 @@
-import { render } from "preact";
-import { App } from "./app.jsx";
-import { DebugLog } from "./components/DebugLog.jsx";
+import { createRoot } from "react-dom/client";
+import { App } from "./app";
+import { DebugLog } from "./components/DebugLog";
 import { log } from "./lib/log.js";
 import "./styles.css";
 
@@ -10,4 +10,4 @@ import "./styles.css";
 // its status ("snips") and the verified-track count ("snipped").
 log("boot", { ua: navigator.userAgent.replace(/^Mozilla\/5\.0 /, "").slice(0, 80) });
 
-render(<><App /><DebugLog /></>, document.getElementById("root"));
+createRoot(document.getElementById("root")!).render(<><App /><DebugLog /></>);

@@ -1,5 +1,4 @@
 import { defineConfig } from "vite";
-import preact from "@preact/preset-vite";
 
 // Cloudflare Web Analytics beacon, rendered only when the build has a site
 // token (CI passes the CF_WEB_ANALYTICS_TOKEN repo variable; local builds
@@ -27,5 +26,5 @@ function cloudflareBeacon(token) {
 
 export default defineConfig({
   base: "./", // relative asset URLs so the build works at any Pages path
-  plugins: [preact(), cloudflareBeacon(process.env.CF_WEB_ANALYTICS_TOKEN)],
+  plugins: [cloudflareBeacon(process.env.CF_WEB_ANALYTICS_TOKEN)],
 });
