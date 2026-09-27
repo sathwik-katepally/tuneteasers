@@ -163,7 +163,7 @@ async function nextSong(n){
   const next = host.page.getByRole("button", { name: /Next song|box office|On to round/ });
   await until(`song ${n} cued`, async () => {
     if (song()?.n === n) return true;
-    if (await next.count() && await next.first().isEnabled().catch(() => false)) await next.first().click({ timeout: 1500 }).catch(() => {});
+    if (await next.count() && await next.first().isEnabled({ timeout: 500 }).catch(() => false)) await next.first().click({ timeout: 1500 }).catch(() => {});
     return false;
   });
 }
@@ -171,6 +171,49 @@ async function nextSong(n){
 async function revealed(n){
   await until(`song ${n} revealed`, () => song()?.n === n && song().state === "revealed");
   await host.page.getByRole("button", { name: /Next song|box office/ }).first().waitFor({ timeout: 20000 });
+}
+
+/* The room refuses what the app never sends: foreign origins, unknown rooms,
+   a phone playing host, oversized frames, frames before a hello, and floods. */
+async function guards(code){
+  const wsBase = worker.origin.replace(/^http/, "ws") + "/parties/room/";
+  const connect = (c, o = origin) => new Promise(res => {
+    const ws = new WebSocket(wsBase + c, { headers: { origin: o } });
+    const got = [];
+    ws.onmessage = e => got.push(JSON.parse(String(e.data)));
+    ws.onopen = () => res({ ws, got, open: true });
+    ws.onerror = () => res({ ws, got, open: false });
+    ws.closed = new Promise(r => { ws.onclose = e => r(e.code); });
+  });
+  const bad = await connect(code, "https://evil.example");
+  if (bad.open) fail("a foreign origin opened a room socket");
+  const post = await fetch(worker.origin + "/api/rooms", { method: "POST", headers: { origin: "https://evil.example" } });
+  if (post.status !== 403) fail(`a foreign origin made a room (${post.status})`);
+  const none = await connect(code === "BBBB" ? "CCCC" : "BBBB");
+  none.ws.send(JSON.stringify({ t: "join", key: "n".repeat(24), name: "Nobody" }));
+  if ((await Promise.race([none.ws.closed, sleep(3000).then(() => 0)])) !== 4404) fail("an unknown room code was not closed with 4404");
+  const fake = await connect(code);
+  fake.ws.send(JSON.stringify({ t: "host", token: "A".repeat(22) }));
+  if ((await Promise.race([fake.ws.closed, sleep(3000).then(() => 0)])) !== 4403) fail("a wrong host token was not refused");
+  const early = await connect(code);
+  early.ws.send(JSON.stringify({ t: "buzz" }));
+  await sleep(300);
+  if (!early.got.some(m => m.code === "hello-first")) fail("a buzz before hello was not refused");
+  early.ws.send(JSON.stringify({ t: "join", key: "g".repeat(24), name: "Guard" }));
+  await sleep(300);
+  early.ws.send(JSON.stringify({ t: "answer", text: "x".repeat(2000) }));
+  early.ws.send(JSON.stringify({ t: "end" }));
+  await sleep(300);
+  if (!early.got.some(m => m.code === "too-big")) fail("an oversized frame was not refused");
+  if (!early.got.some(m => m.code === "unknown")) fail("a phone could send a host command");
+  if (hostState().phase === "over") fail("a phone ended the show");
+  let refused = 0;
+  const before = early.got.length;
+  for (let i = 0; i < 60; i++) early.ws.send(JSON.stringify({ t: "answer", text: "flood" }));
+  await sleep(500);
+  refused = 60 - early.got.slice(before).filter(m => m.code === "not-your-turn").length;
+  if (refused < 30) fail(`a flood of 60 frames was mostly handled (${60 - refused} answered)`);
+  for (const c of [bad, none, fake, early]) try { c.ws.close(); } catch {}
 }
 
 const host = await device("host", "host");
@@ -384,6 +427,7 @@ try {
   await asha.page.locator('button[aria-label="Buzz"]').waitFor({ timeout: 15000 });
 
   if (overflow.length) fail("screens scroll at this size: " + overflow.join(", "));
+  await guards(code);
   const errors = all.flatMap(d => d.errors);
   if (errors.length) fail("page errors:\n" + errors.join("\n"));
   console.log(`room: PASS (room ${code}, ${show.total} songs, ${frames} phone frames checked)`);

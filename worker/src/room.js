@@ -89,11 +89,9 @@ export class Room extends Server {
     await this.ctx.storage.setAlarm(Math.min(...at));
   }
 
+  // Refusals wait for the hello: a close sent from onConnect, before the
+  // handshake response, never reaches the client.
   onConnect(conn){
-    if (!this.room){ conn.close(4404, "no such room"); return; }
-    let n = 0;
-    for (const _ of this.getConnections()) n++;
-    if (n > LIMITS.connections){ conn.close(4429, "room is full"); return; }
     conn.setState({ at: Date.now() });
     this.arm();
   }
@@ -149,6 +147,9 @@ export class Room extends Server {
     if (!m || typeof m !== "object" || typeof m.t !== "string") return this.fail(conn, "bad-message");
 
     if (!role){
+      let n = 0;
+      for (const _ of this.getConnections()) n++;
+      if (n > LIMITS.connections) return conn.close(4429, "room is full");
       if (m.t === "host") return this.helloHost(conn, m);
       if (m.t === "join") return this.helloPlayer(conn, m);
       return this.fail(conn, "hello-first");
