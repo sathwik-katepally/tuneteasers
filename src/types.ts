@@ -44,6 +44,7 @@ export interface HistoryEntry {
 }
 
 export interface GameState {
+  id: string;
   queue: Track[];
   trackIdx: number;
   turn: number;
@@ -53,13 +54,14 @@ export interface GameState {
   source: string;
   mode: Mode;
   difficulty: Difficulty;
+  mix: Mix;
   cast: CastMember[];
   history: HistoryEntry[];
   finished: boolean;
 }
 
 export interface AppState {
-  screen: "setup" | "game" | "done";
+  screen: "setup" | "game" | "done" | "past";
   settings: Settings;
   players: RosterEntry[];
   teams: RosterEntry[];

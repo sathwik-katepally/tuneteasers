@@ -14,7 +14,8 @@
     "e2e:migrate": "node e2e/migrate.mjs",
     "e2e:autoplay": "node e2e/autoplay.mjs",
     "e2e:offline": "node e2e/offline.mjs",
-    "e2e:snips": "node e2e/safe-snips.mjs"
+    "e2e:snips": "node e2e/safe-snips.mjs",
+    "e2e:group": "node e2e/group-sync.mjs"
   },
   "dependencies": {
     "@fontsource/mukta": "^5.3.0",
@@ -22,7 +23,8 @@
     "lucide-react": "^1.48.0",
     "motion": "^13.4.4",
     "react": "^19.3.0",
-    "react-dom": "^19.3.0"
+    "react-dom": "^19.3.0",
+    "uqr": "^0.1.3"
   },
   "devDependencies": {
     "@tensorflow/tfjs": "^4.22.0",
