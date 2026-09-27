@@ -19,7 +19,7 @@ try {
   const box = await page.getByRole("alert").boundingBox();
   if (!box || box.y < 0 || box.y > (await page.evaluate(() => innerHeight)) / 2) throw new Error("error banner is off screen");
   await page.getByRole("button", { name: "log" }).click();
-  await page.locator(".dbg-body").getByText(/crate mix=both source=\w+ saavn=0/).waitFor();
+  await page.locator(".dbg-body").getByText(/crate mix=both difficulty=medium source=\w+.*saavn=0/).waitFor();
   if (A.shots) await page.screenshot({ path: path.join(A.shots, `${A.profile}-offline.png`) });
   if (errors.length) throw new Error(errors.join(" | "));
   console.log("PASS offline", A.profile, "error shown, debug overlay has the crate line");
