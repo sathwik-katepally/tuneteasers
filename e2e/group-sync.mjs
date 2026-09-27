@@ -10,35 +10,14 @@
    D1 (started here), or to --worker=<origin> (e.g. the preview deployment).
    node e2e/group-sync.mjs [--worker=https://...] [--shots=dir] */
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
-import net from "node:net";
-import { spawn, execFileSync } from "node:child_process";
-import { serve, open, args, saved } from "./harness.mjs";
+import { serve, open, args, saved, localWorker } from "./harness.mjs";
 import { songKey } from "../src/lib/utils.js";
 
 const A = args({});
 const shotsDir = A.shots && A.shots !== "true" ? A.shots : null;
 if (shotsDir) fs.mkdirSync(shotsDir, { recursive: true });
 const WORKER_HOST = "tuneteasers-saavn.sathwik-katepally.workers.dev";
-const WORKER_DIR = path.resolve(import.meta.dirname, "../worker");
-
-const freePort = () => new Promise(res => { const s = net.createServer().listen(0, () => { const p = s.address().port; s.close(() => res(p)); }); });
-
-async function localWorker(){
-  const persist = fs.mkdtempSync(path.join(os.tmpdir(), "tt-group-e2e-"));
-  execFileSync("npx", ["wrangler", "d1", "migrations", "apply", "DB", "--local", "--persist-to", persist], { cwd: WORKER_DIR, stdio: "ignore" });
-  const [port, inspector] = [await freePort(), await freePort()];
-  const proc = spawn("npx", ["wrangler", "dev", "--port", String(port), "--inspector-port", String(inspector), "--persist-to", persist], { cwd: WORKER_DIR, stdio: ["ignore", "pipe", "pipe"] });
-  let out = "";
-  await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("wrangler dev did not start:\n" + out.slice(-800))), 60000);
-    const read = d => { out += d; if (/Ready on/.test(out)){ clearTimeout(timer); resolve(); } };
-    proc.stdout.on("data", read); proc.stderr.on("data", read);
-    proc.on("exit", code => reject(new Error(`wrangler dev exited ${code}:\n${out.slice(-800)}`)));
-  });
-  return { origin: `http://localhost:${port}`, stop: () => { proc.kill(); fs.rmSync(persist, { recursive: true, force: true }); } };
-}
 
 const worker = A.worker ? { origin: A.worker.replace(/\/$/, ""), stop(){} } : await localWorker();
 const server = await serve();

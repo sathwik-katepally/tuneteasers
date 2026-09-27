@@ -16,6 +16,8 @@ Everything is optional; with no group, or with the Worker unreachable, the game 
   Only SHA-256 hashes of the secrets are stored in D1; both are 128 random bits, so a fast hash is enough.
 - The invite travels as `#join=<invite>` in the link, so it never reaches GitHub Pages logs; the app strips it from the address bar at once.
 - Every group request sends `Authorization: Bearer <invite>`; a missing or malformed invite gets 401, a wrong one (or a deleted group) 403.
+  A group idle past `GROUP_IDLE_TTL_DAYS` also gets 403 at authentication, before any write could refresh `active_at` and revive it.
+- A link whose `#join=` part is not a valid invite (cut short, mangled by a chat app) is stripped from the address bar and opens the join form with a message asking for the whole link.
 - The owner secret is the only thing that can delete the group (`DELETE /api/group`); member invites cannot.
 - Group responses are `cache-control: no-store` and never go through the edge cache the Saavn proxy uses.
 - CORS on group routes allows only `ALLOWED_ORIGINS` (the Pages origin) and `http://localhost` / `http://127.0.0.1` on any port; a request with any other `Origin` gets 403.
@@ -46,7 +48,7 @@ The import is the one place client timestamps are accepted, clamped to the playe
 Schema: `worker/migrations/` (D1 migrations, applied by CI).
 Tables: `groups`, `played` (group, song key, last played), `round_events` (idempotency log), `results`.
 Windows are Worker vars: `PLAYED_TTL_DAYS` (30, for `played` and `round_events`), `RESULT_TTL_DAYS` (365), `GROUP_IDLE_TTL_DAYS` (365 without writes).
-Reads filter by these windows, so an expired row is never served.
+Reads filter by these windows, and authentication refuses an idle-expired group, so an expired row is never served.
 Deletion runs from group writes, at most hourly per Worker isolate, because this account's five free cron triggers are all taken; a group nobody writes to is still hidden by the read filters and swept on the next write from any group.
 
 ## Client
@@ -54,8 +56,10 @@ Deletion runs from group writes, at most hourly per Worker isolate, because this
 `src/lib/group.ts` holds the group (`tt_group` in localStorage: name, invite, owner secret on the creating phone) and an outbox (`tt_group_outbox`).
 - `recordPlay` is called next to every `markPlayed`; `recordResult` runs once when a game becomes finished (keyed by `game.id`).
   Both write to the outbox first, then flush; a failed flush keeps the entries, and the next write, an `online` event or a page load sends them.
+  The outbox holds only the current group's queue: an answer for a group the phone has since left never rewrites it, and the new group's queue is flushed once the old request settles.
   A 400/413 drops the entry so one bad entry cannot block the rest; 401/403 marks the group as revoked and the home card offers to leave.
 - Before building a crate, `groupPlayed` flushes, fetches the group's map (5 s timeout) and merges it with `tt_played` (latest wins); if the group is unreachable the crate uses `tt_played` alone.
+  Every crate asks again: only a failure of this call's own flush skips the read, never an "offline" left over from an earlier one.
   The `crate` log line reports how many songs were in the cooldown map as `played`.
 - `tt_played` stays the phone's own history; the group map is merged at crate time only.
 - UI: `src/components/GroupPanel.tsx` on the home screen (make, join, invite with QR, leave, owner delete) and `src/screens/PastGames.tsx` (`screen: "past"`).

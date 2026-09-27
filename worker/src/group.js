@@ -127,10 +127,13 @@ async function authenticate(request, env){
   if (!t) throw new HttpError(401, "the invite is malformed");
   const [, id, secret] = t;
   const [row, hash] = await Promise.all([
-    env.DB.prepare("SELECT id, name, member_hash, owner_hash, created_at FROM groups WHERE id = ?").bind(id).first(),
+    env.DB.prepare("SELECT id, name, member_hash, owner_hash, created_at, active_at FROM groups WHERE id = ?").bind(id).first(),
     sha256(secret),
   ]);
-  const role = !row ? null : sameHash(hash, row.owner_hash) ? "owner" : sameHash(hash, row.member_hash) ? "member" : null;
+  // An idle-expired group is gone even before the sweep deletes it; checking
+  // here also stops a write from refreshing active_at and reviving it.
+  const expired = row && row.active_at < Date.now() - ttl(env).idle;
+  const role = !row || expired ? null : sameHash(hash, row.owner_hash) ? "owner" : sameHash(hash, row.member_hash) ? "member" : null;
   if (!role) throw new HttpError(403, "this invite is not valid (the group may have been deleted)");
   return { group: { id: row.id, name: row.name, createdAt: row.created_at }, role };
 }

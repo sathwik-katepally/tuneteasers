@@ -67,13 +67,16 @@ export function parseInvite(text: string): string {
 }
 export const inviteLink = (invite: string) => `${location.origin}${location.pathname}#join=${invite}`;
 
+export const BROKEN_INVITE = "broken";
+
 /* An invite arrives as #join=<invite> so it never reaches a server log.
-   It is removed from the address bar straight away. */
+   It is removed from the address bar straight away. Invites are URL-safe, so
+   the fragment is matched as is: decoding a mangled link (#join=%) throws. */
 export function takeInviteFromUrl(): string {
-  const m = /^#join=(.+)$/.exec(location.hash);
-  if (!m) return "";
+  if (!location.hash.startsWith("#join=")) return "";
+  const invite = parseInvite(location.hash.slice("#join=".length));
   history.replaceState(null, "", location.pathname + location.search);
-  return parseInvite(decodeURIComponent(m[1]));
+  return invite || BROKEN_INVITE;
 }
 
 function readGroup(): Group | null {
@@ -215,26 +218,35 @@ export function recordResult(g: GameState){
   enqueue(o => { if (!o.results.some(r => r.id === result.id)) o.results.push(result); });
 }
 
-let flushing: Promise<void> | null = null;
+type FlushResult = "sent" | "failed" | "nothing";
+let flushing: Promise<FlushResult> | null = null;
 
 /* Sends the outbox. A network failure or a busy server keeps entries for the
-   next try; a rejected entry (400/413) is dropped so it cannot block the rest. */
-export function flush(): Promise<void> {
-  if (!flushing) flushing = doFlush().finally(() => { flushing = null; });
+   next try; a rejected entry (400/413) is dropped so it cannot block the rest.
+   If the phone switched groups while a flush for the old one was in flight,
+   the new group's queue is flushed as soon as that one settles. */
+export function flush(): Promise<FlushResult> {
+  if (!flushing){
+    const groupId = snap.group?.id;
+    flushing = doFlush().finally(() => { flushing = null; });
+    flushing.then(() => { if (snap.group && snap.group.id !== groupId && snap.pending) void flush(); });
+  }
   return flushing;
 }
 
-async function doFlush(){
+async function doFlush(): Promise<FlushResult> {
   const g = snap.group;
-  if (!g || snap.sync === "revoked") return;
+  if (!g || snap.sync === "revoked") return "nothing";
+  // The outbox holds one group's queue; a late answer for an old group must not rewrite it.
   const drop = (ids: Set<string>) => {
+    if (snap.group?.id !== g.id) return;
     const o = readOutbox(g.id);
     o.rounds = o.rounds.filter(r => !ids.has(r.id));
     o.results = o.results.filter(r => !ids.has(r.id));
     lsSet(LS_OUTBOX, o);
     emit({ pending: pendingOf(o) });
   };
-  if (!pendingOf(readOutbox(g.id))) return;
+  if (!pendingOf(readOutbox(g.id))) return "nothing";
   emit({ sync: "syncing" });
   try {
     // Plays recorded while a request is in flight are picked up by the next pass.
@@ -248,10 +260,13 @@ async function doFlush(){
       }
     }
     if (snap.group?.id === g.id) emit({ sync: "idle" });
+    return "sent";
   } catch (e){
-    if (snap.group?.id !== g.id) return;
-    const status = e instanceof GroupError ? e.status : 0;
-    emit({ sync: status === 401 || status === 403 ? "revoked" : "offline" });
+    if (snap.group?.id === g.id){
+      const status = e instanceof GroupError ? e.status : 0;
+      emit({ sync: status === 401 || status === 403 ? "revoked" : "offline" });
+    }
+    return "failed";
   }
 }
 
@@ -271,17 +286,20 @@ async function send(request: () => Promise<unknown>, done: () => void){
 export async function groupPlayed(): Promise<Record<string, number> | null> {
   const g = snap.group;
   if (!g) return null;
-  await flush();
-  if (snap.sync === "offline" || snap.sync === "revoked") return null;
+  // Only this call's flush says the Worker is down; an "offline" left by an
+  // earlier failure must not stop this read, or the group is never asked again.
+  if ((await flush()) === "failed" || snap.sync === "revoked") return null;
   try {
     const r = await call<{ played: Record<string, number> }>("/group/played", g.invite);
     const merged = { ...(loadPlayed() as Record<string, number>) };
     for (const [k, v] of Object.entries(r.played || {})) if (Number.isFinite(v)) merged[k] = Math.max(merged[k] || 0, v);
-    if (snap.sync !== "syncing") emit({ sync: "idle" });
+    if (snap.group?.id === g.id && snap.sync !== "syncing") emit({ sync: "idle" });
     return merged;
   } catch (e){
-    const status = e instanceof GroupError ? e.status : 0;
-    emit({ sync: status === 401 || status === 403 ? "revoked" : "offline" });
+    if (snap.group?.id === g.id){
+      const status = e instanceof GroupError ? e.status : 0;
+      emit({ sync: status === 401 || status === 403 ? "revoked" : "offline" });
+    }
     return null;
   }
 }

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  GROUP_NAME_MAX, GroupError, createGroup, deleteGroup, inviteLink, joinGroup, leaveGroup,
+  BROKEN_INVITE, GROUP_NAME_MAX, GroupError, createGroup, deleteGroup, inviteLink, joinGroup, leaveGroup,
   localHistoryCount, parseInvite, previewInvite, useGroup,
 } from "../lib/group";
 import s from "./GroupPanel.module.css";
@@ -154,10 +154,12 @@ function CreateForm({ busy, error, onCancel, onCreate }: {
   );
 }
 
-function JoinForm({ invite, current, currentId, busy, error, onCancel, onJoin }: {
+function JoinForm({ invite: given, current, currentId, busy, error, onCancel, onJoin }: {
   invite: string; current: string; currentId: string; busy: boolean; error: string;
   onCancel: () => void; onJoin: (invite: string, withHistory: boolean) => void;
 }){
+  const broken = given === BROKEN_INVITE;
+  const invite = broken ? "" : given;
   const [code, setCode] = useState("");
   const [withHistory, setWithHistory] = useState(true);
   const [preview, setPreview] = useState<{ name?: string; error?: string }>({});
@@ -171,7 +173,9 @@ function JoinForm({ invite, current, currentId, busy, error, onCancel, onJoin }:
   const token = invite || parseInvite(code);
   const same = !!token && token.split(".")[0] === currentId;
   const typedBad = !invite && code.trim().length > 0 && !token;
-  const shownError = error || preview.error || (typedBad ? "That doesn't look like an invite. Paste the whole link or code." : "");
+  const shownError = error || preview.error
+    || (typedBad ? "That doesn't look like an invite. Paste the whole link or code."
+      : broken && !code.trim() ? "That invite link is incomplete. Ask for it again, or paste the whole link or code here." : "");
   return (
     <form className={s.panel} aria-label="Join a group" onSubmit={e => { e.preventDefault(); if (token && !busy && !same) onJoin(token, withHistory); }}>
       <span className={s.eyebrow}>{invite ? "You're invited" : "Join a group"}</span>
@@ -192,7 +196,7 @@ function JoinForm({ invite, current, currentId, busy, error, onCancel, onJoin }:
       {!same && <HistoryCheck checked={withHistory} onChange={setWithHistory} />}
       {shownError && <p className={s.error} role="alert">{shownError}</p>}
       <div className={s.row}>
-        <button type="button" className="btn btn-ghost" onClick={onCancel} disabled={busy}>{invite ? "Not now" : "Cancel"}</button>
+        <button type="button" className="btn btn-ghost" onClick={onCancel} disabled={busy}>{given ? "Not now" : "Cancel"}</button>
         <button type="submit" className="btn btn-teal" disabled={busy || !token || same || (!!invite && !preview.name)}>{busy ? "Joining" : "Join"}</button>
       </div>
     </form>
