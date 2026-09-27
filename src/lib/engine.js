@@ -118,41 +118,47 @@ export const engine = {
      sound. Timers re-aim at the end from the element's own clock, and for a
      gated element the gate close is re-aimed on the audio clock each tick. */
   _clip(el, s, id, end, gate, cb){
-    let started = false, lastTime = -1, movedAt = performance.now(), startGuard = 0;
+    let started = false, seen = -1, seenAt = 0, startGuard = 0;
     const trace = { mode: gate ? "snip" : "plain", end, from: null, to: null };
     const finish = stalled => {
       if (s !== this.session) return;
       if (gate){ gate.gain.cancelScheduledValues(0); gate.gain.value = 0; }
       el.pause();
       el._ttPaused = true;
-      trace.to = el.currentTime;
+      // WebKit reports a stale position until the pause has settled.
+      el.addEventListener("pause", () => { trace.to = el.currentTime; }, { once:true });
       if (stalled) log("element-fail", { id, err: "stall" });
       clearTimeout(this.timer); this.timer = null; clearTimeout(startGuard);
       el.removeEventListener("playing", onPlaying); this.boundary = null;
       cb.onEnd && cb.onEnd();
     };
+    /* currentTime moves in steps (~100-250ms apart, coarser on a busy
+       WebKit), so between steps the position is extrapolated from when the
+       last step was seen, and the loop polls every 15ms near the end. */
     const tick = () => {
       this.timer = null;
       if (s !== this.session) return;
-      const now = el.currentTime, left = end - now;
+      const raw = el.currentTime, t = performance.now();
+      if (raw !== seen){ seen = raw; seenAt = t; }
+      else if (t - seenAt > STALL_MS) return finish(true);
+      const at = el.paused || el.readyState < 3 ? raw : raw + Math.min(0.3, (t - seenAt) / 1000) * el.playbackRate;
+      const left = end - at;
       if (left <= 0.005) return finish(false);
-      if (now !== lastTime){ lastTime = now; movedAt = performance.now(); }
-      else if (performance.now() - movedAt > STALL_MS) return finish(true);
       if (gate && !el.paused && left > 0.05){
         const c = this.ctx, g = gate.gain;
         g.cancelScheduledValues(c.currentTime);
         g.setValueAtTime(1, c.currentTime);
         g.setValueAtTime(0, c.currentTime + left);
       }
-      this.timer = setTimeout(tick, left > 0.4 ? Math.min(250, left * 1000 - 150) : Math.max(1, left * 1000 - 2));
+      this.timer = setTimeout(tick, left > 0.6 ? Math.min(250, left * 1000 - 500) : Math.min(15, Math.max(1, left * 1000 - 2)));
     };
     const onPlaying = () => {
       if (s !== this.session) return;
       if (!started){
         started = true;
         clearTimeout(startGuard);
-        movedAt = performance.now();
-        trace.from = el.currentTime;
+        seen = el.currentTime; seenAt = performance.now();
+        trace.from = seen;
         cb.onStart && cb.onStart();
       }
       if (!this.timer) tick();

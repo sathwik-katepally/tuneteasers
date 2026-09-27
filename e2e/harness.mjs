@@ -45,50 +45,39 @@ export async function localWorker(){
   return { origin: `http://localhost:${port}`, sql, stop: () => { proc.kill(); fs.rmSync(persist, { recursive: true, force: true }); } };
 }
 
-/* Test browsers must not play out loud on the machine running them.
-   Chromium has --mute-audio; WebKit has no switch, so this init script sends
-   everything to a zero gain and keeps element volume at 0 while the page
-   still reads back its own volume, muted flag, timing and play state. */
-export function silenceAudio(){
-  const vol = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "volume");
-  const wanted = new WeakMap();
-  Object.defineProperty(HTMLMediaElement.prototype, "volume", {
-    configurable: true,
-    get(){ return wanted.has(this) ? wanted.get(this) : vol.get.call(this); },
-    set(v){ vol.set.call(this, v); wanted.set(this, vol.get.call(this)); vol.set.call(this, 0); },
-  });
-  const play = HTMLMediaElement.prototype.play;
-  HTMLMediaElement.prototype.play = function(){
-    if (!wanted.has(this)) wanted.set(this, vol.get.call(this));
-    vol.set.call(this, 0);
-    return play.call(this);
-  };
-  const hush = new WeakMap();
-  const gateOf = dest => {
-    let g = hush.get(dest.context);
-    if (!g){ g = dest.context.createGain(); g.gain.value = 0; connect.call(g, dest); hush.set(dest.context, g); }
-    return g;
-  };
-  const connect = AudioNode.prototype.connect, disconnect = AudioNode.prototype.disconnect;
-  AudioNode.prototype.connect = function(dest, ...rest){
-    if (dest instanceof AudioDestinationNode){ connect.call(this, gateOf(dest), ...rest); return dest; }
-    return connect.call(this, dest, ...rest);
-  };
-  AudioNode.prototype.disconnect = function(dest, ...rest){
-    return disconnect.call(this, dest instanceof AudioDestinationNode ? gateOf(dest) : dest, ...rest);
-  };
+/* Test browsers must never make a sound on the machine running them.
+   Chromium has a flag for it; WebKit gets this init script, which silences
+   the output without touching what the tests read (media time, paused,
+   muted, the engine's gain gate): element volume goes to 0, and each
+   AudioContext's destination is swapped for a zero-gain node in front of it.
+   OfflineAudioContext keeps its real destination, so offline rendering is
+   unaffected. */
+export const MUTE_ARGS = ["--mute-audio"];
+export function silence(){
+  const P = HTMLMediaElement.prototype, play = P.play;
+  P.play = function(...a){ this.volume = 0; return play.apply(this, a); };
+  const Live = window.AudioContext || window.webkitAudioContext;
+  const proto = (window.BaseAudioContext || Live)?.prototype;
+  const desc = proto && Object.getOwnPropertyDescriptor(proto, "destination");
+  if (!desc?.get) return;
+  Object.defineProperty(proto, "destination", { configurable: true, get(){
+    const real = desc.get.call(this);
+    if (!(this instanceof Live)) return real;
+    if (!this.__ttSilent){ const g = this.createGain(); g.gain.value = 0; g.connect(real); this.__ttSilent = g; }
+    return this.__ttSilent;
+  } });
 }
 
 export const PROFILES = {
   phone: { type: webkit, context: { ...devices["iPhone 13"] } },
-  desktop: { type: chromium, launch: { args: ["--autoplay-policy=no-user-gesture-required", "--mute-audio"] }, context: { viewport: { width: 1440, height: 900 } } },
+  desktop: { type: chromium, launch: { args: ["--autoplay-policy=no-user-gesture-required", ...MUTE_ARGS] }, context: { viewport: { width: 1440, height: 900 } } },
 };
 
 export async function open(profile, { reducedMotion = false } = {}){
   const p = PROFILES[profile];
   const browser = await p.type.launch(p.launch || {});
   const context = await browser.newContext({ ...p.context, reducedMotion: reducedMotion ? "reduce" : "no-preference" });
-  if (p.type === webkit) await context.addInitScript(silenceAudio);
+  await context.addInitScript(silence);
   const page = await context.newPage();
   const errors = [];
   page.on("pageerror", e => errors.push(String(e.message)));

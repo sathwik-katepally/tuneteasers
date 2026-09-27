@@ -242,7 +242,7 @@ function merge(){
   const server = http.createServer(serve);
   await new Promise(r => server.listen(0, "127.0.0.1", r));
   const origin = `http://127.0.0.1:${server.address().port}`;
-  const browser = await chromium.launch();
+  const browser = await chromium.launch({ args: ["--mute-audio"] });
 
   const failures = [];
   let scored = 0, kept = 0, sinceWrite = 0;
