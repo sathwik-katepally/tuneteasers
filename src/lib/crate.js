@@ -51,13 +51,11 @@ async function loadCorpus(){
 }
 const CORPUS_LANG = { hindi:"bolly", telugu:"telugu" };
 
-/* Returns { status: "ok" | "none" | "thin" | "unresolved", pool }.
-   "none" (no corpus) and "unresolved" (ids could not be turned into streams)
-   fall through to the uncurated tiers; "thin" is a filter problem the user
-   must widen, not a reason to play unverified songs. */
-async function loadFromCorpus(langs, eras, difficulty, blocked, played, safeIds, minSongs){
-  const corpus = await loadCorpus();
-  if (!corpus) return { status:"none", pool:[] };
+const langsOf = mix => mix==="both" ? ["bolly","telugu"] : [mix];
+
+/* Corpus songs in the chosen languages and eras, not blocked, and (Music-only)
+   in the snips index. */
+function corpusEligible(corpus, langs, eras, blocked, safeIds){
   const eraSet = Array.isArray(eras) && eras.length && eras.length < ERAS.length ? new Set(eras) : null;
   const eligible = [];
   for (const s of corpus){
@@ -69,9 +67,28 @@ async function loadFromCorpus(langs, eras, difficulty, blocked, played, safeIds,
     if (blocked.size && isBlocked({ artist }, blocked)) continue;
     eligible.push({ ...s, lang, artist });
   }
+  return eligible;
+}
+
+/* The difficulty's tiers, widened to every tier when they hold too few songs
+   (not in Music-only, whose shortage the user has to see). */
+function difficultyCands(eligible, difficulty, safeIds, minSongs){
   const tiers = new Set(DIFFICULTY_TIERS[difficulty] || DIFFICULTY_TIERS.mixed);
-  let cands = eligible.filter(s => tiers.has(s.tier));
-  if (!safeIds && cands.length < minSongs) cands = eligible;
+  const cands = eligible.filter(s => tiers.has(s.tier));
+  return !safeIds && cands.length < minSongs ? eligible : cands;
+}
+
+const inCategories = (s, categories) => !categories.length || (Array.isArray(s.tags) && s.tags.some(t => categories.includes(t)));
+
+/* Returns { status: "ok" | "none" | "thin" | "unresolved", pool }.
+   "none" (no corpus) and "unresolved" (ids could not be turned into streams)
+   fall through to the uncurated tiers; "thin" is a filter problem the user
+   must widen, not a reason to play unverified songs. */
+async function loadFromCorpus(langs, eras, difficulty, blocked, played, safeIds, minSongs, categories){
+  const corpus = await loadCorpus();
+  if (!corpus) return { status:"none", pool:[] };
+  const eligible = corpusEligible(corpus, langs, eras, blocked, safeIds).filter(s => inCategories(s, categories));
+  const cands = difficultyCands(eligible, difficulty, safeIds, minSongs);
   if (cands.length < minSongs) return { status:"thin", pool:[] };
   const now = Date.now();
   const fresh = [], stale = [];
@@ -230,10 +247,13 @@ export async function refreshMusicQueue(queue){
 /* Returns { queue, source } or { error: "load" | "thin" | "safe" }.
    difficulty: "easy" | "medium" | "hard" | "mixed" (corpus tiers; the
    uncurated fallback tiers carry no difficulty and ignore it).
-   played: the cooldown map, this phone's own unless a group's is passed. */
-export async function buildCrate(mix, eras, sound, difficulty = "mixed", minSongs = 10, played = loadPlayed()){
+   played: the cooldown map, this phone's own unless a group's is passed.
+   categories: corpus tags, any of which a song must carry; [] means every
+   song. The fallback tiers carry no tags, so with categories set they never
+   run and an unreachable corpus is a load error. */
+export async function buildCrate(mix, eras, sound, difficulty = "mixed", minSongs = 10, played = loadPlayed(), categories = []){
   const t0 = performance.now();
-  const langs = mix==="both" ? ["bolly","telugu"] : [mix];
+  const langs = langsOf(mix);
   const key = t => songKey(t.title);
   const snips = await loadSnips();
   if (sound === "inst" && (!snips || !Object.keys(snips.snips).length)){
@@ -242,11 +262,15 @@ export async function buildCrate(mix, eras, sound, difficulty = "mixed", minSong
   }
   const blocked = new Set(loadBlocked().map(normArtist));
   const safeIds = sound === "inst" ? new Set(Object.keys(snips?.snips || {})) : null;
-  const corpus = await loadFromCorpus(langs, eras, difficulty, blocked, played, safeIds, minSongs);
+  const corpus = await loadFromCorpus(langs, eras, difficulty, blocked, played, safeIds, minSongs, categories);
   const tiers = { corpus: corpus.status === "ok" ? corpus.pool.length : corpus.status };
   if (corpus.status === "thin"){
-    log("crate", { mix, difficulty, source:"corpus", ...tiers, ms: ms(t0) });
+    log("crate", { mix, difficulty, categories, source:"corpus", ...tiers, ms: ms(t0) });
     return { error:sound === "inst" ? "safe" : "thin" };
+  }
+  if (categories.length && corpus.status !== "ok"){
+    log("crate", { mix, difficulty, categories, source:"corpus", ...tiers, ms: ms(t0) });
+    return { error:"load" };
   }
   let pool = corpus.pool;
   let source = "corpus";
@@ -283,7 +307,7 @@ export async function buildCrate(mix, eras, sound, difficulty = "mixed", minSong
     const verified = verifiedSnip(t, snips);
     if (verified){ t.snip = verified; snipped++; }
   }
-  log("crate", { mix, difficulty, source, ...tiers, snips: snips ? "ok" : "none", snipped, played: Object.keys(played).length, ms: ms(t0) });
+  log("crate", { mix, difficulty, categories, source, ...tiers, snips: snips ? "ok" : "none", snipped, played: Object.keys(played).length, ms: ms(t0) });
   if (pool.length < minSongs && sound !== "inst") return { error:"load" };
   if (Array.isArray(eras) && eras.length && eras.length < ERAS.length)
     pool = pool.filter(t => eras.includes(eraOf(t.year)));
@@ -300,4 +324,24 @@ export async function buildCrate(mix, eras, sound, difficulty = "mixed", minSong
   // A full show's worth of verified tracks is required before the game starts.
   if (queue.length < minSongs) return { error:sound === "inst" ? "safe" : "thin" };
   return { queue, source };
+}
+
+/* How many corpus songs each category offers the corpus tier for these
+   settings, counted the way loadFromCorpus picks them. null when the corpus
+   (or, for Music-only, the snips index) is unavailable. */
+let snipsCache = null;
+export async function categoryCounts(mix, eras, sound, difficulty, minSongs, categories){
+  const corpus = await loadCorpus();
+  if (!corpus) return null;
+  let safeIds = null;
+  if (sound === "inst"){
+    if (!snipsCache || Date.now() - snipsCache.at > 300e3) snipsCache = { at: Date.now(), index: await loadSnips() };
+    if (!snipsCache.index) return null;
+    const index = snipsCache.index;
+    safeIds = new Set(Object.keys(index.snips).filter(id => verifiedSnip({ sourceId:id, duration:Infinity }, index)));
+  }
+  const blocked = new Set(loadBlocked().map(normArtist));
+  const eligible = corpusEligible(corpus, langsOf(mix), eras, blocked, safeIds);
+  const count = cats => difficultyCands(eligible.filter(s => inCategories(s, cats)), difficulty, safeIds, minSongs).length;
+  return Object.fromEntries([...categories.map(c => [c, count([c])]), ["any", count([])]]);
 }

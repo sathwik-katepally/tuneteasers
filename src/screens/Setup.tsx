@@ -5,6 +5,7 @@ import { DIFFICULTY, MAX_CAST, MAX_MEMBERS, NAME_MAX, ROUND_OPTIONS } from "../l
 import { cleanName, newId } from "../lib/save";
 import { Seg } from "../components/Seg";
 import { GroupPanel } from "../components/GroupPanel";
+import { CategoryPicker } from "../components/CategoryPicker";
 import type { Difficulty, GameState, Mix, Mode, RosterEntry, Settings } from "../types";
 import sh from "./shared.module.css";
 import s from "./Setup.module.css";
@@ -116,6 +117,11 @@ export function Setup(p: Props){
             options={(Object.keys(DIFFICULTY) as Difficulty[]).map(d => ({ value: d, label: DIFFICULTY[d].label }))}
             onChange={v => upSettings({ difficulty: v })} />
           <p className={s.hint}>{DIFFICULTY[S.difficulty].note}</p>
+        </div>
+
+        <div className={s.group}>
+          <span className={s.labelText}>Kind of songs</span>
+          <CategoryPicker settings={S} need={S.rounds * list.length} blocked={p.blocked} onChange={categories => upSettings({ categories })} />
         </div>
 
         <div className={s.group}>

@@ -1,4 +1,4 @@
-import type { Difficulty, Track } from "../types";
+import type { Category, Difficulty, Track } from "../types";
 
 /* Every gameplay number lives here: the clip ladder, what each rung pays,
    the speed bonus, the hint cost and the show length. */
@@ -28,6 +28,16 @@ export const DIFFICULTY: Record<Difficulty, { label: string; sound: "full" | "in
   medium: { label: "Medium", sound: "inst", note: "A wider mix of hits, music only. Name it from the tune." },
   hard: { label: "Hard", sound: "inst", note: "Deeper album cuts, music only. For the ones who know every soundtrack." },
 };
+
+/* Song categories on the setup screen, in display order. The ids are the
+   corpus tags written by scripts/build-corpus.mjs (scripts/corpus.config.json). */
+export const CATEGORIES: { id: Category; label: string }[] = [
+  { id: "dance", label: "Dance & party" },
+  { id: "romantic", label: "Romantic" },
+  { id: "sad", label: "Sad" },
+  { id: "item", label: "Item songs" },
+  { id: "mass", label: "Mass beats" },
+];
 
 /* The bonus stays full while a clip is still playing and fades once the
    current rung's clip has finished, so waiting costs a little, never a lot. */

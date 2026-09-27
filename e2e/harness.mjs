@@ -45,15 +45,50 @@ export async function localWorker(){
   return { origin: `http://localhost:${port}`, sql, stop: () => { proc.kill(); fs.rmSync(persist, { recursive: true, force: true }); } };
 }
 
+/* Test browsers must not play out loud on the machine running them.
+   Chromium has --mute-audio; WebKit has no switch, so this init script sends
+   everything to a zero gain and keeps element volume at 0 while the page
+   still reads back its own volume, muted flag, timing and play state. */
+export function silenceAudio(){
+  const vol = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "volume");
+  const wanted = new WeakMap();
+  Object.defineProperty(HTMLMediaElement.prototype, "volume", {
+    configurable: true,
+    get(){ return wanted.has(this) ? wanted.get(this) : vol.get.call(this); },
+    set(v){ vol.set.call(this, v); wanted.set(this, vol.get.call(this)); vol.set.call(this, 0); },
+  });
+  const play = HTMLMediaElement.prototype.play;
+  HTMLMediaElement.prototype.play = function(){
+    if (!wanted.has(this)) wanted.set(this, vol.get.call(this));
+    vol.set.call(this, 0);
+    return play.call(this);
+  };
+  const hush = new WeakMap();
+  const gateOf = dest => {
+    let g = hush.get(dest.context);
+    if (!g){ g = dest.context.createGain(); g.gain.value = 0; connect.call(g, dest); hush.set(dest.context, g); }
+    return g;
+  };
+  const connect = AudioNode.prototype.connect, disconnect = AudioNode.prototype.disconnect;
+  AudioNode.prototype.connect = function(dest, ...rest){
+    if (dest instanceof AudioDestinationNode){ connect.call(this, gateOf(dest), ...rest); return dest; }
+    return connect.call(this, dest, ...rest);
+  };
+  AudioNode.prototype.disconnect = function(dest, ...rest){
+    return disconnect.call(this, dest instanceof AudioDestinationNode ? gateOf(dest) : dest, ...rest);
+  };
+}
+
 export const PROFILES = {
   phone: { type: webkit, context: { ...devices["iPhone 13"] } },
-  desktop: { type: chromium, launch: { args: ["--autoplay-policy=no-user-gesture-required"] }, context: { viewport: { width: 1440, height: 900 } } },
+  desktop: { type: chromium, launch: { args: ["--autoplay-policy=no-user-gesture-required", "--mute-audio"] }, context: { viewport: { width: 1440, height: 900 } } },
 };
 
 export async function open(profile, { reducedMotion = false } = {}){
   const p = PROFILES[profile];
   const browser = await p.type.launch(p.launch || {});
   const context = await browser.newContext({ ...p.context, reducedMotion: reducedMotion ? "reduce" : "no-preference" });
+  if (p.type === webkit) await context.addInitScript(silenceAudio);
   const page = await context.newPage();
   const errors = [];
   page.on("pageerror", e => errors.push(String(e.message)));

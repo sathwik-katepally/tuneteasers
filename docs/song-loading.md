@@ -1,9 +1,12 @@
 # Song loading
 
-`buildCrate(mix, eras, sound, difficulty, minSongs)` in `src/lib/crate.js` assembles the game queue; it returns `{ queue, source }` or `{ error: "load" | "thin" | "safe" }`.
+`buildCrate(mix, eras, sound, difficulty, minSongs, played, categories)` in `src/lib/crate.js` assembles the game queue; it returns `{ queue, source }` or `{ error: "load" | "thin" | "safe" }`.
 `difficulty` is `"easy" | "medium" | "hard" | "mixed"` (default `"mixed"`, also `settings.difficulty`).
 It maps to corpus tiers through `DIFFICULTY_TIERS` in `src/lib/constants.js` (easy → easy; medium → easy + medium; hard → medium + hard; mixed → all); when the mapped tiers hold fewer than 10 songs for the chosen languages and eras the crate widens to all tiers before reporting `thin`.
 The uncurated fallback tiers carry no tier and ignore it.
+`categories` is a list of corpus tags (`dance`, `romantic`, `sad`, `item`, `mass`; `[]` means every song): a corpus song passes when it carries any of them, and the difficulty widening above happens inside that set.
+The fallback tiers carry no tags, so with categories set they never run: an unreachable corpus returns `load` and too few tagged songs return `thin` (or `safe` in Music-only).
+`categoryCounts` in the same file counts each category's songs the way the corpus tier picks them, for the setup screen's chips.
 
 ## Source tiers
 
@@ -43,9 +46,31 @@ The rule is film songs only, with the film's real release year:
 5. **Difficulty** - within each language x decade (raw counts are not comparable: Hindi 2010s median ≈ 19M plays vs 2000s ≈ 6M) the score blends the play-count percentile (weight 0.8) with the editorial-playlist membership percentile (0.2).
    The top 30% by score is `easy`, the next 40% `medium`, the rest `hard` (cut-offs in the config, baked into the file's `tiers`).
 
-The file is compact: `{ v, built, tiers, cols, songs: [[...], ...] }`, one row per song with columns `id, title, film, year, yearVerified, language, singers, composers, lyricists, starring, albumId, plays, score, tier`; the client expands rows by `cols` and carries composers as `music` for the reveal.
+6. **Categories** - see below.
+
+The file is compact: `{ v, built, tiers, cols, songs: [[...], ...] }`, one row per song with columns `id, title, film, year, yearVerified, language, singers, composers, lyricists, starring, albumId, plays, score, tier, tags`; the client expands rows by `cols` and carries composers as `music` for the reveal.
 Songs are deduped by language + `songKey(title)` (highest play count wins); snips are keyed separately by Saavn ID so similarly titled recordings cannot share an interval.
 The script refuses to write a corpus with fewer than `minSongsPerLanguage` songs in either language.
+
+## Song categories (`tags`)
+
+Each song's `tags` column lists the categories it belongs to, set at build time from the `categories` block of `scripts/corpus.config.json` (queries, title regexes, thresholds) with no AI and no human step, so the weekly refresh keeps them current on its own.
+Where a source is too noisy to trust, the rule drops the tag rather than guessing.
+
+- **Moods and mass** (`dance`, `romantic`, `sad`, `mass`) come from JioSaavn's editorial theme playlists (owner `playlistOwner`), found with each category's `queries` and kept when the title matches its `titleRx` and not `playlistExcludeRx` (lofi, remixes, retro decades, ...).
+  Playlist songs map to corpus songs by id or by language + `songKey(title)`.
+  A song gets the tag when it is on one strong list or on `minLists` (2) lists of any kind.
+  Weak lists are titles matching `weakTitleRx` (folk and city "beats" lists for `mass`) and artist lists ("Arijit Singh - Sad Songs", "Best Of Romance - Arijit Singh"): a list whose title contains the name of anyone credited on `artistListMinSongs` corpus songs picks songs by who is on them, not by mood.
+  `unless` then removes overlaps: `dance` drops songs also tagged `sad`, and `romantic` drops `dance` and `sad`.
+  Occasion lists (wedding, Holi, rain) were measured and left out: they hold what gets played at a wedding, not songs about one.
+- **Item songs** (`item`) come from the film's English Wikipedia article (found by the usual "Film (2012 film)" title patterns, accepted only with a film infobox naming the film's year): a cast-list bullet line that names the song and matches `wikipediaRx` ("item number", "bar dancer", "special song", ...).
+  Prose sentences are ignored because they often name two songs of which only one is the item number.
+- **Overrides** - `scripts/category-overrides.json` is a fixed list of corrections applied last (`add` / `remove` per song, matched by id or by language + title).
+  It was seeded once from the owner-decided item-song list (the Wikipedia set plus songs Wikipedia does not phrase as item numbers, minus "Besharam", where a choreographer is credited "as a dancer").
+  It is not a review queue: nothing in the build proposes additions to it.
+
+The build prints a per-language count table and refuses to write the corpus when a category has fewer than its `minTagged` songs, so a broken playlist search or Wikipedia outage leaves the last good corpus in place.
+Hook step, wedding, festival, sufi, patriotic and rain were measured and left out of v1 (too few songs or no trustworthy source).
 
 ## Filters applied to every track
 

@@ -5,8 +5,8 @@
 import { ERAS } from "./constants.js";
 import { sanitizeTrack } from "./storage.js";
 import { isResultId, randomId } from "./group";
-import { DEFAULT_ROUNDS, LEGACY_SCORE_SCALE, MAX_CAST, MAX_MEMBERS, NAME_MAX, ROUND_OPTIONS } from "./config";
-import type { AppState, CastMember, Difficulty, GameState, HistoryEntry, Mix, Mode, RosterEntry, Settings, Track } from "../types";
+import { CATEGORIES, DEFAULT_ROUNDS, LEGACY_SCORE_SCALE, MAX_CAST, MAX_MEMBERS, NAME_MAX, ROUND_OPTIONS } from "./config";
+import type { AppState, CastMember, Category, Difficulty, GameState, HistoryEntry, Mix, Mode, RosterEntry, Settings, Track } from "../types";
 
 const KEY = "tuneteasers_v7";
 const LEGACY_KEY = "tuneteasers_v6";
@@ -27,7 +27,7 @@ export const cleanName = (v: unknown, fallback: string) => String(v ?? "").trim(
 
 export const DEFAULTS: AppState = {
   screen: "setup",
-  settings: { mix: "both", eras: [...ERAS], difficulty: "medium", mode: "players", rounds: DEFAULT_ROUNDS },
+  settings: { mix: "both", eras: [...ERAS], difficulty: "medium", categories: [], mode: "players", rounds: DEFAULT_ROUNDS },
   players: [
     { id: "p1", name: "Player 1", members: [] },
     { id: "p2", name: "Player 2", members: [] },
@@ -44,11 +44,17 @@ function parseEras(v: unknown): string[] {
   return eras.length ? eras : [...ERAS];
 }
 
+/* Any (every song) is the empty list, which is also what saves from before categories load as. */
+function parseCategories(v: unknown): Category[] {
+  return CATEGORIES.map(c => c.id).filter(id => arr(v).includes(id));
+}
+
 function parseSettings(raw: Raw): Settings {
   return {
     mix: oneOf<Mix>(raw.mix, ["bolly", "telugu", "both"], "both"),
     eras: parseEras(raw.eras),
     difficulty: oneOf<Difficulty>(raw.difficulty, ["easy", "medium", "hard"], "medium"),
+    categories: parseCategories(raw.categories),
     mode: oneOf<Mode>(raw.mode, ["players", "teams"], "players"),
     rounds: (ROUND_OPTIONS as readonly number[]).includes(raw.rounds as number) ? raw.rounds as number : DEFAULT_ROUNDS,
   };

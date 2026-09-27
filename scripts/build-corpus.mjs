@@ -16,6 +16,9 @@
       another language that year with the same cast, no same-named TV series.
    3. Score within language x decade: play-count percentile blended with
       editorial-playlist membership; tier cut-offs from the config.
+   4. Tag categories (config "categories"): moods from JioSaavn editorial
+      theme playlists, item songs from the film's Wikipedia cast list, then the
+      fixed overrides file. Fully automatic; nothing waits on a human.
 
    Run: node scripts/build-corpus.mjs   (CI: .github/workflows/refresh-corpus.yml)
    Env:
@@ -364,7 +367,154 @@ function scoreAndTier(songs){
   }
 }
 
-const COLS = ["id", "title", "film", "year", "yearVerified", "language", "singers", "composers", "lyricists", "starring", "albumId", "plays", "score", "tier"];
+/* -- categories -- */
+const CAT = CFG.categories;
+const CAT_IDS = Object.keys(CAT.tags);
+const rxOf = s => (s ? new RegExp(s, "i") : null);
+const words = s => ` ${de(s).normalize("NFKD").replace(/\p{M}+/gu, "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim()} `;
+
+/* A song counts for a mood when it is on one strong list, or on minLists
+   lists of any kind. Artist lists ("Arijit Singh - Sad Songs") pick songs by
+   who is on them rather than by mood, so they only count as weak lists; an
+   artist is anyone credited on artistListMinSongs corpus songs. */
+async function playlistTags(songs){
+  const byId = new Map(songs.map(s => [s.id, s]));
+  const byKey = new Map(songs.map(s => [`${s.language}|${songKey(s.title)}`, s]));
+  const credits = new Map();
+  for (const s of songs) for (const a of new Set([...s.singers, ...s.composers, ...s.lyricists, ...s.starring].map(words)))
+    if (a.trim()) credits.set(a, (credits.get(a) || 0) + 1);
+  const artists = [...credits].filter(([, n]) => n >= CAT.artistListMinSongs).map(([a]) => a);
+  const isArtistList = t => { const w = words(t); return artists.some(a => w.includes(a)); };
+  const exclude = rxOf(CAT.playlistExcludeRx);
+
+  const found = new Map();
+  const queries = [...new Set(Object.values(CAT.tags).flatMap(c => c.queries || []))];
+  for (const q of queries) for (let p = 1; p <= CAT.playlistSearchPages; p++){
+    const j = await saavn(`&__call=search.getPlaylistResults&q=${encodeURIComponent(q)}&n=50&p=${p}`);
+    for (const r of j?.results || []){
+      const mi = r.more_info || {};
+      if (mi.uid !== CFG.playlistOwner || !(mi.language in LANGS)) continue;
+      const title = de(r.title).trim();
+      if (!exclude.test(title)) found.set(r.id, title);
+    }
+    await sleep(150);
+  }
+  const lists = []; // { id, title, cat, strong }
+  for (const [id, title] of found) for (const cat of CAT_IDS){
+    const c = CAT.tags[cat], strong = rxOf(c.titleRx), weak = rxOf(c.weakTitleRx);
+    const isStrong = !!strong?.test(title) && !weak?.test(title);
+    if (!isStrong && !weak?.test(title)) continue;
+    lists.push({ id, title, cat, strong: isStrong && !isArtistList(title) });
+  }
+  const members = new Map();
+  await mapLimit([...new Set(lists.map(l => l.id))], CFG.concurrency, async id => {
+    const j = await saavn(`&__call=playlist.getDetails&listid=${id}&n=500&p=1`);
+    const hits = new Set();
+    for (const s of j?.list || []){
+      const c = byId.get(s.id) || byKey.get(`${s.language}|${songKey(cleanTitle(s.title))}`);
+      if (c) hits.add(c);
+    }
+    members.set(id, hits);
+    await sleep(150);
+  });
+  const raw = Object.fromEntries(CAT_IDS.map(c => [c, new Map()]));
+  for (const l of lists) for (const s of members.get(l.id) || []){
+    const e = raw[l.cat].get(s) || { strong: false, n: 0 };
+    e.strong ||= l.strong; e.n++;
+    raw[l.cat].set(s, e);
+  }
+  const tagged = Object.fromEntries(CAT_IDS.map(c => [c, new Set([...raw[c]].filter(([, e]) => e.strong || e.n >= CAT.minLists).map(([s]) => s))]));
+  for (const cat of CAT_IDS) for (const other of CAT.tags[cat].unless || [])
+    for (const s of tagged[other]) tagged[cat].delete(s);
+  const used = lists.filter(l => members.get(l.id)?.size);
+  console.log(`category playlists: ${used.length} used (${used.filter(l => !l.strong).length} weak)`);
+  return tagged;
+}
+
+/* The film's English Wikipedia article, found by the usual title patterns
+   and accepted only when it is a film infobox naming the film's year. */
+const WIKI_API = "https://en.wikipedia.org/w/api.php?format=json&formatversion=2&redirects=1&action=query&titles=";
+const WIKI_RAW = "https://en.wikipedia.org/w/index.php?action=raw&title=";
+async function filmArticles(songs){
+  const films = new Map();
+  for (const s of songs){
+    const k = `${s.film}|${s.year}|${s.language}`;
+    if (films.has(k)) continue;
+    const lang = s.language[0].toUpperCase() + s.language.slice(1);
+    films.set(k, { year: s.year, titles: [`${s.film} (${s.year} film)`, `${s.film} (${s.year} ${lang} film)`, `${s.film} (${lang} film)`, `${s.film} (film)`, s.film] });
+  }
+  const all = [...new Set([...films.values()].flatMap(f => f.titles))];
+  const exists = new Map();
+  for (let i = 0; i < all.length; i += 50){
+    const batch = all.slice(i, i + 50);
+    let q;
+    try { q = JSON.parse(await getText(WIKI_API + encodeURIComponent(batch.join("|")), { "user-agent": WD_UA })).query || {}; }
+    catch { continue; }
+    const normalized = new Map((q.normalized || []).map(x => [x.from, x.to]));
+    const redirects = new Map((q.redirects || []).map(x => [x.from, x.to]));
+    const present = new Set((q.pages || []).filter(p => !p.missing && !p.invalid).map(p => p.title));
+    for (const t of batch){
+      let r = normalized.get(t) || t;
+      r = redirects.get(r) || r;
+      if (present.has(r)) exists.set(t, r);
+    }
+  }
+  const texts = new Map();
+  await mapLimit([...films], CFG.concurrency, async ([k, f]) => {
+    for (const t of f.titles){
+      if (!exists.has(t)) continue;
+      let w = "";
+      try { w = await getText(WIKI_RAW + encodeURIComponent(exists.get(t)), { "user-agent": WD_UA }, 3); } catch {}
+      if (/\{\{\s*Infobox film/i.test(w) && w.slice(0, 6000).includes(String(f.year))){ texts.set(k, w); return; }
+    }
+  });
+  console.log(`wikipedia: ${texts.size} of ${films.size} films matched`);
+  return texts;
+}
+
+/* Only the cast list's own bullet lines ("* Malaika Arora in the item number
+   'Kevvu Keka'"): prose sentences often name two songs, and only one of
+   them is the item number. */
+const plainWiki = s => s.replace(/<ref[^>]*\/>|<ref[\s\S]*?<\/ref>|<\/?nowiki>|'{2,}/g, "").replace(/\[\[(?:[^|\]]*\|)?([^\]]*)\]\]/g, "$1");
+function wikipediaTags(songs, texts){
+  const tagged = Object.fromEntries(CAT_IDS.map(c => [c, new Set()]));
+  const rules = CAT_IDS.filter(c => CAT.tags[c].wikipediaRx).map(c => [c, rxOf(CAT.tags[c].wikipediaRx)]);
+  for (const s of songs){
+    const w = texts.get(`${s.film}|${s.year}|${s.language}`);
+    const key = words(s.title.replace(/[\(\[].*/, "").split(/\s+[-|]\s+/)[0]);
+    if (!w || key.trim().length < 3) continue;
+    const lines = w.split("\n").filter(l => /^\s*\*/.test(l)).map(plainWiki).filter(l => words(l).includes(key));
+    for (const [cat, rx] of rules) if (lines.some(l => rx.test(l))) tagged[cat].add(s);
+  }
+  return tagged;
+}
+
+/* A fixed list of corrections, matched by id or by language + title key
+   (the id can move to another copy of the same recording). */
+function applyOverrides(songs, tags){
+  const list = JSON.parse(fs.readFileSync(path.join(REPO, CAT.overrides), "utf8")).songs;
+  const byId = new Map(songs.map(s => [s.id, s]));
+  const byKey = new Map(songs.map(s => [`${s.language}|${songKey(s.title)}`, s]));
+  let missing = 0;
+  for (const o of list){
+    for (const t of [...(o.add || []), ...(o.remove || [])]) if (!CAT_IDS.includes(t)) throw new Error(`override ${o.id}: unknown category ${t}`);
+    const s = byId.get(o.id) || byKey.get(`${o.language}|${songKey(o.title)}`);
+    if (!s){ missing++; continue; }
+    for (const t of o.add || []) tags.get(s).add(t);
+    for (const t of o.remove || []) tags.get(s).delete(t);
+  }
+  if (missing) console.log(`overrides: ${missing} of ${list.length} songs not in this corpus`);
+}
+
+async function tagSongs(songs){
+  const tags = new Map(songs.map(s => [s, new Set()]));
+  const sources = [await playlistTags(songs), wikipediaTags(songs, await filmArticles(songs))];
+  for (const src of sources) for (const cat of CAT_IDS) for (const s of src[cat] || []) tags.get(s).add(cat);
+  applyOverrides(songs, tags);
+  for (const s of songs) s.tags = CAT_IDS.filter(c => tags.get(s).has(c));
+}
+
+const COLS = ["id", "title", "film", "year", "yearVerified", "language", "singers", "composers", "lyricists", "starring", "albumId", "plays", "score", "tier", "tags"];
 
 (async () => {
   const t0 = Date.now();
@@ -406,6 +556,8 @@ const COLS = ["id", "title", "film", "year", "yearVerified", "language", "singer
 
   const songs = [...byKey.values()].map(s => ({ ...s, playlists: s.playlists.size }));
   scoreAndTier(songs);
+  console.log("tagging categories...");
+  await tagSongs(songs);
   songs.sort((a, b) => a.language.localeCompare(b.language) || a.year - b.year || a.title.localeCompare(b.title));
 
   console.log("\nrejections:", reasons);
@@ -415,6 +567,12 @@ const COLS = ["id", "title", "film", "year", "yearVerified", "language", "singer
   for (const lang of Object.keys(LANGS)){
     const n = songs.filter(s => s.language === lang).length;
     if (n < CFG.minSongsPerLanguage){ console.error(`REFUSING to write ${OUT}: only ${n} ${lang} songs (< ${CFG.minSongsPerLanguage})`); process.exit(1); }
+  }
+  const tagTable = Object.fromEntries(CAT_IDS.map(c => [c, Object.fromEntries(Object.keys(LANGS).map(l => [l, songs.filter(s => s.language === l && s.tags.includes(c)).length]))]));
+  console.table(tagTable);
+  for (const c of CAT_IDS){
+    const n = Object.values(tagTable[c]).reduce((a, b) => a + b, 0);
+    if (n < CAT.tags[c].minTagged){ console.error(`REFUSING to write ${OUT}: only ${n} songs tagged ${c} (< ${CAT.tags[c].minTagged})`); process.exit(1); }
   }
   if (REPORT) fs.writeFileSync(REPORT, JSON.stringify({ reasons, songs: report }, null, 1));
   const head = JSON.stringify({ v: 1, built: new Date().toISOString(), tiers: CFG.tiers, cols: COLS });

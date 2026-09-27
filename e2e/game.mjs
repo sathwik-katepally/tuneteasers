@@ -1,11 +1,14 @@
 /* Plays one full show through the real UI against the real song sources and
    checks the scoring bookkeeping at the end.
    node e2e/game.mjs --profile=phone|desktop --mode=players|teams --mix=bolly|telugu|both
-     --difficulty=easy|medium|hard --rounds=3 [--reduced] [--no-worker] [--shots=dir] [--url=http://...]
-   --no-worker makes the project's Worker unreachable (songs then come from the mirror). */
+     --difficulty=easy|medium|hard --rounds=3 [--categories=item,mass] [--reduced] [--no-worker] [--shots=dir] [--url=http://...]
+   --no-worker makes the project's Worker unreachable (songs then come from the mirror).
+   --categories picks those song categories (corpus tags) and checks every queued song carries one. */
 import fs from "node:fs";
 import path from "node:path";
 import { serve, open, args, saved } from "./harness.mjs";
+import { songKey } from "../src/lib/utils.js";
+import { CATEGORIES, SPEED_BONUS_FADE_SECS, SPEED_BONUS_MAX } from "../src/lib/config.ts";
 
 const A = args({ profile: "phone", mode: "players", mix: "both", difficulty: "medium", rounds: "3" });
 const shotsDir = A.shots && A.shots !== "true" ? A.shots : null;
@@ -37,6 +40,13 @@ try {
   await page.getByRole("radio", { name: { bolly: "Hindi", telugu: "Telugu", both: "Both" }[A.mix], exact: true }).click();
   await page.getByRole("radio", { name: A.difficulty, exact: false }).click();
   await page.getByRole("radio", { name: A.rounds, exact: true }).click();
+  const categories = A.categories ? A.categories.split(",") : [];
+  for (const id of categories){
+    const label = CATEGORIES.find(c => c.id === id)?.label ?? fail(`unknown category ${id}`);
+    const chip = page.getByRole("button", { name: new RegExp(`^${label}, \\d+ songs$`) });
+    await chip.click();
+    if (await chip.getAttribute("aria-pressed") !== "true") fail(`${label} did not select`);
+  }
   if (A.mode === "teams"){
     const add = btn("Member").first();
     await add.click(); await page.keyboard.type("Priya"); await page.keyboard.press("Enter");
@@ -118,15 +128,18 @@ try {
     }
     const correct = turns % 3 !== 2;
     const before = (await saved(page)).game.history.length;
+    const readAt = Date.now();
     const worth = Number((await page.getByText(/^Worth /).textContent()).match(/\d+/)[0]);
     await btn(correct ? "I know this one" : "I don't know this one").click();
+    // The bonus keeps fading between reading "Worth" and the tap; a busy machine stretches that gap.
+    const fade = Math.ceil((Date.now() - readAt) / 1000 * SPEED_BONUS_MAX / SPEED_BONUS_FADE_SECS) + 1;
     await page.getByRole("button", { name: /Pass it on|box office/ }).waitFor();
     if (await btn("Show the answer").count()) fail("extra reveal tap returned");
     if (await btn(/Got it|Missed/).count()) fail("post-reveal grading returned");
     await page.waitForFunction(n => JSON.parse(localStorage.getItem("tuneteasers_v7")).game.history.length === n + 1, before);
     const history = (await saved(page)).game.history;
     const scored = history.at(-1).points;
-    if (correct ? scored > worth || scored < worth - 3 : scored !== 0) fail(`one-tap score ${scored} vs displayed worth ${worth}`);
+    if (correct ? scored > worth || scored < worth - fade : scored !== 0) fail(`one-tap score ${scored} vs displayed worth ${worth}`);
     await shot("07-reveal", 100);
     await shot(correct ? "07b-reveal-correct" : "08-reveal-wrong", 1300);
     await page.getByRole("button", { name: /Pass it on|box office/ }).click();
@@ -152,6 +165,17 @@ try {
   if (errors.length) fail("page errors: " + errors.join(" | "));
   if (overflow.length) fail("screens scroll at this size: " + overflow.join(", "));
   if (!resumed) fail("home/resume path not exercised");
+  if (categories.length){
+    const corpus = JSON.parse(fs.readFileSync(new URL("../dist/corpus.json", import.meta.url), "utf8"));
+    const lang = { hindi: "bolly", telugu: "telugu" };
+    const tags = new Map(corpus.songs.map(r => Object.fromEntries(corpus.cols.map((c, i) => [c, r[i]])))
+      .map(r => [`${lang[r.language]}|${songKey(r.title)}`, r.tags]));
+    if (g.source !== "corpus") fail(`categories game drew from ${g.source}`);
+    for (const t of g.queue){
+      const tt = tags.get(`${t.lang}|${songKey(t.title)}`);
+      if (!tt?.some(x => categories.includes(x))) fail(`"${t.title}" (${t.album}) carries ${JSON.stringify(tt)}, none of ${categories}`);
+    }
+  }
   console.log("PASS", JSON.stringify(A), `turns=${turns}`, cast.map(c => `${c.name}=${c.score}`).join(" "), `source=${g.source}`, `deadStreams=${deadStreams}`);
 } catch (e){
   exit = 1;
