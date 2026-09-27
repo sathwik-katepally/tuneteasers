@@ -18,7 +18,7 @@ const worker = await localWorker();
 const vite = await createServer({ root: path.resolve(import.meta.dirname, ".."), server: { port: 0 }, logLevel: "silent" });
 await vite.listen();
 const base = vite.resolvedUrls.local[0];
-const browser = await chromium.launch();
+const browser = await chromium.launch({ args: ["--mute-audio"] });
 const page = await browser.newPage();
 const errors = [];
 page.on("pageerror", e => errors.push(String(e.message)));

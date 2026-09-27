@@ -31,7 +31,7 @@ const SCENARIOS = [
 
 async function run(sc, url){
   const bt = sc.browser === "webkit" ? webkit : chromium;
-  const b = await bt.launch(sc.browser === "webkit" ? {} : { args: ["--autoplay-policy=no-user-gesture-required"] });
+  const b = await bt.launch(sc.browser === "webkit" ? {} : { args: ["--autoplay-policy=no-user-gesture-required", "--mute-audio"] });
   const p = await b.newPage(sc.browser === "webkit" ? { viewport: { width: 390, height: 844 }, isMobile: true } : {});
   const reqs = [];
   await p.route("**/*", async r => {
