@@ -39,5 +39,41 @@
   "score": { "playsWeight": 0.8, "playlistsWeight": 0.2 },
   "tiers": { "easy": 0.3, "medium": 0.4 },
   "concurrency": 4,
-  "minSongsPerLanguage": 300
+  "minSongsPerLanguage": 300,
+  "categories": {
+    "overrides": "scripts/category-overrides.json",
+    "playlistSearchPages": 2,
+    "playlistExcludeRx": "lo-?fi|remake|cover|remix|retro|[4-9]0s|carvaan|indie|\\bpop\\b|edm|hip hop|unplugged|ringtone",
+    "artistListMinSongs": 3,
+    "minLists": 2,
+    "tags": {
+      "dance": {
+        "queries": ["dance hits hindi", "dance hits telugu", "bollywood dance", "dance telugu", "dance dhamaaka", "party songs hindi", "party songs telugu", "party hits", "teenmaar", "pakka beat", "bollywood bangers", "jaragandi"],
+        "titleRx": "dance|dhamaa?k|dhamaal|party|teenmaar|pakka beat|bangers|club beats|cheddam",
+        "unless": ["sad"],
+        "minTagged": 400
+      },
+      "romantic": {
+        "queries": ["romantic hits hindi", "romantic hits telugu", "romance hindi", "romance telugu", "love songs hindi", "love songs telugu", "bollywood romance", "tollywood romance", "valentine"],
+        "titleRx": "romance|romantic|love songs|love (hits|grooves|mix)|duets|valentine|date night|xoxo love|love guru|kichidi love|office love|love dub",
+        "unless": ["dance", "sad"],
+        "minTagged": 400
+      },
+      "sad": {
+        "queries": ["sad songs hindi", "sad songs telugu", "sad songs", "heartbreak", "heartbreak hindi", "broken heart", "sad hindi hits", "sad love songs", "emotional", "tears"],
+        "titleRx": "\\bsad\\b|heartbreak|broken heart|tears of love|emotional",
+        "minTagged": 80
+      },
+      "mass": {
+        "queries": ["teenmaar", "teenmaar beats", "dappu", "dhol", "sounds of music", "market beats", "hyderabadi beats", "benz circle beats", "bollywood folk", "telugu folk", "folk hits telugu", "janapadam"],
+        "titleRx": "teenmaar|dappu|\\bdhol\\b|market beats",
+        "weakTitleRx": "folk|janapadam|hyderabadi beats|benz circle beats",
+        "minTagged": 40
+      },
+      "item": {
+        "wikipediaRx": "item[- ]?(number|song|girl|dancer|dance)|bar dancer|go-go dancer|special (song|number)",
+        "minTagged": 50
+      }
+    }
+  }
 }
