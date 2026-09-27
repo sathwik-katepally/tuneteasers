@@ -15,7 +15,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { chromium, webkit, devices } from "playwright";
-import { serve, args, localWorker } from "./harness.mjs";
+import { serve, args, localWorker, silenceAudio } from "./harness.mjs";
 import { displayTitle } from "../src/lib/utils.js";
 import { CLIP_POINTS, ROOM_ANSWER_SECS } from "../src/lib/config.ts";
 
@@ -71,12 +71,13 @@ const hostOnPhone = A.host === "phone";
 async function device(kind, label){
   const desk = kind === "host" && !hostOnPhone;
   const browser = desk
-    ? await chromium.launch({ args: ["--autoplay-policy=no-user-gesture-required"] })
+    ? await chromium.launch({ args: ["--autoplay-policy=no-user-gesture-required", "--mute-audio"] })
     : await webkit.launch();
   const context = await browser.newContext(desk
     ? { viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" }
     : { ...devices["iPhone 13"], reducedMotion: "reduce" });
   await wire(context, label);
+  if (!desk) await context.addInitScript(silenceAudio);
   // Counts what actually reached the page, to tell a lost frame from an app bug.
   await context.addInitScript(() => {
     const W = window.WebSocket;
@@ -139,8 +140,9 @@ async function buzz(p){
   const inRoom = () => { const s = song(), id = idOf(p.label); return s && (s.answering === id || s.queue.includes(id)); };
   const t0 = Date.now();
   for (;;){
-    await buzzBtn(p).waitFor({ timeout: 20000 });
-    await buzzBtn(p).click();
+    if (inRoom()) return;
+    await buzzBtn(p).waitFor({ timeout: 20000 }).catch(() => {});
+    await buzzBtn(p).click({ timeout: 2000 }).catch(() => {});
     for (let i = 0; i < 10 && !inRoom(); i++) await sleep(100);
     if (inRoom()) return;
     if (Date.now() - t0 > 20000) fail(`${p.label}'s buzz never reached the room`);
@@ -380,6 +382,17 @@ try {
     await buzz(p);
     await answer(p, displayTitle(await currentTitle()));
     await revealed(n);
+    if (n === 6){
+      // The host screen reloads mid-show: home offers the show back, and the
+      // room kept everyone's scores.
+      const scores = hostState().players.map(pl => pl.score).join();
+      await host.page.reload();
+      await host.page.getByText("Buzz-in show in progress").waitFor();
+      await shot(host, "host-11-resume-setup");
+      await host.page.getByRole("button", { name: "Resume" }).click();
+      await until("host back in the room", () => song()?.n === 7);
+      if (hostState().players.map(pl => pl.score).join() !== scores) fail("scores changed across a host reload");
+    }
   }
   await host.page.getByRole("button", { name: "Final box office" }).click();
   await host.page.getByText("Final count").waitFor();
