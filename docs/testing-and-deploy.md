@@ -13,11 +13,12 @@ Two profiles: `phone` is WebKit with the iPhone 13 device (390px), `desktop` is 
 - `e2e/migrate.mjs` - seeds a `tuneteasers_v6` save from the previous release with real Saavn tracks, resumes it, plays a turn and checks names, rescaled scores, settings mapping and that the old key is dropped; then feeds junk into the old key and expects a clean home screen.
 - `e2e/autoplay.mjs` - emulates iOS's per-element autoplay rule in Chromium: the hand-over tap's prime must let the countdown start the clip, and a stricter browser must get a working "Tap to play" fallback; also covers End game.
 - `e2e/offline.mjs` - aborts every song source and expects a visible error on the home screen and the `crate` line in the `?debug=1` overlay.
+- `e2e/safe-snips.mjs` - WebKit phone and Chromium desktop play Easy and Music-only through the final rung and replay, then replace the local index with missing, mismatched-ID, stale, and old-schema variants to confirm the visible shortage state.
 - `node scripts/corpus-e2e.cjs [repo] [local-worker-origin]` - the corpus tier: games in each language resolve ids through a local `wrangler dev` worker (the deployed worker host is rerouted to it), through the deployed worker, and with no batch endpoint at all (must fall back to `source: "saavn"`); checks every queue track's corpus film/year/tier and the reveal; includes a phone-width WebKit pass.
 
 Package scripts: `npm run e2e:game -- --profile=desktop`, `e2e:migrate`, `e2e:autoplay`, `e2e:offline`.
 A release run is the matrix of `game.mjs` over both profiles, both modes, all three difficulties and all three language mixes (not every combination, but each value at least once per profile), one `--reduced` run, plus the other three scripts.
-Playback modes asserted are `snip | muffle | plain` (`window.__ttLastMode`); Easy must always report `plain`.
+Playback modes asserted are `snip | plain` (`window.__ttLastMode`); Easy must report `plain`, while Medium and Hard must report `snip` or show a safe-clip shortage.
 Gotchas: screens cross-fade out through `AnimatePresence`, so after a click wait for the old button to detach before looking for the next screen; seed localStorage from a non-app page on the same origin (`/seed.html` 404s, which is fine) so the app's own first save cannot race the seeding.
 
 The older ad-hoc scripts in `/tmp/tt-e2e` (and the obsolete on-device pipeline suites `dsp.js`, `pick.js`, `vadtest.js`, `ml*.js`) drove the pre-cinema UI and no longer apply.
@@ -58,8 +59,14 @@ Run it locally with `CORPUS_CACHE=<dir>` to cache upstream responses across reru
 ## Snips refresh CI
 
 `.github/workflows/refresh-snips.yml` runs `scripts/build-snips.mjs` weekly (Wed 04:30 UTC, after the corpus refresh, which also dispatches it on change) and commits `public/snips.json` if changed, which in turn triggers a deploy.
-The scorer resolves every corpus song to a stream through the worker's batch endpoint (mirror fallback), then runs the MusiCNN VAD in a Playwright Chromium page against local assets (`scripts/vad-assets/`), is incremental (existing entries by key are reused), drops entries with winMax >= 0.40, and refuses to write fewer than 80 entries.
-The client tolerates a missing snips.json, so a failed refresh degrades to muffle-mode playback rather than breaking the game.
+The scorer resolves corpus IDs to streams through the worker's batch endpoint (mirror fallback), then runs the MusiCNN VAD in a Playwright Chromium page against local assets (`scripts/vad-assets/`).
+It reuses only valid v2 entries for the same source ID and writes 10-second intervals whose overlapping patches all pass the clean threshold.
+Each scheduled run scores at most 300 unexamined IDs and records rejected IDs in `checked`, so later runs advance through the corpus instead of rescoring the same failures.
+New IDs in the weekly corpus are prioritized using the previous index's `corpusIds` snapshot.
+The resolver tries both Saavn endpoints with short retries and fails with an endpoint summary after three empty corpus batches; the existing workflow failure alert remains active.
+It refuses to write fewer than 80 entries.
+`SNIP_HINTS=<old-v1-index> SNIP_MIGRATE_ONLY=1` is the one-time migration path: it rescans the old clean candidates continuously against the live recording, discards failures, and leaves other recordings for the normal scheduled full scan.
+The client fails closed with a clear Music-only shortage if the index is missing or inadequate.
 
 ## Monitoring
 

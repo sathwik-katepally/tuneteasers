@@ -1,14 +1,14 @@
 # Audio engine
 
 All playback goes through the `engine` singleton in `src/lib/engine.js`; it is the only owner of audio output, songs and sound effects alike.
-The client does no audio analysis or processing of its own beyond a realtime filter graph.
-Per-song facts (where the song is instrumental) are computed once, offline, by `scripts/build-snips.mjs` and shipped as `public/snips.json`; the client just seeks an `<audio>` element and plays.
+The client does no vocal analysis.
+The offline scorer in `scripts/build-snips.mjs` produces source-specific intervals in `public/snips.json`.
 
 ## Session rule (concurrency safety)
 
 Every `stop()`/play call bumps `engine.session`; async continuations capture the session number and abort if it changed.
 This guarantees two songs can never play at once, even when the user mashes buttons while an element is still buffering.
-`playSnippet(track, offset, secs, cb)` returns the mode that played (`"snip" | "muffle" | "plain"`) or `"failed" | "superseded"`; callers must treat `"superseded"` as "do nothing" (a newer user action owns playback).
+`playSnippet(track, offset, secs, cb)` returns `"snip"`, `"failed"`, or `"superseded"`; callers must treat `"superseded"` as "do nothing" (a newer user action owns playback).
 `playElement(url, offset, secs, cb)` is the as-is path.
 Both take callbacks `cb = { onStart, onEnd, onErr, onBlocked }` (`playSnippet` uses `onEnd` and `onBlocked`); stale sessions never fire them.
 
@@ -16,26 +16,35 @@ Both take callbacks `cb = { onStart, onEnd, onErr, onBlocked }` (`playSnippet` u
 
 `public/snips.json` is built offline in CI (see docs/testing-and-deploy.md) and fetched same-origin, no-cache, once per crate build:
 
-    { "v": 1, "built": "...", "snips": { "<key>": [startSec, winMax], ... } }
+    { "v": 2, "built": "...", "snips": { "<Saavn ID>": { "sourceId": "<Saavn ID>", "startSec": 78, "endSec": 88, "maxVoice": 0.023, "method": "continuous-v2" } }, "checked": { "<rejected Saavn ID>": "continuous-v2/0.25" } }
 
-`<key>` is the canonical song title key, `songKey(title)` from `src/lib/utils.js`, the same normalization the crate uses for dedupe.
-`startSec` is the start of the song's most instrumental window (integer seconds); the window is ~10-12s of verified coverage.
-`winMax` is the window's max p(voice) from the offline MusiCNN VAD; lower is cleaner.
-The file keeps entries up to winMax 0.40, but the client only trusts entries below `SNIP_CLEAN_MAX` (`src/lib/constants.js`, currently 0.25), so the threshold can be tuned without a corpus rebuild.
-A missing or unfetchable snips.json is normal and handled: no track gets a verified window and everything plays through the muffle fallback.
+The key and `sourceId` must both match the returned Saavn recording ID.
+`checked` records scored recordings that did not pass and never authorizes playback.
+The scorer fetches that recording, then accepts a 10-second interval only if every overlapping ~3-second patch, spaced about one second apart and covering the full interval, has voice probability below `SNIP_CLEAN_MAX` in `src/lib/constants.js`.
+It uses the maximum raw patch score, without smoothing away a high-scoring patch.
+An index with another schema, an unmatched ID, a malformed interval, an absent entry, or a build timestamp over 30 days old cannot authorize Music-only playback.
+The client also checks the stream duration covers the interval.
+When the index is missing or too few safe tracks remain, the player sees a shortage message.
 
-## Playback modes (default "Music only" mode)
+## Playback modes
 
-- `"snip"`: the track has a verified instrumental window (`track.snip`, annotated by the crate).
-  The element is seeked to `track.snip + offset` and played raw; no Web Audio processing at all.
-- `"muffle"`: no verified window (unindexed Saavn track, or the 30s hook-clip fallback tiers).
-  The element is routed through a realtime biquad muffle graph via `MediaElementAudioSourceNode`: a 140Hz bass foundation branch plus peaking cuts at 1.2kHz and 3kHz into a 6.5kHz lowpass.
-  This requires `crossOrigin="anonymous"`; both the Saavn mirrors and iTunes previews serve CORS-readable audio (verified 2026-08-31).
-  If wiring the element into Web Audio fails, playback falls through to `"plain"`.
-- `"plain"`: as-is element playback with the "you'll hear it as it is" notice; also the mode for reveals and for Easy (the With-vocals difficulty), where clips start at a likely hook (`hookOffset` in `src/lib/config.ts`) instead of the intro.
+- `"snip"`: Medium and Hard use the verified interval for all four rungs (3, 5, 8, 10 seconds).
+  The engine seeks before unmuting, routes the CORS element through an AudioContext gain gate, and schedules silence at the interval end on the audio clock.
+  A media-time boundary and pause timer also stop the element.
+  Failure to seek, wire the gate, or find a valid interval returns `"failed"` without starting raw playback.
+- `"plain"`: Easy keeps the full vocals and its 3, 5, 8, 12-second ladder, starting at a likely hook (`hookOffset` in `src/lib/config.ts`); reveals also play as-is.
 
 `window.__ttLastMode` reports the mode that actually played (E2E/debug surface).
-Every rung of the clip ladder (3, 5, 8, 12s) plays from the start of the clip window (the snip start, or the hook offset on Easy); the 12s rung may run past the ~10-12s verified window, which the owner has explicitly accepted.
+Every rung and replay starts at the same interval start.
+The engine rejects any offset and length outside that interval.
+
+## What verification can and cannot say
+
+MusiCNN is a voice detector, not proof that a clip has no vocals.
+Quiet singing, speech under loud instruments, unusual vocal timbres, and model mistakes can pass its threshold.
+The overlapping patches close the old uncovered gaps, but even continuous model coverage cannot guarantee zero audible vocals.
+The `sourceId`, exact start/end, method, and maximum raw voice probability in the index make each decision auditable against the live Saavn recording.
+For a listening audit, resolve an indexed `sourceId` from the song endpoint, play the exact `[startSec,endSec]` interval from its HTTPS `downloadUrl`, and record any audible vocals before adjusting the index or threshold.
 
 ## Buffering and the stall guard
 
@@ -60,7 +69,7 @@ Effects share one cached 0.5s noise buffer; each call builds a few short-lived o
 ## Reveal playback
 
 `showAnswer` plays the unfiltered song via `playElement`; for full-length tracks it seeks toward a likely hook (`min(45, duration-60)`), for 30s `hook` clips it starts at 0.
-An element that was previously muffled is rewired straight to the speakers for the reveal.
+An element that was routed through the Music-only gain gate is rewired straight to the speakers for the reveal.
 
 ## Wake lock
 
@@ -68,7 +77,7 @@ An element that was previously muffled is rewired straight to the speakers for t
 
 ## Diagnostics
 
-`src/lib/log.js` keeps a structured ring buffer (250 entries) mirrored to the console and persisted in localStorage: boot, crate tier results (including `snips: "ok"|"none"` and the `snipped` count), every play with its mode, and every fallback (`element-fail`, `muffle-wire-fail`, `muffle-fallback`, `element-play`, `play-blocked`, `sfx-fail`), plus `snippet` (rung and clip length), `skip` and `go-home` from the game.
+`src/lib/log.js` keeps a structured ring buffer (250 entries) mirrored to the console and persisted in localStorage: boot, crate tier results (including `snips: "ok"|"none"` and the `snipped` count), every play with its mode, and failures (`element-fail`, `snip-fail`, `element-play`, `play-blocked`, `sfx-fail`), plus `snippet` (rung and clip length), `skip` and `go-home` from the game.
 A `boot` entry with no preceding `pagehide` is the signature of a crash or jetsam kill.
 On any device, append `?debug=1` to the URL for a live on-screen log overlay with copy-to-clipboard (`?debug=0` turns it off).
 `window.__ttLog.dump()` reads the log programmatically.
@@ -76,4 +85,4 @@ The old on-device pipeline's localStorage keys (`tt_vad`, `tt_ml_slow`) are obso
 
 ## The bulb equalizer
 
-The level meter under the cinema screen is decorative CSS, not an analyser: reading real levels would mean routing the raw "snip" element through Web Audio, which the engine deliberately avoids.
+The level meter under the cinema screen is decorative CSS, not an analyser.
