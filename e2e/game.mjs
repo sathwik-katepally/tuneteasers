@@ -99,7 +99,7 @@ try {
     if (!extended){
       await page.getByText("Guess, or hear more").waitFor({ timeout: 20000 });
       await shot("05b-listened", 200);
-      await btn(/Hear 5s/).click();
+      await btn(/Hear 7s more/).click();
       await page.getByText(/s left/).waitFor({ timeout: 20000 });
       extended = true;
     }

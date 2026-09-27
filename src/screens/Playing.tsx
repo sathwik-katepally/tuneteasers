@@ -75,7 +75,7 @@ export function Playing({ name, track, plain, phase, turn, note, onPlay, onJudge
             const heard = i < turn.rung || (i === turn.rung && !cueing);
             const running = playing && inSpan(i);
             return (
-              <div key={i} className={`${s.frame} ${heard && !running && !(cueing && inSpan(i)) ? s.frameDone : ""} ${i === turn.rung ? s.frameNow : ""}`}>
+              <div key={i} className={`${s.frame} ${heard && !running && !(cueing && inSpan(i)) ? s.frameDone : ""} ${i === turn.rung ? s.frameNow : ""} ${running ? s.frameLit : ""}`}>
                 {running && (
                   <div key={turn.playKey} className={`${s.frameFill} ${s.frameRun}`}
                     style={{ animationDuration: `${sec}s`, animationDelay: `${rungStart(i) - from}s` }} />

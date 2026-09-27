@@ -218,6 +218,10 @@
   outline-offset: -2px;
 }
 
+.frameLit {
+  color: var(--cream);
+}
+
 .frameFill {
   position: absolute;
   inset: 0;

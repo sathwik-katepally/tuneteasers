@@ -8,10 +8,12 @@
    - Music-only never sounds outside the verified interval;
    - no audio before the listening screen is fully faded in, and "Now
      playing" and the clip bar start with the sound.
-   node e2e/ladder.mjs --profile=phone|desktop --difficulty=easy|medium [--mix=both] [--log] */
+   node e2e/ladder.mjs --profile=phone|desktop --difficulty=easy|medium [--mix=both] [--log] [--shots=<dir>] */
+import fs from "node:fs";
+import path from "node:path";
 import { serve, open, args, saved } from "./harness.mjs";
 
-const A = args({ profile: "desktop", difficulty: "easy", mix: "both", log: "" });
+const A = args({ profile: "desktop", difficulty: "easy", mix: "both", log: "", shots: "" });
 const SEGMENTS = [5, 7, 8];
 const TOL = 0.1; // s of media time
 
@@ -80,11 +82,18 @@ try {
     await btn("Skip this song").click();
   }
   const tl0 = await page.evaluate(() => window.__tl.slice());
-  for (const name of [/^Hear 7s more/, /^Hear 8s more/, /^Replay/]){
+  const shot = async name => {
+    if (!A.shots) return;
+    fs.mkdirSync(A.shots, { recursive: true });
+    await page.screenshot({ path: path.join(A.shots, `${A.profile}-${A.difficulty}-${name}.png`) });
+  };
+  for (const [name, at, label] of [[/^Hear 7s more/, 3000, "rung2"], [/^Hear 8s more/, 0], [/^Replay/, 9000, "replay"]]){
     await btn(name).click();
     await page.getByText(/\ds left/).waitFor({ timeout: 20000 });
+    if (at){ await page.waitForTimeout(at); await shot(label); }
     await listened.waitFor({ timeout: 30000 });
   }
+  await shot("done");
   await page.waitForTimeout(300);
   const tl = await page.evaluate(() => window.__tl.slice());
   const clips = await page.evaluate(() => window.__ttClips);
