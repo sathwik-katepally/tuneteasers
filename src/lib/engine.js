@@ -153,7 +153,7 @@ export const engine = {
       }
       if (!this.timer) tick();
     };
-    try { (window.__ttClips ||= []).push(trace); } catch(e){} // E2E/debug surface
+    try { const t = (window.__ttClips ||= []); t.push(trace); if (t.length > 40) t.shift(); } catch(e){} // E2E/debug surface
     el.addEventListener("playing", onPlaying);
     this.boundary = onPlaying;
     startGuard = setTimeout(() => {
