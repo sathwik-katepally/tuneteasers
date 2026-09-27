@@ -11,7 +11,7 @@
    - a phone that reloads mid-show keeps its seat and score,
    - the podium matches the room, and every phone's final place does too,
    - no phone ever receives the title before its reveal, or any stream URL.
-   node e2e/room.mjs [--worker=https://...] [--shots=dir] */
+   node e2e/room.mjs [--host=phone] [--worker=https://...] [--shots=dir] */
 import fs from "node:fs";
 import path from "node:path";
 import { chromium, webkit, devices } from "playwright";
@@ -66,14 +66,29 @@ async function wire(context, label){
   });
 }
 
+// --host=phone runs the host screen on a WebKit iPhone too (a room with no laptop).
+const hostOnPhone = A.host === "phone";
 async function device(kind, label){
-  const browser = kind === "host"
+  const desk = kind === "host" && !hostOnPhone;
+  const browser = desk
     ? await chromium.launch({ args: ["--autoplay-policy=no-user-gesture-required"] })
     : await webkit.launch();
-  const context = await browser.newContext(kind === "host"
+  const context = await browser.newContext(desk
     ? { viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" }
     : { ...devices["iPhone 13"], reducedMotion: "reduce" });
   await wire(context, label);
+  // Counts what actually reached the page, to tell a lost frame from an app bug.
+  await context.addInitScript(() => {
+    const W = window.WebSocket;
+    window.__rx = { n: 0, last: "", opened: 0 };
+    window.WebSocket = class extends W {
+      constructor(...a){
+        super(...a);
+        window.__rx.opened++;
+        this.addEventListener("message", e => { window.__rx.n++; window.__rx.last = String(e.data).slice(0, 300); });
+      }
+    };
+  });
   const page = await context.newPage();
   const errors = [], logs = [];
   page.on("console", m => { if (m.text().startsWith("[tt]")) logs.push(m.text()); });
@@ -82,10 +97,13 @@ async function device(kind, label){
   return { label, browser, context, page, errors, logs };
 }
 
+// Every in-show screen has to fit without scrolling; setup and the lobby may scroll.
+const overflow = [];
 async function shot(dev, name){
-  if (!shotsDir) return;
   await dev.page.waitForTimeout(400);
-  await dev.page.screenshot({ path: path.join(shotsDir, `${name}.png`) });
+  const spill = await dev.page.evaluate(() => document.documentElement.scrollHeight - innerHeight);
+  if (spill > 1 && !/setup|lobby|join/.test(name)) overflow.push(`${name}+${spill}px`);
+  if (shotsDir) await dev.page.screenshot({ path: path.join(shotsDir, `${name}.png`) });
 }
 
 async function until(what, fn, timeout = 30000){
@@ -115,10 +133,20 @@ async function wrongTitle(){
 }
 
 const buzzBtn = p => p.page.locator('button[aria-label="Buzz"]');
+// A tap that lands just as buzzing closes (the song was revealed) is rightly
+// ignored, so a buzz counts once the room has the phone in its queue.
 async function buzz(p){
-  await buzzBtn(p).waitFor({ timeout: 20000 });
-  await buzzBtn(p).click();
+  const inRoom = () => { const s = song(), id = idOf(p.label); return s && (s.answering === id || s.queue.includes(id)); };
+  const t0 = Date.now();
+  for (;;){
+    await buzzBtn(p).waitFor({ timeout: 20000 });
+    await buzzBtn(p).click();
+    for (let i = 0; i < 10 && !inRoom(); i++) await sleep(100);
+    if (inRoom()) return;
+    if (Date.now() - t0 > 20000) fail(`${p.label}'s buzz never reached the room`);
+  }
 }
+
 async function answer(p, text, { pick = true } = {}){
   const input = p.page.getByLabel("Your answer");
   await p.page.getByRole("button", { name: "Lock it in" }).waitFor({ timeout: 10000 });
@@ -263,8 +291,10 @@ try {
   await until("ravi back online", () => hostState().players.find(p => p.id === raviId)?.online && hostState().players.length === 3);
   await ravi.page.locator('button[aria-label="Buzz"]').waitFor({ timeout: 15000 });
   if (scoreOf("Ravi") !== raviScore || idOf("Ravi") !== raviId) fail("reloaded phone lost its seat or score");
-  await ravi.page.close();
-  ravi.page = await ravi.context.newPage();
+  // Then leaves the site entirely and comes back through the room link.
+  // (Navigating away rather than closing the tab: WebKit crashes closing a page with a routed WebSocket.)
+  await ravi.page.goto(url + "seed.html");
+  await until("ravi gone", () => !hostState().players.find(p => p.id === raviId)?.online);
   await ravi.page.goto(url + "#room=" + code);
   await ravi.page.locator('button[aria-label="Buzz"], button[aria-label*="answering"], button[aria-label*="Wait"]').first().waitFor({ timeout: 15000 });
   if (hostState().players.length !== 3 || idOf("Ravi") !== raviId) fail("reopened phone took a new seat");
@@ -353,12 +383,15 @@ try {
   if (hostState().players.some(p => p.score !== 0)) fail("scores not reset for the next show");
   await asha.page.locator('button[aria-label="Buzz"]').waitFor({ timeout: 15000 });
 
+  if (overflow.length) fail("screens scroll at this size: " + overflow.join(", "));
   const errors = all.flatMap(d => d.errors);
   if (errors.length) fail("page errors:\n" + errors.join("\n"));
   console.log(`room: PASS (room ${code}, ${show.total} songs, ${frames} phone frames checked)`);
 } catch (e){
   console.error("room: FAIL", e.message);
   console.error("host view:", JSON.stringify({ ...latest.host, results: undefined }).slice(0, 600));
+  for (const d of all) console.error(`--- ${d.label} page rx`, JSON.stringify(await d.page.evaluate(() => window.__rx).catch(() => null)), "proxy in:", (traffic[d.label] || []).filter(f => f.dir === "in").length);
+  for (const [label, log] of Object.entries(traffic)) console.error(`--- ${label} last frames\n` + log.slice(-6).map(f => `${f.dir} ${new Date(f.at).toISOString().slice(17, 23)} ${f.data.slice(0, 140)}`).join("\n"));
   for (const d of all) console.error(`--- ${d.label} app log\n` + d.logs.slice(-15).join("\n"));
   if (shotsDir) for (const d of all) await d.page.screenshot({ path: path.join(shotsDir, `fail-${d.label}.png`) }).catch(() => {});
   exit = 1;

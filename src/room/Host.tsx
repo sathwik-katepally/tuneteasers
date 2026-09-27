@@ -189,6 +189,7 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
   const seen = useRef({ n: 0, buzzes: 0, guesses: 0 });
   useEffect(() => {
     const s = view?.song;
+    if (s) log("room-song", { n: s.n, state: s.state, rung: s.rung, phase, songNo: show?.songNo ?? -1 });
     if (!s || !show || s.n !== show.songNo + 1 || (phase !== "song" && phase !== "countdown")) return;
     const last = seen.current.n === s.n ? seen.current : { n: s.n, buzzes: 0, guesses: 0 };
     const buzzes = s.queue.length + s.guesses.length;
@@ -312,6 +313,9 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
       break;
     case "countdown":
       meta = songMeta;
+      // Same key as the song screen: a buzz can land within the cross-fade,
+      // and two key changes inside one fade leave AnimatePresence stuck on the old screen.
+      key = `song-${show?.idx}`;
       screen = <Countdown onTick={n => engine.sfx(n > 0 ? "tick" : "roll")} onDone={() => playClip(0)} />;
       break;
     case "reveal":

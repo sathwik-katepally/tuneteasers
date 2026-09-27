@@ -348,11 +348,13 @@ const HOST = {
 const PLAYER = {
   buzz(conn){
     const r = this.room, s = r.song, me = conn.state.seat;
-    if (!s || (s.state !== "live" && s.state !== "answering")) return SAME;
+    // "missed" is the beat after a wrong answer before more of the song plays;
+    // someone the wrong guess just jogged can still buzz in at the same points.
+    if (!s || (s.state !== "live" && s.state !== "answering" && s.state !== "missed")) return SAME;
     if (s.locked.includes(me) || s.queue.some(q => q.id === me)) return SAME;
     s.queue.push({ id: me, points: s.points });
     r.seq++;
-    if (s.state === "live") this.nextAnswerer();
+    if (s.state !== "answering") this.nextAnswerer();
   },
   answer(conn, m){
     const r = this.room, s = r.song, me = conn.state.seat;

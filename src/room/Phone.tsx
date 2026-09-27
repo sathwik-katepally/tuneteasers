@@ -174,7 +174,7 @@ function Buzzer({ view, titles, send, online, error }: {
   const queued = !!song?.queue.includes(me);
   const out = !!song?.locked.includes(me);
   const place = song ? song.queue.indexOf(me) : -1;
-  const open = (state === "live" || state === "answering") && !out && !queued && online;
+  const open = (state === "live" || state === "answering" || state === "missed") && !out && !queued && online;
   const hints = useMemo(() => suggest(text, titles, 5), [text, titles]);
 
   // A new song, or my turn ending, clears the pad.
@@ -193,7 +193,7 @@ function Buzzer({ view, titles, send, online, error }: {
   // iOS only raises the keyboard for a focus made inside a tap, so the pad's
   // input takes focus on the buzz itself when this buzz is likely to be first.
   function buzzTap(){
-    if (state === "live" && open) input.current?.focus({ preventScroll: true });
+    if (state !== "answering" && open) input.current?.focus({ preventScroll: true });
   }
   function answer(t: string){
     const v = t.trim();
@@ -213,7 +213,7 @@ function Buzzer({ view, titles, send, online, error }: {
   else if (queued && !answering){ label = `#${place + 1}`; sub = `In line. ${playerName(view, song!.answering)} is answering.`; }
   else if (state === "answering"){ label = "Buzz"; sub = `${playerName(view, song!.answering)} is answering. Buzz to go next.`; }
   else if (state === "live"){ label = "Buzz"; sub = "Buzz the moment you know it"; }
-  else if (state === "missed"){ label = "Wait"; sub = "Nobody yet. More of the song is coming."; }
+  else if (state === "missed"){ label = "Buzz"; sub = "Nobody yet. Buzz if that jogged your memory, or hear more."; }
   else { label = "Wait"; sub = song ? "Ears on. The clip starts in a moment." : "Get ready for the first song"; }
 
   return (
