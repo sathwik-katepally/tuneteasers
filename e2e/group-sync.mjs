@@ -209,6 +209,7 @@ try {
   if (!/Solo · Easy · Hindi \+ Telugu · 3 rounds/.test(await phone.page.locator("body").innerText())) fail("past show settings line wrong");
   await shot(phone, "phone-03-past-shows");
   await home(phone.page);
+  await phone.page.getByRole("heading", { name: "Past shows" }).waitFor({ state: "detached" });
   await home(phone.page);
 
   // Phone: its next crate left out every song the desktop played.

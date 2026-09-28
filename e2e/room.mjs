@@ -337,6 +337,12 @@ try {
   const code = (await hostShow()).code;
   if (!/^[A-Z]{4}$/.test(code)) fail(`bad room code ${code}`);
   await host.page.getByRole("img", { name: "QR code to join this room" }).waitFor();
+  // A big screen gets a lobby readable from across the room.
+  if (!hostOnPhone){
+    const qr = await host.page.getByRole("img", { name: "QR code to join this room" }).boundingBox();
+    const tile = await host.page.locator("[aria-label^='Room code '] > span").first().boundingBox();
+    if (!qr || qr.width < 240 || !tile || tile.height < 110) fail(`wide lobby too small: QR ${qr?.width}px, code tile ${tile?.height}px`);
+  }
   await shot(host, "host-02-lobby-empty");
 
   // Asha types the code on the home screen; Ravi and Meena open the link.
@@ -350,7 +356,8 @@ try {
   if ((await asha.page.evaluate(() => location.hash)) !== `#room=${code}`) fail("room link not kept in the address bar");
   for (const p of [ravi, meena]){
     await p.page.goto(url + "#room=" + code);
-    if ((await p.page.getByLabel("Room code").inputValue()) !== code) fail("room link did not fill the code");
+    await p.page.getByLabel(`Room code ${code}`).waitFor();
+    if ((await p.page.evaluate(() => document.activeElement?.getAttribute("aria-label"))) !== "Your name") fail("room link did not focus the name");
     await p.page.getByLabel("Your name").fill(p.label);
     if (p === ravi) await shot(ravi, "phone-02-join-filled");
     await p.page.getByRole("button", { name: "Join the show" }).click();
@@ -384,6 +391,9 @@ try {
   // Song 1: a buzz race. Ravi, then Asha, then Meena; Ravi answers wrong,
   // Asha right at the rung she buzzed on.
   await live(1, 0);
+  // Late arrivals: a big screen keeps the code and QR up beside the show.
+  const tag = host.page.getByText(`Late? Join${code}`);
+  if (hostOnPhone ? await tag.isVisible() : !(await tag.isVisible())) fail(`join tag ${hostOnPhone ? "shown on a phone host" : "missing during play"}`);
   await shot(host, "host-04-playing");
   await shot(asha, "phone-04-buzzer-live");
   buzzLog = [];
