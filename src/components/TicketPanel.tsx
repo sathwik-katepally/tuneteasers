@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Fingerprint } from "lucide-react";
 import { GroupError, localHistoryCount, useGroup } from "../lib/group";
 import { loadBlocked } from "../lib/storage.js";
 import {
@@ -152,7 +153,7 @@ export function TicketPanel({ moveTicket, clearMoveTicket, onPrefs }: Props){
           <div className={s.row}>
             <button type="button" className="btn btn-cream" onClick={() => go("move")}>Move to a phone</button>
             {me.passkeys > 0
-              ? <button type="button" className="btn btn-teal" disabled>{me.passkeys === 1 ? "Passkey saved" : `${me.passkeys} passkeys`}</button>
+              ? <span className={s.saved}><Fingerprint size={16} strokeWidth={2.5} /> {me.passkeys === 1 ? "Passkey saved" : `${me.passkeys} passkeys`}</span>
               : <button type="button" className="btn btn-teal" disabled={busy || !passkeysSupported()}
                   onClick={() => run(async () => { await addPasskey(); }, "summary")}>{busy ? "Creating" : "Create a passkey"}</button>}
           </div>

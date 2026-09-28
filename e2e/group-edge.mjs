@@ -59,11 +59,11 @@ try {
   await check("a failed cooldown read does not block the next one", async () => {
     await page.evaluate(() => g.createGroup("Edge recovery", false));
     net.down = true;
-    const failed = await page.evaluate(() => g.groupPlayed());
+    const failed = await page.evaluate(() => g.groupCooldown());
     expect(failed === null, "read with the Worker down should give null");
     net.down = false;
     net.reads = 0;
-    const again = await page.evaluate(() => g.groupPlayed());
+    const again = await page.evaluate(() => g.groupCooldown());
     expect(net.reads === 1, `expected 1 cooldown request after recovery, saw ${net.reads}`);
     expect(again && typeof again === "object", "recovered read returned null");
   });
