@@ -2,7 +2,7 @@ import type { Category, Difficulty, Track } from "../types";
 import { SNIP_WINDOW_SEC } from "./constants.js";
 
 /* Every gameplay number lives here: the clip ladder, what each rung pays,
-   the speed bonus, the hint cost and the show length. */
+   the speed bonus, the hint cost, the show length, skips and cooldowns. */
 
 /* Each rung plays the next stretch of one continuous clip window: the first
    5s, then "Hear more" carries on for 7s, then 8s. Easy keeps the vocals and
@@ -51,6 +51,16 @@ export const ROUND_OPTIONS = [3, 5, 8] as const;
 export const DEFAULT_ROUNDS = 5;
 
 export const MAX_CAST = 8;
+
+/* "Heard it too much" in pass-the-phone: each contestant's free skips per show.
+   A skip after a stream error is always free. The room's vote share and skip
+   cap are Worker vars (worker/wrangler.jsonc), since the room enforces them. */
+export const SKIPS_PER_PLAYER = 1;
+
+/* How long a song sits out of new crates, by how it last left: played through,
+   or skipped as heard too much. The group's PLAYED_TTL_DAYS (Worker var) must
+   be at least the longest of these, or the group forgets a skip too early. */
+export const COOLDOWN_DAYS = { played: 7, tired: 30 } as const;
 
 /* Buzz-in rooms (docs/room-mode.md): the host screen plays, phones buzz. */
 export const ROOM_SONGS_PER_ROUND = 4;

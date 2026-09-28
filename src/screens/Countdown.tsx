@@ -5,7 +5,8 @@ import { BulbFrame } from "../components/Bulbs";
 import s from "./Countdown.module.css";
 import sh from "./shared.module.css";
 
-export function Countdown({ onTick, onDone }: { onTick: (n: number) => void; onDone: () => void }){
+/* skipped: the title of a song just skipped as heard too much, shown so the room sees it. */
+export function Countdown({ onTick, onDone, skipped = "" }: { onTick: (n: number) => void; onDone: () => void; skipped?: string }){
   const reduce = useReducedMotion();
   const [n, setN] = useState(3);
   useEffect(() => {
@@ -21,6 +22,12 @@ export function Countdown({ onTick, onDone }: { onTick: (n: number) => void; onD
     <div className={sh.stage}>
       <div className={s.wrap}>
         <BulbFrame mode="fast" gap={22} inset={12} size={11} />
+        {skipped && (
+          <p className={s.skipped} role="status">
+            <span className={s.skippedLabel}>Skipped</span>
+            <span className={s.skippedTitle}>{skipped}</span>
+          </p>
+        )}
         <AnimatePresence>
           {n > 0 ? (
             <m.div key={n} className={s.num} aria-live="polite"
@@ -35,7 +42,7 @@ export function Countdown({ onTick, onDone }: { onTick: (n: number) => void; onD
             </m.div>
           )}
         </AnimatePresence>
-        <p className={s.label}>Ears on</p>
+        <p className={s.label}>{skipped ? "Another one, same level" : "Ears on"}</p>
       </div>
     </div>
   );

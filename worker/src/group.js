@@ -30,6 +30,7 @@ const LIMITS = {
 };
 
 const DAY = 86400e3;
+const KINDS = ["played", "tired"];
 const B32 = "abcdefghijklmnopqrstuvwxyz234567";
 
 class HttpError extends Error {
@@ -152,9 +153,11 @@ async function createGroup(request, env){
 
 async function played(env, auth){
   const since = Date.now() - ttl(env).played;
-  const { results } = await env.DB.prepare("SELECT song_key, last_played_at FROM played WHERE group_id = ? AND last_played_at > ?")
+  const { results } = await env.DB.prepare("SELECT song_key, kind, last_played_at FROM played WHERE group_id = ? AND last_played_at > ?")
     .bind(auth.group.id, since).all();
-  return [{ played: Object.fromEntries(results.map(r => [r.song_key, r.last_played_at])) }];
+  const out = { played: {}, tired: {} };
+  for (const r of results) if (out[r.kind]) out[r.kind][r.song_key] = r.last_played_at;
+  return [out];
 }
 
 async function results(env, auth, url){
@@ -182,22 +185,22 @@ async function postRounds(request, env, auth){
     throw new HttpError(400, `rounds must be a list of 1 to ${LIMITS.roundBatch} songs`);
   const rounds = body.rounds.map(r => {
     if (!r || typeof r.id !== "string" || !EVENT_ID_RX.test(r.id)) throw new HttpError(400, "round id is not valid");
-    return { id: r.id, key: songKey(r.key) };
+    return { id: r.id, key: songKey(r.key), kind: r.kind === undefined ? "played" : oneOf(r.kind, KINDS, "kind") };
   });
   const json = JSON.stringify(rounds);
   const now = Date.now();
   const gid = auth.group.id;
   await env.DB.batch([
     env.DB.prepare(
-      `INSERT OR IGNORE INTO round_events (group_id, event_id, song_key, played_at)
-       SELECT ?1, json_extract(value, '$.id'), json_extract(value, '$.key'), ?3 FROM json_each(?2)`,
+      `INSERT OR IGNORE INTO round_events (group_id, event_id, song_key, kind, played_at)
+       SELECT ?1, json_extract(value, '$.id'), json_extract(value, '$.key'), json_extract(value, '$.kind'), ?3 FROM json_each(?2)`,
     ).bind(gid, json, now),
     env.DB.prepare(
-      `INSERT INTO played (group_id, song_key, last_played_at)
-       SELECT group_id, song_key, MAX(played_at) FROM round_events
+      `INSERT INTO played (group_id, song_key, kind, last_played_at)
+       SELECT group_id, song_key, kind, MAX(played_at) FROM round_events
        WHERE group_id = ?1 AND event_id IN (SELECT json_extract(value, '$.id') FROM json_each(?2))
-       GROUP BY song_key
-       ON CONFLICT (group_id, song_key) DO UPDATE SET last_played_at = MAX(last_played_at, excluded.last_played_at)`,
+       GROUP BY song_key, kind
+       ON CONFLICT (group_id, song_key, kind) DO UPDATE SET last_played_at = MAX(last_played_at, excluded.last_played_at)`,
     ).bind(gid, json),
     env.DB.prepare("UPDATE groups SET active_at = ? WHERE id = ?").bind(now, gid),
   ]);
@@ -242,32 +245,32 @@ async function postResult(request, env, auth){
   return [{ ok: true }];
 }
 
-/* One-time import of a phone's own cooldown map. Client timestamps are
-   accepted here (the plays happened before the group existed) but clamped to
-   the retention window and never into the future. */
+/* One-time import of a phone's own history ({ played, tired }, each song key
+   to time). Client timestamps are accepted here (the plays happened before the
+   group existed) but clamped to the retention window and never into the future. */
 async function postImport(request, env, auth){
   const body = await readJson(request, LIMITS.importBody);
-  const raw = body.played;
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new HttpError(400, "played must be an object of song key to time");
-  const entries = Object.entries(raw);
-  if (entries.length > LIMITS.importSongs) throw new HttpError(400, `at most ${LIMITS.importSongs} songs can be imported`);
   const now = Date.now();
   const since = now - ttl(env).played;
-  const keep = {};
-  for (const [k, v] of entries){
-    songKey(k);
-    if (!Number.isFinite(v) || v <= since) continue;
-    keep[k] = Math.min(Math.round(v), now);
+  const keep = [];
+  for (const kind of KINDS){
+    const raw = body[kind] === undefined && kind === "tired" ? {} : body[kind];
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new HttpError(400, `${kind} must be an object of song key to time`);
+    for (const [k, v] of Object.entries(raw)){
+      songKey(k);
+      if (Number.isFinite(v) && v > since) keep.push({ key: k, kind, at: Math.min(Math.round(v), now) });
+    }
   }
+  if (keep.length > LIMITS.importSongs) throw new HttpError(400, `at most ${LIMITS.importSongs} songs can be imported`);
   const gid = auth.group.id;
   const statements = [env.DB.prepare("UPDATE groups SET active_at = ? WHERE id = ?").bind(now, gid)];
-  if (Object.keys(keep).length) statements.unshift(env.DB.prepare(
-    `INSERT INTO played (group_id, song_key, last_played_at)
-     SELECT ?1, key, value FROM json_each(?2) WHERE true
-     ON CONFLICT (group_id, song_key) DO UPDATE SET last_played_at = MAX(last_played_at, excluded.last_played_at)`,
+  if (keep.length) statements.unshift(env.DB.prepare(
+    `INSERT INTO played (group_id, song_key, kind, last_played_at)
+     SELECT ?1, json_extract(value, '$.key'), json_extract(value, '$.kind'), json_extract(value, '$.at') FROM json_each(?2) WHERE true
+     ON CONFLICT (group_id, song_key, kind) DO UPDATE SET last_played_at = MAX(last_played_at, excluded.last_played_at)`,
   ).bind(gid, JSON.stringify(keep)));
   await env.DB.batch(statements);
-  return [{ ok: true, imported: Object.keys(keep).length }];
+  return [{ ok: true, imported: keep.length }];
 }
 
 async function deleteGroup(env, auth){

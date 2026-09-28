@@ -144,6 +144,24 @@
   gap: 6px;
 }
 
+/* The skip budget as a torn ticket stub. */
+.stub {
+  padding: 1px 6px 0;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  color: var(--vermilion-deep);
+  background: var(--cream);
+  border-left: 2px dashed var(--ink);
+  text-decoration: none;
+  mask: radial-gradient(circle at 100% 50%, transparent 4px, #000 4.5px);
+  -webkit-mask: radial-gradient(circle at 100% 50%, transparent 4px, #000 4.5px);
+}
+
+.link[disabled] .stub {
+  color: var(--cream-shade);
+  background: #3a221b;
+}
+
 .posterLine {
   composes: eyebrow from global;
   color: var(--teal);

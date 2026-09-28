@@ -249,6 +249,10 @@
   text-shadow: 4px 4px 0 var(--ink);
 }
 
+.vote {
+  margin-top: -6px;
+}
+
 .sub {
   min-height: 2.8em;
   max-width: 320px;

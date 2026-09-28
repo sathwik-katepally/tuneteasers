@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { isFirstVisit, loadSaved, save } from "./lib/save";
-import { DIFFICULTY, hookOffset, ladderFor, pointsNow } from "./lib/config";
+import { DIFFICULTY, SKIPS_PER_PLAYER, hookOffset, ladderFor, pointsNow } from "./lib/config";
 import { playRung } from "./lib/ladder";
 import { markPlayed, loadBlocked, saveBlocked, normArtist, isBlocked } from "./lib/storage.js";
-import { buildCrate as buildCrateJs, refreshMusicQueue as refreshMusicQueueJs } from "./lib/crate.js";
+import { buildCrate as buildCrateJs, refreshMusicQueue as refreshMusicQueueJs, withSameTierNext as withSameTierNextJs } from "./lib/crate.js";
 import { engine, keepAwake } from "./lib/engine.js";
 import { log } from "./lib/log.js";
 import { displayTitle } from "./lib/utils.js";
-import { groupPlayed, randomId, recordPlay, recordResult, takeInviteFromUrl, useGroup } from "./lib/group";
+import { groupCooldown, randomId, recordPlay, recordResult, takeInviteFromUrl, useGroup } from "./lib/group";
 import { loadHostShow, roomFromUrl, saveHostShow } from "./lib/room";
 import { Stage } from "./components/Stage";
 import { Host } from "./room/Host";
@@ -25,7 +25,8 @@ import { PastGames } from "./screens/PastGames";
 import type { AppState, CastMember, Category, Difficulty, GameState, Mode, Phase, RosterEntry, Settings, Track, Turn, Verdict } from "./types";
 
 type Crate = { error?: string; queue?: Track[]; source?: string };
-const buildCrate = buildCrateJs as (mix: string, eras: string[], sound: string, difficulty: Difficulty, minSongs: number, played?: Record<string, number>, categories?: Category[]) => Promise<Crate>;
+const buildCrate = buildCrateJs as (mix: string, eras: string[], sound: string, difficulty: Difficulty, minSongs: number, cooldown?: Record<string, number>, categories?: Category[]) => Promise<Crate>;
+const withSameTierNext = withSameTierNextJs as (queue: Track[], idx: number) => Track[] | null;
 const refreshMusicQueue = refreshMusicQueueJs as (queue: Track[]) => Promise<Track[]>;
 
 const freshTurn = (): Turn => ({ rung: 0, span: { from: 0, to: 0 }, clipEndedAt: null, clipStartedAt: 0, playKey: 0, hint: false });
@@ -51,6 +52,8 @@ export function App(){
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [note, setNote] = useState("");
+  // The title of a song just skipped as heard too much, shown on the next countdown.
+  const [skipped, setSkipped] = useState("");
   const [blocked, setBlocked] = useState<string[]>(loadBlocked);
   const [invite, setInvite] = useState(takeInviteFromUrl);
   const groupSnap = useGroup();
@@ -98,7 +101,7 @@ export function App(){
 
   function resetTurn(){
     clearTimeout(startOnShow.current); startOnShow.current = 0;
-    setTurn(freshTurn()); setVerdict(null); setRevealed(null); setNote("");
+    setTurn(freshTurn()); setVerdict(null); setRevealed(null); setNote(""); setSkipped("");
   }
 
   async function startGame(cast?: CastMember[]){
@@ -106,8 +109,8 @@ export function App(){
     setLoading(true); setError("");
     const mode = cast ? g?.mode ?? S.mode : S.mode;
     const roster = cast ?? (mode === "teams" ? state.teams : state.players);
-    const played = groupSnap.group ? await groupPlayed() : null;
-    const crate = await buildCrate(S.mix, S.eras, DIFFICULTY[S.difficulty].sound, S.difficulty, S.rounds * roster.length, played ?? undefined, S.categories);
+    const cooldown = groupSnap.group ? await groupCooldown() : null;
+    const crate = await buildCrate(S.mix, S.eras, DIFFICULTY[S.difficulty].sound, S.difficulty, S.rounds * roster.length, cooldown ?? undefined, S.categories);
     setLoading(false);
     if (crate.error || !crate.queue){
       setError(crate.error === "safe" ? "Not enough verified music-only clips for this show. Try Easy or fewer rounds, or widen your song picks."
@@ -122,7 +125,7 @@ export function App(){
       queue: crate.queue, trackIdx: 0, turn: 0, round: 1, totalRounds: S.rounds,
       totalSongs: crate.queue.length, source: crate.source ?? "corpus",
       mode, difficulty: S.difficulty, mix: S.mix,
-      cast: roster.map(r => ({ id: r.id, name: r.name, members: [...r.members], score: 0 })),
+      cast: roster.map(r => ({ id: r.id, name: r.name, members: [...r.members], score: 0, skips: 0 })),
       history: [], finished: false,
     };
     resetTurn();
@@ -208,11 +211,11 @@ export function App(){
     setPhase(toBoard ? "board" : "handover");
   }
 
+  /* After a stream error: free, and the song goes on no cooldown, since it
+     was never heard and may stream fine next time. */
   function skipSong(){
     if (!g || !track) return;
     engine.stop();
-    markPlayed(track.title);
-    recordPlay(track.title);
     const trackIdx = g.trackIdx + 1;
     if (trackIdx >= g.queue.length){
       setBoardRound(g.round);
@@ -224,6 +227,23 @@ export function App(){
     log("skip", { title: String(track.title).slice(0, 28) });
     primeCurrent(g.queue[trackIdx]);
     setState(st => ({ ...st, game: { ...g, trackIdx } }));
+    setPhase("countdown");
+  }
+
+  /* "Heard it too much": costs the contestant one of their skips, sits the
+     song out for the longer tired cooldown, and brings a song from the same
+     tier. The title goes up on screen so the room sees what was skipped. */
+  const heardItQueue = g && who && who.skips < SKIPS_PER_PLAYER ? withSameTierNext(g.queue, g.trackIdx) : null;
+  function heardIt(){
+    if (!g || !who || !track || !heardItQueue || verdict) return;
+    engine.stop();
+    markPlayed(track.title, "tired");
+    recordPlay(track.title, "tired");
+    log("skip", { tired: true, title: String(track.title).slice(0, 28) });
+    const trackIdx = g.trackIdx + 1;
+    primeCurrent(heardItQueue[trackIdx]);
+    setSkipped(displayTitle(track.title));
+    setState(st => ({ ...st, game: { ...g, queue: heardItQueue, trackIdx, cast: g.cast.map((c, i) => (i === g.turn ? { ...c, skips: c.skips + 1 } : c)) } }));
     setPhase("countdown");
   }
 
@@ -336,7 +356,7 @@ export function App(){
         break;
       case "countdown":
         key = "countdown";
-        screen = <Countdown onTick={n => engine.sfx(n > 0 ? "tick" : "roll")} onDone={startWhenShown} />;
+        screen = <Countdown skipped={skipped} onTick={n => engine.sfx(n > 0 ? "tick" : "roll")} onDone={startWhenShown} />;
         break;
       case "reveal":
         key = "reveal";
@@ -350,7 +370,8 @@ export function App(){
       default:
         key = "playing";
         screen = <Playing name={who!.name} track={track!} plain={plain} phase={phase} turn={turn} note={note}
-          onPlay={playClip} onJudge={revealAndScore} onHint={() => setTurn(t => ({ ...t, hint: true }))} onSkip={skipSong} />;
+          onPlay={playClip} onJudge={revealAndScore} onHint={() => setTurn(t => ({ ...t, hint: true }))} onSkip={skipSong}
+          skipsLeft={Math.max(0, SKIPS_PER_PLAYER - who!.skips)} onHeardIt={heardItQueue ? heardIt : undefined} />;
     }
   }
 

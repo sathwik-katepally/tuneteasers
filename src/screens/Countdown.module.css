@@ -36,3 +36,37 @@
   bottom: 40px;
   color: var(--cream-dim);
 }
+
+.skipped {
+  position: absolute;
+  top: 44px;
+  left: 36px;
+  right: 36px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 14px 6px;
+  text-align: center;
+  color: var(--ink);
+  background: var(--cream);
+  border: 2px solid var(--ink);
+  box-shadow: 4px 4px 0 var(--vermilion-deep);
+  transform: rotate(-2deg);
+  z-index: 1;
+}
+
+.skippedLabel {
+  composes: eyebrow from global;
+  color: var(--vermilion-deep);
+}
+
+.skippedTitle {
+  composes: display from global;
+  max-width: 100%;
+  font-size: 24px;
+  line-height: 1.15;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

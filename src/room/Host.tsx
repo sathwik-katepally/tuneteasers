@@ -3,12 +3,12 @@ import { DIFFICULTY, ROOM_ANSWER_SECS, ROOM_GRACE_SECS, ROOM_SONGS_PER_ROUND, RO
   hookOffset, ladderFor } from "../lib/config";
 import { nearTitles } from "../lib/answer.js";
 import { playRung } from "../lib/ladder";
-import { answerTitles as answerTitlesJs, buildCrate as buildCrateJs } from "../lib/crate.js";
+import { answerTitles as answerTitlesJs, buildCrate as buildCrateJs, withSameTierNext as withSameTierNextJs } from "../lib/crate.js";
 import { engine, keepAwake } from "../lib/engine.js";
 import { markPlayed } from "../lib/storage.js";
 import { displayTitle } from "../lib/utils.js";
 import { log } from "../lib/log.js";
-import { groupPlayed, recordPlay } from "../lib/group";
+import { groupCooldown, recordPlay } from "../lib/group";
 import { createRoom, loadHostShow, playerName, saveHostShow, useMsLeft, useRoom, type HostShow, type RoomView } from "../lib/room";
 import { Stage } from "../components/Stage";
 import { Countdown } from "../screens/Countdown";
@@ -21,7 +21,8 @@ import { HostPlaying, type Audio } from "./HostPlaying";
 import type { Category, Difficulty, GameState, Settings, Track, Verdict } from "../types";
 
 type Crate = { error?: string; queue?: Track[] };
-const buildCrate = buildCrateJs as (mix: string, eras: string[], sound: string, difficulty: Difficulty, minSongs: number, played: Record<string, number> | undefined, categories: Category[]) => Promise<Crate>;
+const buildCrate = buildCrateJs as (mix: string, eras: string[], sound: string, difficulty: Difficulty, minSongs: number, cooldown: Record<string, number> | undefined, categories: Category[]) => Promise<Crate>;
+const withSameTierNext = withSameTierNextJs as (queue: Track[], idx: number) => Track[] | null;
 const answerTitles = answerTitlesJs as (mix: string) => Promise<string[]>;
 
 type Phase = "opening" | "lobby" | "loading" | "countdown" | "song" | "reveal" | "board" | "done" | "failed";
@@ -43,6 +44,7 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
   const [note, setNote] = useState("");
   const [revealed, setRevealed] = useState<Revealed | null>(null);
   const [wrong, setWrong] = useState<{ name: string; text: string; timeout: boolean; at: number } | null>(null);
+  const [skipped, setSkipped] = useState("");
 
   const setShow = (s: HostShow | null) => { setShowState(s); saveHostShow(s); };
   const room = useRoom(show?.code ?? "", show ? { t: "host", token: show.host } : null);
@@ -62,7 +64,7 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
     createRoom().then(({ code, host }) => {
       if (!on) return;
       setShow({ code, host, queue: [], idx: 0, songNo: 0, total: settings.rounds * ROOM_SONGS_PER_ROUND, perRound: ROOM_SONGS_PER_ROUND,
-        plain: DIFFICULTY[settings.difficulty].sound === "full", difficulty: settings.difficulty, mix: settings.mix, eras: settings.eras, categories: settings.categories, started: false });
+        plain: DIFFICULTY[settings.difficulty].sound === "full", difficulty: settings.difficulty, mix: settings.mix, eras: settings.eras, categories: settings.categories, started: false, skipsSeen: 0 });
       setPhase("lobby");
     }, e => { if (on){ log("room-create-fail", { msg: String(e?.message || e).slice(0, 60) }); setPhase("failed"); } });
     return () => { on = false; };
@@ -119,8 +121,8 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
     engine.ac();
     setPhase("loading");
     setError("");
-    const played = await groupPlayed();
-    const crate = await buildCrate(show.mix, show.eras, show.plain ? "full" : "inst", show.difficulty, show.total, played ?? undefined, show.categories);
+    const cooldown = await groupCooldown();
+    const crate = await buildCrate(show.mix, show.eras, show.plain ? "full" : "inst", show.difficulty, show.total, cooldown ?? undefined, show.categories);
     if (crate.error || !crate.queue){
       setError(crate.error === "safe" ? "Not enough verified music-only clips for this show. Go back and pick Easy or fewer rounds."
         : crate.error === "thin" ? `Not enough songs match your picks. Go back and pick more eras${show.categories.length ? " or another kind of song" : ""}.`
@@ -132,7 +134,7 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
     await titlePool(show.mix);
     // No titles go to the room here: phones load the public list themselves.
     room.send({ t: "start", mix: show.mix, total: show.total, perRound: show.perRound, answerSecs: ROOM_ANSWER_SECS });
-    const next = { ...show, queue, idx: 0, songNo: 0, started: true };
+    const next = { ...show, queue, idx: 0, songNo: 0, started: true, skipsSeen: 0 };
     setShow(next);
     // No prime here: the crate took the tap's gesture with it, and a prime
     // outside a gesture only races the first clip. A strict browser shows
@@ -140,7 +142,8 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
     toCountdown();
   }
 
-  function toCountdown(){
+  function toCountdown(skippedTitle = ""){
+    setSkipped(skippedTitle);
     setClip(freshClip());
     setAudio("cueing");
     setGraceUntil(null);
@@ -160,7 +163,7 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
       room.send({ t: "song", n, title: track.title, film: track.album || "", year: track.year || 0, artist: track.artist || "",
         near: nearTitles(track.title, titles) });
     });
-  }, [phase, room.link]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [phase, room.link, show?.idx]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* A replay starts from the top of the clip window; otherwise the rung plays
      only its new stretch, carrying on from where the last one stopped. */
@@ -291,21 +294,40 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
     toCountdown();
   }
 
+  /* After a stream error: free, and no cooldown for a song nobody heard.
+     The room takes song n again with the next track. */
   function skipSong(){
     if (!show || !track) return;
     engine.stop();
-    markPlayed(track.title);
-    recordPlay(track.title);
-    const idx = show.idx + 1;
-    setShow({ ...show, idx });
-    if (idx >= show.queue.length){
+    nextTrack(show);
+  }
+  function nextTrack(s: HostShow, skippedTitle = ""){
+    const idx = s.idx + 1;
+    setShow({ ...s, idx });
+    if (idx >= s.queue.length){
       room.send({ t: "end" });
       setPhase("board");
       return;
     }
-    engine.prime(show.queue[idx], show.plain);
-    toCountdown();
+    engine.prime(s.queue[idx], s.plain);
+    toCountdown(skippedTitle);
   }
+
+  /* "Heard it too much", decided by the room (a majority vote, or the host's
+     own tap): the song sits out for the tired cooldown and song n is cued
+     again with a song of the same tier when one is left. Acting on the
+     room's skip count, not the tap, makes each skip happen exactly once,
+     through a reload too. */
+  useEffect(() => {
+    const { view: v, show: sh, track: t } = live.current;
+    if (!v || !sh?.started || !t || (phase !== "song" && phase !== "countdown")) return;
+    if (v.skips.used <= sh.skipsSeen || v.song?.state !== "skipped" || v.song.n !== sh.songNo + 1) return;
+    engine.stop();
+    markPlayed(t.title, "tired");
+    recordPlay(t.title, "tired");
+    log("skip", { tired: true, room: true, title: String(t.title).slice(0, 28) });
+    nextTrack({ ...sh, queue: withSameTierNext(sh.queue, sh.idx) ?? sh.queue, skipsSeen: v.skips.used }, displayTitle(t.title));
+  }, [view?.skips.used, view?.song?.state, phase]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function leaveBoard(){
     if (!show) return;
@@ -348,7 +370,7 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
       // Same key as the song screen: a buzz can land within the cross-fade,
       // and two key changes inside one fade leave AnimatePresence stuck on the old screen.
       key = `song-${show?.idx}`;
-      screen = <Countdown onTick={n => engine.sfx(n > 0 ? "tick" : "roll")} onDone={() => playClip(0)} />;
+      screen = <Countdown skipped={skipped} onTick={n => engine.sfx(n > 0 ? "tick" : "roll")} onDone={() => playClip(0)} />;
       break;
     case "reveal":
       screen = revealed && <Reveal track={revealed.track} name={revealed.verdict.name} verdict={revealed.verdict} note={note}
@@ -368,7 +390,8 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
       screen = view && show && track && (
         <HostPlaying view={view} song={view.song?.n === show.songNo + 1 ? view.song : null} songNo={show.songNo + 1} total={show.total} ladder={ladder} clip={clip} audio={audio}
           graceUntil={graceUntil} msLeft={msLeft} note={note} wrong={wrong} link={room.link}
-          onPlay={() => playClip(clip.rung, true)} onMore={carryOn} onReveal={giveUp} onSkip={skipSong} />
+          onPlay={() => playClip(clip.rung, true)} onMore={carryOn} onReveal={giveUp} onSkip={skipSong}
+          onHeardIt={() => room.send({ t: "skip", n: show.songNo + 1 })} />
       );
   }
   const inShow = !!show?.started && phase !== "lobby" && phase !== "failed" && phase !== "opening";
@@ -387,7 +410,7 @@ function asGame(view: RoomView | null, show: HostShow | null): GameState | null 
     id: view.code, queue: [], trackIdx: show.idx, turn: 0, round: round(Math.max(1, show.songNo)),
     totalRounds: Math.ceil(show.total / show.perRound), totalSongs: show.total, source: "room",
     mode: "players", difficulty: show.difficulty, mix: show.mix,
-    cast: view.players.map(p => ({ id: p.id, name: p.name, members: [], score: p.score })),
+    cast: view.players.map(p => ({ id: p.id, name: p.name, members: [], score: p.score, skips: 0 })),
     history: view.results.map(r => ({ id: r.winner ?? "", song: displayTitle(r.title), points: r.points, round: round(r.n) })),
     finished: view.phase === "over",
   };
