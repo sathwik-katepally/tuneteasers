@@ -9,14 +9,17 @@
    - Music-only never sounds outside the verified interval;
    - no audio before the listening screen is fully faded in, and "Now
      playing" and the clip bar start with the sound.
-   node e2e/ladder.mjs --profile=phone|desktop --difficulty=easy|medium [--mix=both] [--log] [--shots=<dir>] */
+   --window-at=0 (Music-only) serves only the verified windows that start at
+   0s, so the first clip needs no seek to reach its start and must still not
+   resume from wherever the hand-over prime left the element.
+   node e2e/ladder.mjs --profile=phone|desktop --difficulty=easy|medium [--mix=both] [--window-at=0] [--log] [--shots=<dir>] */
 import fs from "node:fs";
 import path from "node:path";
 import { serve, open, args, saved, moreSettings } from "./harness.mjs";
 import { ladderFor } from "../src/lib/config.ts";
 import { SNIP_WINDOW_SEC } from "../src/lib/constants.js";
 
-const A = args({ profile: "desktop", difficulty: "easy", mix: "both", log: "", shots: "" });
+const A = args({ profile: "desktop", difficulty: "easy", mix: "both", "window-at": "", log: "", shots: "" });
 const music = A.difficulty !== "easy";
 const L = ladderFor(!music);
 const FULL = L.end(L.last);
@@ -69,6 +72,15 @@ const instrument = () => {
 const server = await serve();
 const { browser, context, page, errors } = await open(A.profile);
 await context.addInitScript(instrument);
+if (A["window-at"] !== ""){
+  const at = Number(A["window-at"]);
+  await context.route(/\/snips\.json(\?|$)/, async route => {
+    const res = await route.fetch();
+    const idx = await res.json();
+    idx.snips = Object.fromEntries(Object.entries(idx.snips).filter(([, s]) => s.startSec === at));
+    route.fulfill({ response: res, json: idx });
+  });
+}
 const fail = m => { throw new Error(m); };
 const btn = name => page.getByRole("button", { name });
 const fmt = n => n.toFixed(2);

@@ -82,9 +82,10 @@ export const engine = {
     let gate;
     const target = snip.startSec + offset;
     try {
-      // After a pause, seek even to where the element already is: Chromium
-      // resumes a paused element ~60ms past its pause point unless a seek
-      // flushes it, and the tail past the last stop was gated silent anyway.
+      // After a pause (a clip's end or the hand-over prime), seek even to
+      // where the element already is: Chromium resumes a paused element ~60ms
+      // past its pause point unless a seek flushes it, and the tail past the
+      // last stop was gated silent anyway.
       // An element that never started (a refused autoplay) skips the seek so
       // "Tap to play" can call play() inside the tap.
       if (el._ttPaused || Math.abs(el.currentTime - target) > 0.02) el.currentTime = target;
@@ -211,7 +212,10 @@ export const engine = {
     const el = this._el(track.stream, !plain);
     const s = this.session;
     el.muted = true;
-    const restore = () => { if (s === this.session) el.pause(); el.muted = false; };
+    // WebKit keeps the media clock running behind a pause this quick: the
+    // element reads 0s but would resume from however long ago the tap was.
+    // Marking it paused makes the first clip seek to its start.
+    const restore = () => { if (s === this.session){ el.pause(); el._ttPaused = true; } el.muted = false; };
     try { const p = el.play(); if (p) p.then(restore, restore); else restore(); } catch(e){ restore(); }
   },
   /* As-is playback (mode "plain"): reveals and Easy snippets.

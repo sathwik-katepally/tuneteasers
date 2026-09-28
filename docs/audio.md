@@ -96,6 +96,7 @@ The countdown hands over silently: when "Roll it" ends the listening screen fade
 The sound, "Now playing" and the clip bar then start together on the element's `playing` event; before this, audio started ~0.3s before the screen was visible.
 iOS Safari only lets an element start audio outside a tap once that element has been played inside one, so the hand-over tap calls `engine.prime(track, plain)`: it resumes the AudioContext and plays the upcoming track's element muted for a moment, then pauses it (session-checked so it can never pause real playback).
 The unlock belongs to the element, so the later, timer-started play is still covered.
+The prime marks the element paused, so the first clip always seeks to its start: WebKit keeps the media clock running behind a pause that quick, and an element that reads 0s would otherwise resume from however long ago the tap was (a window starting at 0s lost its first 4 seconds).
 If a browser still refuses (`play()` rejects with `NotAllowedError`), the engine logs `play-blocked`, stops the session and calls `onBlocked`; the game shows a "Tap to play" button that replays the rung inside a tap.
 `e2e/autoplay.mjs` emulates the iOS rule in Chromium and checks both paths.
 
