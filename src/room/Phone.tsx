@@ -33,6 +33,8 @@ export function Phone({ code: initial, onExit }: { code: string; onExit: () => v
   const [name, setName] = useState(lastName);
   const [joining, setJoining] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
+  // A code that came in a link is shown as fixed text; typing one is only for when it didn't work.
+  const [linked, setLinked] = useState(() => isCode(initial));
   const hello = seat ? { t: "join", key: seat.key, name: joining ?? "" } : null;
   const room = useRoom(seat ? code : "", hello);
   const view = room.view;
@@ -50,6 +52,7 @@ export function Phone({ code: initial, onExit }: { code: string; onExit: () => v
   useEffect(() => {
     if (!room.gone) return;
     setNotice(GONE[room.gone.code] ?? "Lost the room.");
+    if (room.gone.code !== 4403) setLinked(false);
     setSeat(null);
     dropSeat();
   }, [room.gone]);
@@ -77,7 +80,7 @@ export function Phone({ code: initial, onExit }: { code: string; onExit: () => v
 
   let key = "join", screen: React.ReactNode;
   if (!seat){
-    screen = <JoinForm code={code} name={name} notice={notice} onCode={v => setCode(cleanCode(v))} onName={setName} onJoin={join} onBack={() => { setRoomUrl(""); onExit(); }} />;
+    screen = <JoinForm code={code} linked={linked} onUnlink={() => setLinked(false)} name={name} notice={notice} onCode={v => setCode(cleanCode(v))} onName={setName} onJoin={join} onBack={() => { setRoomUrl(""); onExit(); }} />;
   } else if (!view || !me){
     key = "connecting";
     screen = (
@@ -106,8 +109,9 @@ export function Phone({ code: initial, onExit }: { code: string; onExit: () => v
   );
 }
 
-function JoinForm({ code, name, notice, onCode, onName, onJoin, onBack }: {
-  code: string; name: string; notice: string; onCode: (v: string) => void; onName: (v: string) => void; onJoin: (e: FormEvent) => void; onBack: () => void;
+function JoinForm({ code, linked, onUnlink, name, notice, onCode, onName, onJoin, onBack }: {
+  code: string; linked: boolean; onUnlink: () => void; name: string; notice: string;
+  onCode: (v: string) => void; onName: (v: string) => void; onJoin: (e: FormEvent) => void; onBack: () => void;
 }){
   return (
     <form className={sh.stage} onSubmit={onJoin}>
@@ -116,14 +120,22 @@ function JoinForm({ code, name, notice, onCode, onName, onJoin, onBack }: {
           <h2 className={s.joinTitle}>Take your seat</h2>
           <span className={`${s.joinMeta} nowrap`}>Buzz-in show</span>
         </div>
-        <label className={s.field}>
+        {linked ? (
+          <div className={s.field}>
+            <span className={s.label}>Room code</span>
+            <div className={s.fixedCode}>
+              <span className={s.fixedLetters} aria-label={`Room code ${code}`}>{code}</span>
+              <button type="button" className={`link ${s.change}`} onClick={onUnlink}>Change</button>
+            </div>
+          </div>
+        ) : <label className={s.field}>
           <span className={s.label}>Room code</span>
           <input className={`${s.input} ${s.codeInput}`} value={code} onChange={e => onCode(e.target.value)} placeholder="ABCD"
             autoCapitalize="characters" autoComplete="off" autoCorrect="off" spellCheck={false} inputMode="text" maxLength={4} aria-label="Room code" />
-        </label>
+        </label>}
         <label className={s.field}>
           <span className={s.label}>Your name</span>
-          <input className={s.input} value={name} onChange={e => onName(e.target.value)} placeholder="Name" maxLength={NAME_MAX}
+          <input className={s.input} value={name} onChange={e => onName(e.target.value)} placeholder="Name" maxLength={NAME_MAX} autoFocus={linked}
             autoComplete="nickname" enterKeyHint="go" aria-label="Your name" />
         </label>
         <p className={s.hint}>The big screen plays the songs. Your phone is your buzzer.</p>

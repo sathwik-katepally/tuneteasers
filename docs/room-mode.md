@@ -5,8 +5,8 @@ One screen (a laptop, a TV, or one phone) is the host: it plays every song and s
 Everyone else joins on their own phone, which becomes a buzzer and an answer pad.
 It is the Kahoot or Jackbox model: no accounts, a four-letter code, and nothing kept after the party.
 
-Example: the host picks "Buzz in" on the home screen and taps "Open a room"; the big screen shows `KFHB` and a QR code.
-Asha scans it, types her name and sees "You're in".
+Example: the host taps "Buzz in from every phone" on the landing (or picks "Buzz in" on setup) and taps "Open a room"; the big screen shows `KFHB` and a QR code.
+Asha scans it; her phone shows the code as fixed text with her name field focused, she types her name and sees "You're in".
 When the clip starts her phone lights up BUZZ; she taps it, the song pauses on the big screen, and she has 15 seconds to type the title.
 Autocomplete offers every known title in the show's languages; if she is right she scores the rung's points, if not the next person who buzzed gets a turn.
 
@@ -14,6 +14,7 @@ Autocomplete offers every known title in the show's languages; if she is right s
 
 - The host screen (`src/room/Host.tsx`) builds the crate (honouring the home screen's languages, eras, difficulty and song categories), plays audio through the engine, runs the clip ladder, the reveal, the box office and the podium, and tells the room what is playing.
   It reuses the pass-the-phone screens: `Countdown`, `Reveal`, `Scoreboard`, `Podium`, `Loading`, plus `Lobby` and `HostPlaying` in `src/room/`.
+  From 900px wide the host screen is laid out for a laptop or TV: the lobby spreads over the whole stage with code tiles and a QR sized from the screen (up to 260px), and during the show a small join tag (QR and code) stays in the corner, since latecomers can still take a seat.
 - The room (`worker/src/room.js`) is one Durable Object per room code, built on PartyServer with WebSocket hibernation.
   It is the referee: it orders buzzes as they arrive, runs the answer clock, judges answers and holds the scores.
 - A phone (`src/room/Phone.tsx`) only joins, buzzes and types. It never plays audio.

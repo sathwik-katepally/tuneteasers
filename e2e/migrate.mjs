@@ -2,7 +2,7 @@
    upgrade: it is offered for resume, scores are rescaled, and a turn plays on
    top of it. Garbage in the old key must not crash the app.
    node e2e/migrate.mjs [--profile=phone|desktop] */
-import { serve, open, args, saved } from "./harness.mjs";
+import { serve, open, args, saved, moreSettings } from "./harness.mjs";
 import { displayTitle } from "../src/lib/utils.js";
 
 const A = args({ profile: "phone" });
@@ -32,6 +32,8 @@ try {
   await page.goto(server.url);
   await page.getByText("Show in progress").waitFor();
   const line = await page.getByText(/Round 2 of \d+, Rahul is up next/).textContent();
+  await page.getByRole("button", { name: /Start a new show instead/ }).click();
+  await moreSettings(page);
   for (const n of ["Priya", "Rahul", "Anu"]) await page.getByRole("button", { name: `Rename ${n}` }).waitFor();
   if (await page.getByRole("radio", { name: "Easy" }).getAttribute("aria-checked") !== "true") fail("old With-vocals setting did not map to Easy");
   if (await page.getByRole("radio", { name: "Hindi" }).getAttribute("aria-checked") !== "true") fail("mix lost");

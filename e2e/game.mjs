@@ -9,7 +9,7 @@
    stream to check the stream-error skip stays free and records nothing. */
 import fs from "node:fs";
 import path from "node:path";
-import { serve, open, args, saved } from "./harness.mjs";
+import { serve, open, args, saved, moreSettings } from "./harness.mjs";
 import { displayTitle, songKey } from "../src/lib/utils.js";
 import { CATEGORIES, SKIPS_PER_PLAYER, SPEED_BONUS_FADE_SECS, SPEED_BONUS_MAX } from "../src/lib/config.ts";
 
@@ -46,6 +46,7 @@ try {
   await page.goto(url);
   await page.getByRole("radio", { name: A.mode === "teams" ? "Teams" : "Solo" }).click();
   await page.getByRole("radio", { name: { bolly: "Hindi", telugu: "Telugu", both: "Both" }[A.mix], exact: true }).click();
+  await moreSettings(page);
   await page.getByRole("radio", { name: A.difficulty, exact: false }).click();
   await page.getByRole("radio", { name: A.rounds, exact: true }).click();
   const categories = A.categories ? A.categories.split(",") : [];

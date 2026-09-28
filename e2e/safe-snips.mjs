@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import { serve, open, saved } from "./harness.mjs";
+import { serve, open, saved, moreSettings } from "./harness.mjs";
 import { ladderFor } from "../src/lib/config.ts";
 import { SNIP_INDEX_V, SNIP_METHOD, SNIP_WINDOW_SEC } from "../src/lib/constants.js";
 
@@ -13,6 +13,7 @@ async function setup(page, difficulty){
   await page.goto(server.url + "seed.html");
   await page.evaluate(() => localStorage.clear());
   await page.goto(server.url);
+  await moreSettings(page);
   await page.getByRole("radio", { name:difficulty, exact:false }).click();
   await page.getByRole("radio", { name:"3", exact:true }).click();
   await page.getByRole("button", { name:/Start (the|a new) show/ }).click();

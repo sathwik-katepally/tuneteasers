@@ -70,7 +70,7 @@ export function PastGames({ group, onBack }: { group: Group; onBack: () => void 
       </div>
       <div className={sh.actions}>
         <p className={`${s.foot} ${sh.muted}`}>Shows are kept for a year.</p>
-        <button type="button" className="btn btn-cream btn-block" onClick={onBack}>Back to the booking counter</button>
+        <button type="button" className="btn btn-cream btn-block" onClick={onBack}>Back</button>
       </div>
     </div>
   );

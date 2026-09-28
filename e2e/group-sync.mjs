@@ -12,7 +12,7 @@
    node e2e/group-sync.mjs [--worker=https://...] [--shots=dir] */
 import fs from "node:fs";
 import path from "node:path";
-import { serve, open, args, saved, localWorker } from "./harness.mjs";
+import { serve, open, args, saved, localWorker, moreSettings } from "./harness.mjs";
 import { songKey } from "../src/lib/utils.js";
 
 const A = args({});
@@ -53,8 +53,16 @@ async function api(invite, p){
   return r.json();
 }
 
+/* Groups live behind the home screen's menu. */
+async function groupScreen(page){
+  await page.getByRole("button", { name: "Menu" }).click();
+  await page.getByRole("button", { name: "Phone group" }).click();
+}
+const home = page => page.getByRole("button", { name: "Back", exact: true }).click();
+
 async function setupShow(page){
   await page.getByRole("radio", { name: "Solo" }).click();
+  await moreSettings(page);
   await page.getByRole("radio", { name: "Easy", exact: true }).click();
   await page.getByRole("radio", { name: "3", exact: true }).click();
   while (await page.getByRole("button", { name: /^Remove / }).count()) await page.getByRole("button", { name: /^Remove / }).first().click();
@@ -128,6 +136,8 @@ try {
     localStorage.setItem("tt_tired", JSON.stringify({ [t]: Date.now() - 10 * 86400e3 }));
   }, [importKey, tiredImportKey]);
   await desktop.page.goto(url);
+  if (await desktop.page.getByText("More than one phone?").count()) fail("group card on the home screen");
+  await groupScreen(desktop.page);
   await desktop.page.getByText("More than one phone?").waitFor();
   await shot(desktop, "desktop-01-no-group");
   await desktop.page.getByRole("button", { name: "Make a group" }).click();
@@ -151,6 +161,7 @@ try {
   if (!imported.tired[tiredImportKey] || imported.tired[importKey]) fail("local tired history was not imported as tired");
   await desktop.page.getByRole("button", { name: "Done" }).click();
   await desktop.page.getByText("Friday night crew").waitFor();
+  await home(desktop.page);
 
   // Phone: opens the shared link.
   await phone.page.goto(url + "seed.html");
@@ -169,6 +180,7 @@ try {
   if ((await phone.page.getByLabel("Invite link").inputValue()) !== link) fail("phone shares a different invite link");
   await shot(phone, "phone-02b-invite");
   await phone.page.getByRole("button", { name: "Done" }).click();
+  await home(phone.page);
   const phoneGroup = JSON.parse(await phone.page.evaluate(() => localStorage.getItem("tt_group")));
   if (phoneGroup.owner) fail("joining phone got the owner secret");
 
@@ -187,6 +199,7 @@ try {
   const desktopScore = (await saved(desktop.page)).game.cast[0];
 
   // Phone: Past shows lists the desktop's show.
+  await groupScreen(phone.page);
   await phone.page.getByRole("button", { name: "Past shows" }).click();
   await phone.page.getByRole("heading", { name: "Past shows" }).waitFor();
   const row = phone.page.locator("li", { hasText: desktopScore.name }).first();
@@ -195,7 +208,9 @@ try {
   if (!rowText.includes(String(desktopScore.score))) fail(`past show row "${rowText}" lacks score ${desktopScore.score}`);
   if (!/Solo · Easy · Hindi \+ Telugu · 3 rounds/.test(await phone.page.locator("body").innerText())) fail("past show settings line wrong");
   await shot(phone, "phone-03-past-shows");
-  await phone.page.getByRole("button", { name: "Back to the booking counter" }).click();
+  await home(phone.page);
+  await phone.page.getByRole("heading", { name: "Past shows" }).waitFor({ state: "detached" });
+  await home(phone.page);
 
   // Phone: its next crate left out every song the desktop played.
   await setupShow(phone.page);
@@ -241,6 +256,7 @@ try {
   if ((await pendingCount(phone.page)) < offlinePlayed.length) fail("offline plays were not queued");
   await phone.page.getByRole("button", { name: "Game menu" }).click();
   await phone.page.getByRole("button", { name: "Home, keep the game" }).click();
+  await groupScreen(phone.page);
   await phone.page.getByText(/waiting to sync/).waitFor();
   await shot(phone, "phone-04-offline-pending");
   await wire(phone, "phone");
@@ -254,6 +270,7 @@ try {
   await desktop.page.getByRole("button", { name: "Game menu" }).click();
   await desktop.page.getByRole("button", { name: "End game" }).click();
   await desktop.page.getByRole("button", { name: "End it" }).click();
+  await groupScreen(desktop.page);
   await desktop.page.getByRole("button", { name: "Leave this group" }).click();
   await desktop.page.getByRole("button", { name: "Delete the group for every phone" }).click();
   await shot(desktop, "desktop-04-delete-confirm");
@@ -263,7 +280,7 @@ try {
   if (gone.status !== 403) fail(`deleted group answered ${gone.status}`);
   await phone.page.getByRole("button", { name: "Past shows" }).click();
   await phone.page.getByRole("alert").waitFor();
-  await phone.page.getByRole("button", { name: "Back to the booking counter" }).click();
+  await home(phone.page);
 
   const errors = [...phone.errors, ...desktop.errors];
   if (errors.length) fail("page errors: " + errors.join(" | "));

@@ -64,8 +64,9 @@ Deletion runs from group writes, at most hourly per Worker isolate, because this
   Every crate asks again: only a failure of this call's own flush skips the read, never an "offline" left over from an earlier one.
   The `crate` log line reports how many songs were in the cooldown map as `cooldown`.
 - `tt_played` and `tt_tired` stay the phone's own history; the group's is merged at crate time only.
-- UI: `src/components/GroupPanel.tsx` on the home screen (make, join, invite with QR, leave, owner delete) and `src/screens/PastGames.tsx` (`screen: "past"`).
-  A `#join=` link shows the invite card at the top of the home screen.
+- UI: `src/components/GroupPanel.tsx` (make, join, invite with QR, leave, owner delete) on its own screen (`src/screens/GroupScreen.tsx`, `screen: "group"`), reached only from "Phone group" in the home menu, and `src/screens/PastGames.tsx` (`screen: "past"`).
+  Groups are never prompted: no home-screen card and no offer after a show; no-repeat within one phone needs no setup at all.
+  A `#join=` link opens the group screen with the invite card.
 
 ## Environments
 

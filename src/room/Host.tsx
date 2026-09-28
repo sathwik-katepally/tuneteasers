@@ -16,7 +16,7 @@ import { Loading } from "../screens/Loading";
 import { Reveal } from "../screens/Reveal";
 import { Scoreboard } from "../screens/Scoreboard";
 import { Podium } from "../screens/Podium";
-import { Lobby, RoomTrouble } from "./Lobby";
+import { JoinTag, Lobby, RoomTrouble } from "./Lobby";
 import { HostPlaying, type Audio } from "./HostPlaying";
 import type { Category, Difficulty, GameState, Settings, Track, Verdict } from "../types";
 
@@ -395,8 +395,11 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
       );
   }
   const inShow = !!show?.started && phase !== "lobby" && phase !== "failed" && phase !== "opening";
+  // Latecomers can still take a seat, so the code and QR stay up beside the show on a big screen.
+  const tag = code && inShow && phase !== "done" ? <JoinTag code={code} /> : null;
   return (
-    <Stage screenKey={key} meta={meta} game={inShow ? game : null} onHome={() => { engine.stop(); onExit(true); }} onEnd={endShow}>
+    <Stage screenKey={key} meta={meta} game={inShow ? game : null} onHome={() => { engine.stop(); onExit(true); }} onEnd={endShow}
+      wide={phase === "lobby"} aside={tag}>
       {screen}
     </Stage>
   );

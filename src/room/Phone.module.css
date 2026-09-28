@@ -135,6 +135,26 @@
   padding: 10px 12px 6px calc(12px + 0.3em);
 }
 
+.fixedCode {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.fixedLetters {
+  composes: display from global;
+  font-size: 40px;
+  line-height: 1;
+  padding-top: 6px;
+  letter-spacing: 0.3em;
+  color: var(--vermilion);
+}
+
+.change {
+  color: var(--teal);
+}
+
 .codeInput::placeholder {
   color: var(--cream-shade);
 }

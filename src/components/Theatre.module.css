@@ -262,6 +262,29 @@
   padding: 0 12px;
 }
 
+.homeMenu {
+  width: min(240px, calc(100vw - 32px));
+  padding: 6px 14px;
+}
+
+.menuItem {
+  display: block;
+  width: 100%;
+  padding: 12px 0;
+  text-align: left;
+  font-weight: 700;
+  font-size: 16px;
+  color: var(--ink);
+}
+
+.menuItem + .menuItem {
+  border-top: 1px dashed var(--cream-shade);
+}
+
+.aside {
+  display: none;
+}
+
 .endLink {
   composes: link from global;
   color: var(--vermilion);
@@ -300,9 +323,27 @@
   }
 }
 
-/* Next to the About button a narrow marquee only has room for the title. */
+@media (min-width: 900px) {
+  .wide .stage {
+    width: min(1180px, calc(100vw - 96px));
+  }
+  .aside {
+    display: block;
+    position: fixed;
+    right: 24px;
+    bottom: 24px;
+    z-index: 4;
+  }
+}
+
+.homeMenuBtn {
+  position: relative;
+}
+
+/* Next to the About button or the home menu a narrow marquee only has room for the title. */
 @media (max-width: 419px) {
-  .marqueeInner:has(.aboutBtn) .marqueeMeta {
+  .marqueeInner:has(.aboutBtn) .marqueeMeta,
+  .marqueeInner:has(.homeMenuBtn) .marqueeMeta {
     visibility: hidden;
   }
 }

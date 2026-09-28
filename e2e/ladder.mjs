@@ -12,7 +12,7 @@
    node e2e/ladder.mjs --profile=phone|desktop --difficulty=easy|medium [--mix=both] [--log] [--shots=<dir>] */
 import fs from "node:fs";
 import path from "node:path";
-import { serve, open, args, saved } from "./harness.mjs";
+import { serve, open, args, saved, moreSettings } from "./harness.mjs";
 import { ladderFor } from "../src/lib/config.ts";
 import { SNIP_WINDOW_SEC } from "../src/lib/constants.js";
 
@@ -77,6 +77,7 @@ try {
   await page.goto(server.url);
   const mix = { bolly: "Hindi", telugu: "Telugu", both: "Both" }[A.mix];
   await page.getByRole("radio", { name: mix, exact: true }).click();
+  await moreSettings(page);
   await page.getByRole("radio", { name: A.difficulty, exact: false }).click();
   await page.getByRole("radio", { name: "3", exact: true }).click();
   await btn(/Start the show/).click();
