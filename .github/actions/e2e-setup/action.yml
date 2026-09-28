@@ -1,6 +1,9 @@
 name: E2E setup
-description: Node deps, a production build, the Playwright browsers for this runner, and optionally the Worker's deps for wrangler dev.
+description: Node deps, a production build, the Playwright browsers the job needs, and optionally the Worker's deps for wrangler dev.
 inputs:
+  browsers:
+    description: Playwright browsers to install (space separated).
+    default: webkit chromium
   worker:
     description: Also install worker/ dependencies (suites that start wrangler dev).
     default: "false"
@@ -22,18 +25,15 @@ runs:
       shell: bash
     - run: npm run build
       shell: bash
-    # Linux jobs drive the runner's Google Chrome (see CHROMIUM_CHANNEL in
-    # e2e/harness.mjs) and need no download. macOS jobs run Playwright's
-    # WebKit and Chromium, which play the AAC streams there.
-    - if: runner.os == 'macOS'
-      id: pw
-      run: echo "version=$(node -p 'require("playwright/package.json").version')" >> "$GITHUB_OUTPUT"
+    - id: pw
+      run: |
+        echo "version=$(node -p 'require("playwright/package.json").version')" >> "$GITHUB_OUTPUT"
+        echo "dir=${{ runner.os == 'macOS' && '~/Library/Caches/ms-playwright' || '~/.cache/ms-playwright' }}" >> "$GITHUB_OUTPUT"
       shell: bash
-    - if: runner.os == 'macOS'
-      uses: actions/cache@v6
+    - uses: actions/cache@v6
       with:
-        path: ~/Library/Caches/ms-playwright
-        key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.pw.outputs.version }}
-    - if: runner.os == 'macOS'
-      run: npx playwright install webkit chromium
+        path: ${{ steps.pw.outputs.dir }}
+        key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.pw.outputs.version }}-${{ inputs.browsers }}
+    # --with-deps adds the Linux system libraries; macOS needs none.
+    - run: npx playwright install ${{ runner.os == 'Linux' && '--with-deps' || '' }} ${{ inputs.browsers }}
       shell: bash

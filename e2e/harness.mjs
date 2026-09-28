@@ -109,16 +109,9 @@ export function skipLanding(){
   try { localStorage.setItem("tt_landing_seen", "1"); } catch {}
 }
 
-/* The songs are AAC in mp4. Playwright's own Chromium build has no
-   proprietary codecs on Linux, so there the desktop profile drives Google
-   Chrome (preinstalled on GitHub's runners) instead; E2E_CHROMIUM_CHANNEL
-   overrides the choice. */
-export const CHROMIUM_CHANNEL = process.env.E2E_CHROMIUM_CHANNEL || (process.platform === "linux" ? "chrome" : undefined);
-export const DESKTOP_LAUNCH = { channel: CHROMIUM_CHANNEL, args: ["--autoplay-policy=no-user-gesture-required", ...MUTE_ARGS] };
-
 export const PROFILES = {
   phone: { type: webkit, context: { ...devices["iPhone 13"] } },
-  desktop: { type: chromium, launch: DESKTOP_LAUNCH, context: { viewport: { width: 1440, height: 900 } } },
+  desktop: { type: chromium, launch: { args: ["--autoplay-policy=no-user-gesture-required", ...MUTE_ARGS] }, context: { viewport: { width: 1440, height: 900 } } },
 };
 
 export async function open(profile, { reducedMotion = false, landing = false } = {}){

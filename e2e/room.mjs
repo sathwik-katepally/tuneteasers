@@ -21,7 +21,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { chromium, webkit, devices } from "playwright";
-import { serve, args, localWorker, silence, skipLanding, moreSettings, wireWorker, DESKTOP_LAUNCH } from "./harness.mjs";
+import { serve, args, localWorker, silence, skipLanding, moreSettings, wireWorker, MUTE_ARGS } from "./harness.mjs";
 import { displayTitle } from "../src/lib/utils.js";
 import { CATEGORIES, DIFFICULTY, ROOM_ANSWER_SECS, ladderFor } from "../src/lib/config.ts";
 import { songKey } from "../src/lib/utils.js";
@@ -54,7 +54,7 @@ const hostOnPhone = A.host === "phone";
 async function device(kind, label){
   const desk = kind === "host" && !hostOnPhone;
   const browser = desk
-    ? await chromium.launch(DESKTOP_LAUNCH)
+    ? await chromium.launch({ args: ["--autoplay-policy=no-user-gesture-required", ...MUTE_ARGS] })
     : await (A["phone-engine"] === "chromium" ? chromium : webkit).launch();
   const context = await browser.newContext(desk
     ? { viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" }

@@ -18,7 +18,7 @@
    node e2e/room-norepeat.mjs [--worker=https://...] */
 import fs from "node:fs";
 import { chromium, webkit, devices } from "playwright";
-import { serve, args, localWorker, silence, skipLanding, moreSettings, wireWorker, DESKTOP_LAUNCH } from "./harness.mjs";
+import { serve, args, localWorker, silence, skipLanding, moreSettings, wireWorker, MUTE_ARGS } from "./harness.mjs";
 import { displayTitle, songKey, shuffle } from "../src/lib/utils.js";
 import { ROOM_HEARD } from "../src/lib/constants.js";
 
@@ -37,7 +37,7 @@ const heard = {};   // label -> last merged history the room sent (host only)
 
 async function device(kind, label){
   const desk = kind === "host";
-  const browser = desk ? await chromium.launch(DESKTOP_LAUNCH) : await webkit.launch();
+  const browser = desk ? await chromium.launch({ args: ["--autoplay-policy=no-user-gesture-required", ...MUTE_ARGS] }) : await webkit.launch();
   const context = await browser.newContext(desk ? { viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" } : { ...devices["iPhone 13"], reducedMotion: "reduce" });
   await wireWorker(context, worker.origin, origin, traffic[label] ||= [], {
     onIn: m => { if (m.t === "state") latest[label] = m; else if (m.t === "heard") heard[label] = m.songs; },
