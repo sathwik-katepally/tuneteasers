@@ -3,15 +3,16 @@
    ("<groupId>.<secret>") and only its SHA-256 is stored. The creating phone
    also gets an owner secret, the only thing that can delete the group.
    Never stores audio or stream URLs: song keys, timestamps, names, scores. */
+import { peopleHistory, peopleIds, personPlayStatements, playKind, purgePeopleStatements } from "./people.js";
 
-const TOKEN_RX = /^([a-z2-7]{12})\.([A-Za-z0-9_-]{22})$/;
-const EVENT_ID_RX = /^[A-Za-z0-9_-]{8,40}$/;
+export const TOKEN_RX = /^([a-z2-7]{12})\.([A-Za-z0-9_-]{22})$/;
+export const EVENT_ID_RX = /^[A-Za-z0-9_-]{8,40}$/;
 // songKey() output: lowercase letters and digits, single spaces, trimmed.
-const SONG_KEY_RX = /^[\p{L}\p{N}]+( [\p{L}\p{N}]+)*$/u;
+export const SONG_KEY_RX = /^[\p{L}\p{N}]+( [\p{L}\p{N}]+)*$/u;
 const LOCAL_ORIGIN_RX = /^http:\/\/(localhost|127\.0\.0\.1)(:\d{1,5})?$/;
 const CONTROL_RX = /[\u0000-\u001f\u007f]/g;
 
-const LIMITS = {
+export const LIMITS = {
   body: 16 * 1024,
   importBody: 64 * 1024,
   groupName: 32,
@@ -27,39 +28,41 @@ const LIMITS = {
   pageSize: 50,
   // A result queued offline keeps its own finish time, within reason.
   resultBackdateDays: 30,
+  // Tickets named on one request (a roster, a room's seats).
+  people: 16,
 };
 
-const DAY = 86400e3;
+export const DAY = 86400e3;
 const B32 = "abcdefghijklmnopqrstuvwxyz234567";
 
-class HttpError extends Error {
+export class HttpError extends Error {
   constructor(status, message){ super(message); this.status = status; }
 }
 
-const days = (v, fallback) => (Number(v) > 0 ? Number(v) : fallback) * DAY;
-const ttl = env => ({
+export const days = (v, fallback) => (Number(v) > 0 ? Number(v) : fallback) * DAY;
+export const ttl = env => ({
   results: days(env.RESULT_TTL_DAYS, 365),
   played: days(env.PLAYED_TTL_DAYS, 30),
   idle: days(env.GROUP_IDLE_TTL_DAYS, 365),
 });
 
-function randomBase32(n){
+export function randomBase32(n){
   const bytes = crypto.getRandomValues(new Uint8Array(n));
   return Array.from(bytes, b => B32[b & 31]).join("");
 }
 
-function randomSecret(){
+export function randomSecret(){
   const bytes = crypto.getRandomValues(new Uint8Array(16));
   return btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-async function sha256(s){
+export async function sha256(s){
   return new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s)));
 }
-const toHex = bytes => Array.from(bytes, b => b.toString(16).padStart(2, "0")).join("");
-const fromHex = hex => new Uint8Array((hex.match(/../g) || []).map(h => parseInt(h, 16)));
+export const toHex = bytes => Array.from(bytes, b => b.toString(16).padStart(2, "0")).join("");
+export const fromHex = hex => new Uint8Array((hex.match(/../g) || []).map(h => parseInt(h, 16)));
 
-function sameHash(a, hex){
+export function sameHash(a, hex){
   const b = fromHex(hex);
   return a.byteLength === b.byteLength && crypto.subtle.timingSafeEqual(a, b);
 }
@@ -71,7 +74,7 @@ export function allowedOrigin(origin, env){
   return list.includes(origin) ? origin : null;
 }
 
-function reply(body, status, origin){
+export function reply(body, status, origin){
   const headers = {
     "cache-control": "no-store",
     vary: "Origin",
@@ -81,7 +84,7 @@ function reply(body, status, origin){
   return new Response(body === null ? null : JSON.stringify(body), { status, headers });
 }
 
-async function readJson(request, max){
+export async function readJson(request, max){
   if (Number(request.headers.get("content-length") || 0) > max) throw new HttpError(413, "request body is too large");
   const text = await request.text();
   if (text.length > max) throw new HttpError(413, "request body is too large");
@@ -91,7 +94,7 @@ async function readJson(request, max){
   return v;
 }
 
-function cleanText(v, max, what){
+export function cleanText(v, max, what){
   if (typeof v !== "string") throw new HttpError(400, `${what} must be text`);
   const t = v.replace(CONTROL_RX, "").trim();
   if (!t) throw new HttpError(400, `${what} is required`);
@@ -99,31 +102,39 @@ function cleanText(v, max, what){
   return t;
 }
 
-function int(v, lo, hi, what){
+export function int(v, lo, hi, what){
   if (!Number.isInteger(v) || v < lo || v > hi) throw new HttpError(400, `${what} must be a whole number from ${lo} to ${hi}`);
   return v;
 }
 
-function oneOf(v, options, what){
+export function oneOf(v, options, what){
   if (!options.includes(v)) throw new HttpError(400, `${what} must be one of ${options.join(", ")}`);
   return v;
 }
 
-function songKey(v){
+export function songKey(v){
   if (typeof v !== "string" || v.length > LIMITS.songKey || !SONG_KEY_RX.test(v)) throw new HttpError(400, "song key is not valid");
   return v;
 }
 
-async function limited(limiter, key){
+export async function limited(limiter, key){
   if (!limiter) return false;
   const { success } = await limiter.limit({ key });
   return !success;
 }
 
-async function authenticate(request, env){
+export function bearer(request, what){
   const m = /^Bearer (\S+)$/.exec(request.headers.get("authorization") || "");
-  if (!m) throw new HttpError(401, "an invite is required");
-  const t = TOKEN_RX.exec(m[1]);
+  if (!m) throw new HttpError(401, `${what} is required`);
+  return m[1];
+}
+
+async function authenticate(request, env){
+  return authenticateInvite(bearer(request, "an invite"), env);
+}
+
+export async function authenticateInvite(invite, env){
+  const t = TOKEN_RX.exec(String(invite || ""));
   if (!t) throw new HttpError(401, "the invite is malformed");
   const [, id, secret] = t;
   const [row, hash] = await Promise.all([
@@ -150,11 +161,32 @@ async function createGroup(request, env){
   return [{ group: { id, name, createdAt: now }, role: "owner", invite: `${id}.${secret}`, owner: `${id}.${ownerSecret}` }, 201];
 }
 
-async function played(env, auth){
+/* The group's cooldown, plus the histories of the group members named in
+   ?people= (ticket ids, not secrets) so a phone can leave out what the people
+   in the room have heard. Ids outside this group are ignored, never served. */
+async function played(env, auth, url){
   const since = Date.now() - ttl(env).played;
-  const { results } = await env.DB.prepare("SELECT song_key, last_played_at FROM played WHERE group_id = ? AND last_played_at > ?")
-    .bind(auth.group.id, since).all();
-  return [{ played: Object.fromEntries(results.map(r => [r.song_key, r.last_played_at])) }];
+  const wanted = String(url.searchParams.get("people") || "").split(",").filter(Boolean).slice(0, LIMITS.people);
+  const [{ results }, members] = await Promise.all([
+    env.DB.prepare("SELECT song_key, last_played_at FROM played WHERE group_id = ? AND last_played_at > ?").bind(auth.group.id, since).all(),
+    wanted.length ? groupMembers(env, auth.group.id, wanted) : [],
+  ]);
+  const people = members.length ? await peopleHistory(env, members, since) : {};
+  return [{ played: Object.fromEntries(results.map(r => [r.song_key, r.last_played_at])), tired: {}, people }];
+}
+
+async function groupMembers(env, gid, ids){
+  const { results } = await env.DB.prepare(
+    `SELECT person_id FROM group_people WHERE group_id = ?1 AND person_id IN (SELECT value FROM json_each(?2))`,
+  ).bind(gid, JSON.stringify(ids)).all();
+  return results.map(r => r.person_id);
+}
+
+async function groupPeople(env, auth){
+  const { results } = await env.DB.prepare(
+    `SELECT p.id, p.name FROM group_people gp JOIN people p ON p.id = gp.person_id WHERE gp.group_id = ? ORDER BY gp.joined_at`,
+  ).bind(auth.group.id).all();
+  return [{ people: results.map(r => ({ id: r.id, name: r.name })) }];
 }
 
 async function results(env, auth, url){
@@ -182,12 +214,18 @@ async function postRounds(request, env, auth){
     throw new HttpError(400, `rounds must be a list of 1 to ${LIMITS.roundBatch} songs`);
   const rounds = body.rounds.map(r => {
     if (!r || typeof r.id !== "string" || !EVENT_ID_RX.test(r.id)) throw new HttpError(400, "round id is not valid");
-    return { id: r.id, key: songKey(r.key) };
+    return { id: r.id, key: songKey(r.key), kind: playKind(r.kind), people: peopleIds(r.people) };
   });
-  const json = JSON.stringify(rounds);
+  const json = JSON.stringify(rounds.map(r => ({ id: r.id, key: r.key })));
   const now = Date.now();
   const gid = auth.group.id;
+  // Plays for the group's people: any phone in the group may record them,
+  // but only for tickets that joined this group.
+  const named = [...new Set(rounds.flatMap(r => r.people))];
+  const members = new Set(named.length ? await groupMembers(env, gid, named) : []);
+  const personRounds = rounds.filter(r => r.people.some(p => members.has(p))).map(r => ({ ...r, people: r.people.filter(p => members.has(p)) }));
   await env.DB.batch([
+    ...personPlayStatements(env, personRounds, now),
     env.DB.prepare(
       `INSERT OR IGNORE INTO round_events (group_id, event_id, song_key, played_at)
        SELECT ?1, json_extract(value, '$.id'), json_extract(value, '$.key'), ?3 FROM json_each(?2)`,
@@ -273,7 +311,7 @@ async function postImport(request, env, auth){
 async function deleteGroup(env, auth){
   if (auth.role !== "owner") throw new HttpError(403, "only the phone that made the group can delete it");
   const gid = auth.group.id;
-  await env.DB.batch(["round_events", "played", "results"].map(t => env.DB.prepare(`DELETE FROM ${t} WHERE group_id = ?`).bind(gid))
+  await env.DB.batch(["round_events", "played", "results", "group_people"].map(t => env.DB.prepare(`DELETE FROM ${t} WHERE group_id = ?`).bind(gid))
     .concat(env.DB.prepare("DELETE FROM groups WHERE id = ?").bind(gid)));
   return [null, 204];
 }
@@ -281,7 +319,8 @@ async function deleteGroup(env, auth){
 const ROUTES = {
   "GET /api/group": (req, env, auth) => [auth],
   "DELETE /api/group": (req, env, auth) => deleteGroup(env, auth),
-  "GET /api/group/played": (req, env, auth) => played(env, auth),
+  "GET /api/group/played": (req, env, auth, url) => played(env, auth, url),
+  "GET /api/group/people": (req, env, auth) => groupPeople(env, auth),
   "GET /api/group/results": (req, env, auth, url) => results(env, auth, url),
   "POST /api/group/rounds": (req, env, auth) => postRounds(req, env, auth),
   "POST /api/group/results": (req, env, auth) => postResult(req, env, auth),
@@ -334,7 +373,7 @@ export async function group(request, env, url, ctx){
    windows, so an expired row is never served even before it is deleted. */
 const SWEEP_EVERY_MS = 3600e3;
 let lastSweep = 0;
-function sweep(env){
+export function sweep(env){
   if (Date.now() - lastSweep < SWEEP_EVERY_MS) return Promise.resolve();
   lastSweep = Date.now();
   return purgeExpired(env).catch(e => console.error("retention sweep failed", String(e?.message || e)));
@@ -348,5 +387,6 @@ async function purgeExpired(env){
     env.DB.prepare("DELETE FROM round_events WHERE played_at < ?").bind(now - t.played),
     env.DB.prepare("DELETE FROM played WHERE last_played_at < ?").bind(now - t.played),
     env.DB.prepare("DELETE FROM groups WHERE active_at < ?").bind(now - t.idle),
+    ...purgePeopleStatements(env, now, t),
   ]);
 }

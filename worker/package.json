@@ -8,6 +8,7 @@
     "deploy": "wrangler deploy"
   },
   "dependencies": {
+    "@simplewebauthn/server": "^14.0.3",
     "node-forge": "^1.4.0",
     "partyserver": "^0.5.10"
   },

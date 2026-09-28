@@ -5,9 +5,15 @@
    scores. It learns each song's title from the host and never sends it to a
    phone before the reveal; it never sees a stream URL at all.
    Everything lives in this object's storage and is wiped when the room has
-   been idle for ROOM_TTL_MS. Nothing is written to D1. */
+   been idle for ROOM_TTL_MS. The one thing that reaches D1 is a seated
+   ticket's song history (docs/tickets.md): a phone that joins with a ticket
+   has its key checked against D1 here and the person id kept on the seat, and
+   the Worker asks this object for the seated ids (`seated`) when the host
+   reads their histories or records a song for them. Nothing else about the
+   room (code, names, scores, buzzes) ever leaves this object. */
 import { Server } from "partyserver";
 import { isCorrect } from "../../src/lib/answer.js";
+import { ticketHolder } from "./tickets.js";
 
 export const CODE_ALPHABET = "BCDFGHJKLMNPQRSTVWXZ";
 export const CODE_RX = /^[BCDFGHJKLMNPQRSTVWXZ]{4}$/;
@@ -97,6 +103,14 @@ export class Room extends Server {
     };
     await this.save();
     return true;
+  }
+
+  /* For the Worker's host routes: the ticket ids of everyone seated, once the
+     caller proves it is the host. */
+  async seated(hostHash){
+    const r = this.room !== undefined ? this.room : (await this.ctx.storage.get("room")) || null;
+    if (!r || r.touchedAt <= Date.now() - ROOM_TTL_MS || r.hostHash !== hostHash) return null;
+    return r.players.map(p => p.personId).filter(Boolean);
   }
 
   async save(){
@@ -209,8 +223,15 @@ export class Room extends Server {
       if (r.players.length >= LIMITS.players) return this.fail(conn, "full");
       p = { id: randomToken(6), keyHash, name, score: 0 };
       r.players.push(p);
-      await this.save();
     }
+    // A ticket brought to the seat: its key is checked against D1 and only
+    // the person id stays on the seat. An invalid or unreachable one is a
+    // seat without a ticket, never a refused join.
+    if (m.ticket !== undefined){
+      const person = typeof m.ticket === "string" && m.ticket.length <= 64 ? await ticketHolder(this.env, m.ticket).catch(() => null) : null;
+      p.personId = person ? person.id : undefined;
+    }
+    await this.save();
     conn.setState({ role: "player", seat: p.id });
     conn.send(JSON.stringify({ t: "welcome", role: "player", code: r.code, seat: p.id, name: p.name }));
     this.broadcastState();
@@ -235,7 +256,7 @@ export class Room extends Server {
       total: r.total,
       perRound: r.perRound,
       answerSecs: r.rules.answerSecs,
-      players: r.players.map(p => ({ id: p.id, name: p.name, score: p.score, online: on.has(p.id) })),
+      players: r.players.map(p => ({ id: p.id, name: p.name, score: p.score, online: on.has(p.id), ticket: !!p.personId })),
       results: r.results,
       seq: r.seq,
       song: s && {
