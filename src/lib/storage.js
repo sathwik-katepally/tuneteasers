@@ -7,7 +7,7 @@ import { COOLDOWN_DAYS } from "./config";
 
 const LS_PLAYED = "tt_played";   // { titleKey: lastPlayedMs }, songs heard through to the reveal
 const LS_TIRED = "tt_tired";     // { titleKey: lastSkippedMs }, songs skipped as heard too much
-const LS_BLOCKED = "tt_blocked"; // [ artistName ] — device-local "never play this artist" list
+const LS_BLOCKED = "tt_blocked"; // [ artistName ], device-local "never play this artist" list
 const lsGet = k => { try { return JSON.parse(localStorage.getItem(k)); } catch(e){ return null; } };
 const lsSet = (k,v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch(e){} };
 

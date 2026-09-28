@@ -42,6 +42,20 @@ Autocomplete offers every known title in the show's languages; if she is right s
 5. When a clip ends with nobody buzzing, buzzing stays open for `ROOM_GRACE_SECS`, then the next rung plays. The host can also tap "Hear more" or "Reveal it".
 6. If every player is locked out the song is revealed straight away.
 
+## Skipping a song ("Heard it too much")
+
+While a song is cued or playing, and until anyone buzzes, each phone shows "Heard it too much".
+A tap sends `vote`; the room counts votes itself and skips once more than `ROOM_SKIP_VOTE_SHARE` (0.5) of the seated players have voted, so 2 of 3 or 3 of 4.
+Seated means every player with a seat, online or not; the host can always skip on its own ("Heard it too much" under the song, which sends `skip`).
+A show has `ROOM_SKIPS_PER_SHOW` (3) skips in all, votes and host skips together; "Same crowd again" gives them back.
+Both numbers are Worker vars in `worker/wrangler.jsonc`, because the room is what enforces them; the view carries `skips { used, max }` and each song's `votes` and `votesNeeded` for the screens.
+
+A skip puts the song in state `skipped` without a result, a reveal or its answer, so no phone ever receives the skipped title.
+The host acts on the room's skip count rather than on a tap, so each skip happens exactly once, a reload included (`skipsSeen` in the saved show): it stops the audio, records the song as `tired` for this device and the group (docs/song-loading.md), and cues song `n` again with the next queued song from the same corpus tier, falling back to the next song when that tier has run out.
+Its countdown shows "Skipped: <title>" on the big screen only.
+Fishing for an easier song gains nothing here, since a skip changes the song for everyone and takes a majority or the host.
+A stream error keeps its own free "Skip this song" on the host, which re-cues `n` without touching the skip count or any history.
+
 A show is `rounds × ROOM_SONGS_PER_ROUND` songs, with the box office after every round.
 "Same crowd again" on the podium starts a new show in the same room with scores reset; the phones stay in their seats.
 All of these numbers live in `src/lib/config.ts`; the host passes the answer time to the room at `start`.
@@ -59,8 +73,10 @@ The first message must be a hello; anything else is refused until then, and a co
 | host | `song { n, title, film, year, artist, near }` | Arms song `n` (buzzing shut). `n` must be one past the number of results and at most `total`, so a re-cue can restart an unfinished song but never replay a scored one |
 | host | `clip { rung, points }` | A clip is playing; buzzing open at these points |
 | host | `reveal` / `end` / `kick { id }` | Nobody got it / show over / remove a player (lobby only) |
+| host | `skip { n }` | Skips song `n` straight away (cue or live, nobody has buzzed, a skip left) |
 | phone | `join { key, name }` | Takes a seat, or gets its seat back when the key is known |
 | phone | `buzz` / `answer { text }` / `leave` | |
+| phone | `vote` | "Heard it too much" for the current song; a majority skips it |
 | room | `welcome`, `state`, `error { code }`, `kicked` | `state` is the full view for that device, sent after every change |
 
 `POST /api/rooms` (no body, so no CORS preflight) draws a free code and returns `{ code, host }`; only the SHA-256 of the host secret is stored.
@@ -77,6 +93,7 @@ Codes are four letters from `BCDFGHJKLMNPQRSTVWXZ` (no vowels, so no words).
 ## Limits and expiry
 
 - Nothing goes to D1. Room state lives in the Durable Object's own storage and is wiped by an alarm after 3 idle hours.
+  The host's `recordPlay` for a skipped song is the host device's own group sync, the same as for a played one.
 - Origin must be the Pages origin or localhost, for both `POST /api/rooms` and the WebSocket.
 - Rate limits (Workers rate limiting, per IP): 10 new rooms a minute, 240 room connections a minute (a whole party shares one IP behind the Wi-Fi).
 - Per connection: every frame is charged to a bucket of 12 refilled at 6 a second, before anything else; 40 refused frames close the socket (4429), and any frame over the size limit, or binary, closes it at once (1009).
@@ -96,6 +113,6 @@ So "Main Hu Na" matches "Main Hoon Na" and "kesaria" matches "Kesariya", while "
 ## Testing
 
 `npm run e2e:room` (`e2e/room.mjs`) starts a local `wrangler dev` and proxies the room WebSockets to it from Playwright, recording every frame.
-Desktop Chromium hosts (or a WebKit iPhone with `--host=phone`; `--difficulty=medium` plays a Music-only show on the shorter ladder) and three WebKit iPhones in separate contexts play a full 12-song show: join by typed code and by link, a buzz race in arrival order, wrong answer to the next buzzer, right answer at the rung's points, "Hear more" and the automatic ladder after a miss, a typed misspelling, a reload and a leave-and-return keeping the seat, the answer clock running out, everyone locked out, the box office, the host reloading while a phone answers (the room scores it once and the host resumes on its reveal), the host reloading on the final reveal, podium totals against the room's results, each phone's final place, and "Same crowd again".
+Desktop Chromium hosts (or a WebKit iPhone with `--host=phone`; `--difficulty=medium` plays a Music-only show on the shorter ladder) and three WebKit iPhones in separate contexts play a full 12-song show: join by typed code and by link, a buzz race in arrival order, wrong answer to the next buzzer, right answer at the rung's points, "Hear more" and the automatic ladder after a miss, a typed misspelling, a reload and a leave-and-return keeping the seat, the answer clock running out, everyone locked out, the box office, "Heard it too much" (one vote of three does not skip, two do, the host skips until the cap, the room refuses a skip past the cap or after a buzz, the same-tier replacement and the tired history on the host, and the skipped title on the big screen only), the host reloading while a phone answers (the room scores it once and the host resumes on its reveal), the host reloading on the final reveal, podium totals against the room's results, each phone's final place, and "Same crowd again".
 It then probes the room directly: a foreign origin, an unclaimed code, a wrong host token, silent sockets up to the cap and their 4401 timeout (in a browser page with its own context: Node's WebSocket reports a close the server starts late or never, and the game contexts route the Worker's host through the script's Node proxy, which matters when `--worker` is production), frames before a hello, a host command from a phone, an oversized frame, a flood, and song numbers out of order.
 `--worker=<origin>` runs it against a deployed Worker (the preview one) instead, and `--categories=romantic,...` checks that every song in the show carries one of those tags.

@@ -1,6 +1,6 @@
 # Song loading
 
-`buildCrate(mix, eras, sound, difficulty, minSongs, played, categories)` in `src/lib/crate.js` assembles the game queue; it returns `{ queue, source }` or `{ error: "load" | "thin" | "safe" }`.
+`buildCrate(mix, eras, sound, difficulty, minSongs, cooldown, categories)` in `src/lib/crate.js` assembles the game queue; it returns `{ queue, source }` or `{ error: "load" | "thin" | "safe" }`.
 `difficulty` is `"easy" | "medium" | "hard" | "mixed"` (default `"mixed"`, also `settings.difficulty`).
 It maps to corpus tiers through `DIFFICULTY_TIERS` in `src/lib/constants.js` (easy → easy; medium → easy + medium; hard → medium + hard; mixed → all); when the mapped tiers hold fewer than 10 songs for the chosen languages and eras the crate widens to all tiers before reporting `thin`.
 The uncurated fallback tiers carry no tier and ignore it.
@@ -11,7 +11,7 @@ The fallback tiers carry no tags, so with categories set they never run: an unre
 ## Source tiers
 
 1. **Curated corpus** (`loadFromCorpus`) - `public/corpus.json`, the verified film-song pool built offline by `scripts/build-corpus.mjs` (below).
-   The crate filters it by language, era, difficulty tier and the device blocklist, orders fresh songs before recently played ones, draws `CORPUS_DRAW` candidates and resolves them to streams with one batch request per `CORPUS_BATCH` ids (`GET /songs?ids=`, served by our Worker and by any saavn.dev-compatible mirror in `SAAVN_BASES`).
+   The crate filters it by language, era, difficulty tier and the device blocklist, orders fresh songs before ones still cooling down, draws `CORPUS_DRAW` candidates and resolves them to streams with one batch request per `CORPUS_BATCH` ids (`GET /songs?ids=`, served by our Worker and by any saavn.dev-compatible mirror in `SAAVN_BASES`).
    Tracks carry `album` = film, `year` = the film's verified year and `tier`.
    If the corpus file is missing or the ids cannot be resolved (worker and mirror down), the tiers below take over; if the corpus loads but fewer than 10 songs match the filters, the crate returns `{ error: "thin" }` rather than playing unverified songs.
 2. **Saavn search** (`loadFromSaavn`) - JioSaavn search APIs listed in `SAAVN_BASES`; full songs, so snippets start at the intro.
@@ -92,10 +92,13 @@ In Music-only mode (`sound === "inst"`), the queue contains only annotated track
 If fewer safe songs survive, the crate returns `safe` and setup explains the shortage.
 On resume, the remaining queue is checked against the current index again; stale entries are removed, and an inadequate queue cannot resume.
 
-## Played-song cooldown (per device, or per group)
+## Song cooldown (per device, or per group)
 
-`tt_played` in localStorage maps normalized title → last-played timestamp; entries older than 30 days are pruned.
-In a group, `startGame` passes `buildCrate` the group's map merged with `tt_played` (latest wins), so songs any phone in the group played recently sit out too; see docs/group-sync.md.
-Songs played within the last 7 days (`PLAY_COOLDOWN`) are excluded from the crate when at least 15 fresh songs remain.
-When fresh songs run low, recently played songs are appended AFTER all fresh ones, ordered least-recently-played first, so repeats only appear when unavoidable.
-Old installs stored `tt_played` as a plain array; `loadPlayed` migrates that format transparently.
+A song's history has two kinds, each a localStorage map of normalized title → timestamp: `tt_played` for songs heard through to the reveal, and `tt_tired` for songs skipped as "Heard it too much" (docs/architecture.md, Skips).
+Each kind sits out for its own `COOLDOWN_DAYS` in `src/lib/config.ts`: 7 days after a play, 30 after a tired skip, because a song someone is sick of should stay away longer.
+Entries older than the longest cooldown are pruned; a stream-error skip records nothing.
+`cooldownOf(...histories)` in `src/lib/storage.js` turns histories (`{ played, tired }`, this device's from `loadHistory`, a group's, later a person's) into one map of song key → the time the song may come back, latest wins, and that map is `buildCrate`'s `cooldown`.
+In a group, `startGame` passes the group's history merged with the device's (`groupCooldown`), so songs any phone in the group played or skipped sit out too; see docs/group-sync.md.
+Songs still cooling down are excluded from the crate when at least 15 fresh songs remain.
+When fresh songs run low, they are appended AFTER all fresh ones, soonest-due first, so repeats only appear when unavoidable.
+Old installs stored `tt_played` as a plain array; `loadHistory` migrates that format transparently.
