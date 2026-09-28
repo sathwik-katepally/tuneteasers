@@ -21,7 +21,8 @@ The landing page shows only on a first visit, so `open()` also adds `skipLanding
   The expected spans come from the difficulty's ladder in `src/lib/config.ts`: Easy's rungs must cover 0-5s, 5-12s and 12-20s of the window and Replay 0-20s, Music-only's 0-5s and 5-12s and Replay 0-12s (within 0.15s: Easy's stop rides a JS timer a busy machine can delay), the seams must not repeat or skip more than 80ms, no rung past the ladder may be offered, Music-only must stay inside its verified interval, and the first clip must not sound before the listening screen is fully faded in, with "Now playing" and the clip bar starting within 150ms of the sound.
   It prints the measured spans and the hand-off timeline.
   Flags: `--profile=phone|desktop --difficulty=easy|medium|hard --mix=bolly|telugu|both --log`; run it for both profiles with Easy and Medium.
-- `e2e/safe-snips.mjs` - WebKit phone and Chromium desktop play Easy and Music-only through the final rung of each one's ladder and replay, resume saves written by the 20- and 10-second releases (the game must rebind to 12s windows and keep its score), then replace the local index with missing, mismatched-ID, old-schema (v1, v2, v3), wrong-length (10s, 20s) and stale variants to confirm the visible shortage state.
+- `e2e/safe-snips.mjs` - WebKit phone and Chromium desktop play Easy and Music-only through the final rung of each one's ladder and replay, resume saves written by the MusiCNN 12-second and the 20- and 10-second releases (the game must rebind to the current index's windows and keep its score), then replace the local index with missing, mismatched-ID, old-schema (v1, v2, v3), crossed (an accepted version whose entries carry the other version's method), unknown-version, wrong-length (10s, 20s) and stale variants to confirm the visible shortage state.
+  It checks whatever index the build serves (`dist/snips.json`); to check the v5 switch, copy a v5 index over `dist/snips.json` after building (the 262-song fixture from the switch, say) and run it again, along with `e2e/ladder.mjs`.
   It first checks that `public/snips.json` itself is a current-schema index of `SNIP_WINDOW_SEC` windows.
 - `e2e/group-sync.mjs` (`npm run e2e:group`) - desktop Chromium makes a group (importing its own history) and phone WebKit joins through the `#join` link; a song played on one is left out of the other's next crate, the desktop's finished show appears in the phone's Past shows, the phone keeps playing with the Worker unreachable and sends its queued plays when it is back, and the owner's delete makes the invite answer 403.
   It starts its own `wrangler dev` with a fresh local D1 and reroutes the deployed Worker host to it; `--worker=<origin>` points it at a deployed Worker instead (the preview one, see docs/group-sync.md), and `--shots=<dir>` saves the group screens.
@@ -75,21 +76,21 @@ Run it locally with `CORPUS_CACHE=<dir>` to cache upstream responses across reru
 
 ## Snips refresh CI
 
-`.github/workflows/refresh-snips.yml` runs `scripts/build-snips.mjs` weekly (Wed 04:30 UTC, after the corpus refresh, which also dispatches it on change) and commits `public/snips.json` if changed, which in turn triggers a deploy.
-Scoring runs in a matrix of `shards` runners (1 on schedule), each scoring at most `limit` songs of its share into a partial index (`SNIP_SHARD=i/n`); a `merge` job combines them (`SNIP_MERGE=<dir>`), applies the size floor, prints the pass rate and entries per language/tier, and commits.
-After a schema change, dispatch it with more runners, for example `gh workflow run refresh-snips.yml -f shards=12 -f limit=400`, so the whole corpus is rescored in one go; a runner that fails only leaves its songs for the next run.
-A failure alert pages only for runs on main.
-The scorer resolves corpus IDs to streams through the worker's batch endpoint (mirror fallback), then runs the MusiCNN VAD in a Playwright Chromium page against local assets (`scripts/vad-assets/`).
-It reuses only valid entries of the current schema (v4) for the same source ID and writes 12-second intervals whose overlapping patches all pass the clean threshold.
-Only songs with neither an index entry nor a stored voice curve are fetched and scored; every song with a curve is judged from it on each run, so the scorer never rescans a recording.
-Each scheduled run scores at most 300 such IDs (a full-song dense scan takes 30 to 70 seconds per song) and records rejected IDs in `checked`.
-Shards write their new curves next to their partial index, and the merge commits `public/snips.json` and `scripts/voice-curves.json` together.
-Changing the model, patch geometry or extraction means a new `CURVE_METHOD` in `scripts/build-snips.mjs`: every song is scored again under it, and the old detector's curves stay in the store.
-New IDs in the weekly corpus are prioritized using the previous index's `corpusIds` snapshot.
-The resolver tries both Saavn endpoints with short retries and fails with an endpoint summary after three empty corpus batches; the existing workflow failure alert remains active.
+`.github/workflows/refresh-snips.yml` runs `scripts/build-snips.mjs` nightly (04:30 UTC; the weekly corpus refresh also dispatches it) and commits `public/snips.json` and `scripts/voice-curves.json` if changed, which in turn triggers a deploy.
+Its `plan` job counts the corpus songs without vocal-stem curves (`SNIP_PLAN=1`, no network) and starts one scoring runner per 35 of them, at most 40 and 20 at a time; a night with nothing to score skips scoring and only refreshes the index.
+Each runner scores its share (`SNIP_SHARD=i/n`, at most `limit` songs) and stops taking songs after 5 hours (`SNIP_BUDGET_MIN`), well inside GitHub's 6-hour job limit, so whatever it scored is kept; the rest wait for the next night.
+A `merge` job on the branch tip combines the shards' curves (`SNIP_MERGE=<dir>`), judges every corpus song from them, prints the curve coverage, the pass rate, entries per language/tier and the calibration, and commits.
+Until the curves cover 95% of the corpus it publishes the previous v4 (MusiCNN) index with a fresh build time, so Music-only keeps working; from the first run past 95% it publishes the v5 index judged from the curves, and keeps publishing v5 after that (docs/audio.md).
+A failure alert pages only for runs on main; a runner that fails only leaves its songs for the next night.
+The scorer resolves corpus IDs to streams through the worker's batch endpoint (mirror fallback), then hands each song to `scripts/vocal-curve.py`, one long-lived Python process per runner (pinned in `scripts/requirements-snips.txt`: CPU PyTorch, `demucs`, `audio-separator`, `faster-whisper`; ffmpeg decodes), with the model weights (~2 GB) cached between runs under `~/.cache/tt-snips-models`.
+On a 4-core runner a song takes about 4 minutes (htdemucs about 1.7, Whisper about 2) plus about 3 minutes per RoFormer check, so a full corpus takes two or three nights and a week of new songs a few runners for an hour.
+RoFormer is too slow to run on whole songs there (about 30 minutes per song), which is why it only checks candidate windows.
+Only songs without curves are fetched, new corpus IDs first; every song with curves is judged from them on each run, so the scorer never rescans a recording.
+Changing a separator, the Whisper model or the measurement means new curve names in `scripts/build-snips.mjs` (`CURVE_METHOD` and its siblings) and a new index version: every song is scored again under them, and the old curves stay in the store.
+The resolver tries both Saavn endpoints with short retries and fails with an endpoint summary after three empty corpus batches.
 It refuses to write fewer than 80 entries.
-An index of an earlier schema never authorizes anything as it is, but its verified windows at least `SNIP_WINDOW_SEC` long carry over as the first `SNIP_WINDOW_SEC` seconds of each (the same every-patch check, so any stretch of one is clean): automatically while the output file still holds the older schema, or from `SNIP_PRIOR=<old-index>`.
-The v4 rescore (12-second windows, September 2026) carried over the 142 songs with verified 20-second windows and raised verified songs from 142 of 2,418 (6%) to 527 (22%): Hindi easy/medium/hard 119/106/76 and Telugu 79/88/59, up from 34/32/17 and 17/22/20.
+The September 2026 switch from MusiCNN seeded the store with the curves of the 262 songs used to choose the separators (docs/audio.md has that comparison).
+Run it locally with `SNIP_PYTHON=<venv>/bin/python`; `SNIP_CORPUS=<file>` limits it to a corpus subset.
 The client fails closed with a clear Music-only shortage if the index is missing or inadequate.
 
 ## Monitoring
