@@ -58,7 +58,7 @@ export function Setup(p: Props){
       {p.savedGame && <ResumeCard game={p.savedGame} onResume={p.resumeGame} onDiscard={p.discardGame} />}
       {p.hostShow && <RoomResumeCard show={p.hostShow} onResume={p.resumeRoom} onDiscard={p.discardRoom} />}
       <div className={s.joinStrip}>
-        <span className={s.joinText}>Someone else hosting a buzz-in show?</span>
+        <span className={s.joinText}>Someone else hosting a <span className="nowrap">buzz-in show?</span></span>
         <button type="button" className={`btn btn-teal ${s.joinBtn}`} onClick={p.joinRoom}>Join with a code</button>
       </div>
 
@@ -209,7 +209,7 @@ function ResumeCard({ game, onResume, onDiscard }: { game: GameState; onResume: 
 function RoomResumeCard({ show, onResume, onDiscard }: { show: HostShow; onResume: () => void; onDiscard: () => void }){
   return (
     <div className={s.resume}>
-      <div className={s.resumeHead}>Buzz-in show in progress</div>
+      <div className={s.resumeHead}><span className="nowrap">Buzz-in</span> show in progress</div>
       <p className={s.resumeLine}>Room {show.code}, {show.songNo} of {show.total} songs played. Phones stay in their seats.</p>
       <div className={sh.row2}>
         <button type="button" className="btn btn-ghost" onClick={onDiscard}>Discard</button>

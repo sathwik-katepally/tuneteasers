@@ -75,7 +75,7 @@ export function RoomTrouble({ gone, onBack, onRetry }: { gone: boolean; onBack: 
       <div className={s.trouble}>
         <span className={s.eyebrow}>{gone ? "Room closed" : "No room"}</span>
         <h2 className={s.troubleTitle}>{gone ? "This room has closed" : "Couldn't open a room"}</h2>
-        <p className={s.how}>{gone ? "Rooms close after a few quiet hours. Open a new one and share its code." : "Buzz-in shows need a connection. Check it and try again, or pass one phone around instead."}</p>
+        <p className={s.how}>{gone ? "Rooms close after a few quiet hours. Open a new one and share its code." : <><span className="nowrap">Buzz-in</span> shows need a connection. Check it and try again, or pass one phone around instead.</>}</p>
       </div>
       <div className={sh.actions}>
         <div className={sh.row2}>

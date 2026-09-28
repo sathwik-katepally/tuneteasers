@@ -114,7 +114,7 @@ function JoinForm({ code, name, notice, onCode, onName, onJoin, onBack }: {
       <div className={`${sh.paper} ${s.joinCard}`}>
         <div className={s.joinHead}>
           <h2 className={s.joinTitle}>Take your seat</h2>
-          <span className={s.joinMeta}>Buzz-in show</span>
+          <span className={`${s.joinMeta} nowrap`}>Buzz-in show</span>
         </div>
         <label className={s.field}>
           <span className={s.label}>Room code</span>
