@@ -1,0 +1,108 @@
+name: E2E release matrix
+
+# The rest of the release matrix (docs/testing-and-deploy.md) on top of the
+# key suites in e2e.yml, which run on every pull request. Runner choice per
+# suite follows the same rule: WebKit that plays songs on macOS, Chromium and
+# the buzz room on Linux (see the header of e2e.yml).
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "30 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-release-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  release:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: game phone matrix
+            os: macos-latest
+            browsers: webkit
+            run: >-
+              npm run e2e:game -- --profile=phone --mode=teams --mix=bolly --difficulty=easy --rounds=5 &&
+              npm run e2e:game -- --profile=phone --mix=telugu --difficulty=hard &&
+              npm run e2e:game -- --profile=phone --reduced &&
+              npm run e2e:game -- --profile=phone --categories=item
+          - name: game desktop matrix
+            os: ubuntu-latest
+            browsers: chromium
+            run: >-
+              npm run e2e:game -- --profile=desktop --mix=bolly --difficulty=hard &&
+              npm run e2e:game -- --profile=desktop --mix=telugu --difficulty=medium --rounds=5 &&
+              npm run e2e:game -- --profile=desktop --no-worker &&
+              npm run e2e:game -- --profile=desktop --categories=mass
+          - name: ladder window at 0s phone
+            os: macos-latest
+            browsers: webkit
+            run: npm run e2e:ladder -- --profile=phone --difficulty=medium --window-at=0
+          - name: ladder window at 0s desktop, migrate, autoplay
+            os: ubuntu-latest
+            browsers: chromium
+            run: >-
+              npm run e2e:ladder -- --profile=desktop --difficulty=medium --window-at=0 &&
+              npm run e2e:migrate -- --profile=desktop &&
+              npm run e2e:autoplay
+          - name: categories, migrate, offline
+            os: macos-latest
+            browsers: webkit
+            run: >-
+              npm run e2e:categories &&
+              npm run e2e:migrate -- --profile=phone &&
+              npm run e2e:offline
+          - name: group sync
+            os: macos-latest
+            worker: true
+            run: npm run e2e:group
+          - name: group edge cases
+            os: ubuntu-latest
+            browsers: chromium
+            worker: true
+            run: npm run e2e:group-edge
+          - name: buzz room on a phone host
+            os: macos-latest
+            browsers: webkit
+            worker: true
+            run: npm run e2e:room -- --host=phone
+          - name: buzz room music-only, no repeats
+            os: ubuntu-latest
+            browsers: webkit chromium
+            worker: true
+            run: npm run e2e:room -- --difficulty=medium && npm run e2e:room-norepeat
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/e2e-setup
+        with:
+          browsers: ${{ matrix.browsers || 'webkit chromium' }}
+          worker: ${{ matrix.worker || false }}
+      - run: uptime
+      - run: ${{ matrix.run }}
+
+  # Phone alert when main or the nightly run breaks (ntfy, topic in the
+  # NTFY_TOPIC repo secret).
+  alert:
+    needs: [release]
+    if: failure() && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: >-
+          curl -s --max-time 20
+          -H "Title: ${{ github.repository }}/${{ github.workflow }} failed"
+          -H "Priority: high" -H "Tags: x"
+          -d "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          "https://ntfy.sh/$NTFY_TOPIC"
