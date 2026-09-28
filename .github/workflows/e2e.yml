@@ -85,7 +85,7 @@ jobs:
 
   full:
     if: github.event_name != 'pull_request'
-    name: ${{ matrix.name }}
+    name: ${{ matrix.name || 'release matrix (main and nightly only)' }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
