@@ -4,6 +4,12 @@ name: E2E
 # so they run side by side. Pull requests get the key suites; pushes to main,
 # the nightly run and a manual run add the rest of the release matrix
 # (docs/testing-and-deploy.md).
+#
+# Anything that drives the phone profile runs on macOS: WebKit there plays
+# through AVFoundation like an iPhone, while Linux WebKit's GStreamer backend
+# stops delivering audio after any seek once a stream has started playing
+# (readyState stuck at 2 while the clock runs on), so no Music-only or
+# ladder check can pass there. Desktop-only suites run on Linux with Chrome.
 on:
   pull_request:
   push:
@@ -22,7 +28,7 @@ concurrency:
 jobs:
   key:
     name: ${{ matrix.name }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os || 'macos-latest' }}
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -31,6 +37,7 @@ jobs:
           - name: game phone
             run: npm run e2e:game -- --profile=phone
           - name: game desktop
+            os: ubuntu-latest
             run: npm run e2e:game -- --profile=desktop --mode=teams --difficulty=easy
           - name: safe snips
             run: npm run e2e:snips
@@ -56,7 +63,7 @@ jobs:
   full:
     if: github.event_name != 'pull_request'
     name: ${{ matrix.name }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os || 'macos-latest' }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -69,6 +76,7 @@ jobs:
               npm run e2e:game -- --profile=phone --reduced &&
               npm run e2e:game -- --profile=phone --categories=item
           - name: game desktop matrix
+            os: ubuntu-latest
             run: >-
               npm run e2e:game -- --profile=desktop --mix=bolly --difficulty=hard &&
               npm run e2e:game -- --profile=desktop --mix=telugu --difficulty=medium --rounds=5 &&

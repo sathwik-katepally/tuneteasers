@@ -52,7 +52,7 @@ export function serve(){
       let f = path.join(DIST, decodeURIComponent(q.url.split("?")[0]));
       if (f.endsWith("/")) f += "index.html";
       fs.readFile(f, (e, d) => {
-        if (e){ s.writeHead(404); return s.end(); }
+        if (e){ s.writeHead(404, { "content-type": "text/plain" }); return s.end("Not found"); }
         s.writeHead(200, { "content-type": MIME[path.extname(f)] || "application/octet-stream" });
         s.end(d);
       });
