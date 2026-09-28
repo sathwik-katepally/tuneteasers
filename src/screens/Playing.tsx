@@ -17,11 +17,15 @@ interface Props {
   onJudge: (result: "correct" | "wrong") => void;
   onHint: () => void;
   onSkip: () => void;
+  /* "Heard it too much": this contestant's skips left, and the skip itself
+     (absent when no song of the same tier is left to replace this one). */
+  skipsLeft: number;
+  onHeardIt?: () => void;
 }
 
 const LINE: Partial<Record<Phase, string>> = { cueing: "Threading the film", playing: "Now playing", listened: "Clip over" };
 
-export function Playing({ name, track, plain, phase, turn, note, onPlay, onJudge, onHint, onSkip }: Props){
+export function Playing({ name, track, plain, phase, turn, note, onPlay, onJudge, onHint, onSkip, skipsLeft, onHeardIt }: Props){
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), 250);
@@ -107,7 +111,12 @@ export function Playing({ name, track, plain, phase, turn, note, onPlay, onJudge
           <button type="button" className={s.link} onClick={onHint} disabled={turn.hint}>
             <Lightbulb size={15} strokeWidth={2.5} /> {turn.hint ? "Hint shown" : `Hint, costs ${HINT_PENALTY}`}
           </button>
-          {note.includes("Skip it") && <button type="button" className={s.link} onClick={onSkip}>Skip this song</button>}
+          {note.includes("Skip it") ? <button type="button" className={s.link} onClick={onSkip}>Skip this song</button>
+            : (onHeardIt || !skipsLeft) && (
+              <button type="button" className={`${s.link} ${s.heard}`} onClick={onHeardIt} disabled={!skipsLeft || cueing}>
+                <span className={s.heardText}>Heard it<span className={s.heardMore}> too much</span></span> <span className={s.stub}>{skipsLeft ? `${skipsLeft} left` : "Used"}</span>
+              </button>
+            )}
         </div>
       </div>
     </div>

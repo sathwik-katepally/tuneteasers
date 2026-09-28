@@ -90,7 +90,7 @@ function parseGame(raw: Raw, mode: Mode, difficulty: Difficulty, mix: Mix): Game
   const q = parseQueue(raw);
   if (!q) return null;
   const cast: CastMember[] = parseRoster(raw.cast, [], "c").map((c, i) => ({
-    ...c, score: Math.max(0, int(obj(arr(raw.cast)[i]).score, 0)),
+    ...c, score: Math.max(0, int(obj(arr(raw.cast)[i]).score, 0)), skips: Math.max(0, int(obj(arr(raw.cast)[i]).skips, 0)),
   }));
   if (!cast.length || raw.finished === true) return null;
   const ids = new Set(cast.map(c => c.id));
@@ -130,7 +130,7 @@ function migrateLegacy(raw: Raw): AppState {
   const q = parseQueue(g);
   if (q && oldPlayers.length){
     const cast = players.map((p, i) => ({
-      ...p, score: Math.max(0, Math.round((parseFloat(String(oldPlayers[i].score)) || 0) * LEGACY_SCORE_SCALE)),
+      ...p, score: Math.max(0, Math.round((parseFloat(String(oldPlayers[i].score)) || 0) * LEGACY_SCORE_SCALE)), skips: 0,
     }));
     const round = Math.max(1, int(g.round, 1));
     game = {

@@ -23,7 +23,7 @@ React 19 + TypeScript + Vite SPA, deployed by GitHub Actions to GitHub Pages at 
 - D1 schema changes are new files in `worker/migrations/`; never edit an applied migration.
 - Song streaming URLs must be https and pass `sanitizeTrack`; never render or play unsanitized API data.
 - Every playback path, sound effects included, must go through the audio engine in `src/lib/engine.js`; never create ad-hoc Audio elements or AudioContexts elsewhere.
-- Gameplay numbers (clip ladder, points, bonus, hint cost, rounds) live only in `src/lib/config.ts`.
+- Gameplay numbers (clip ladder, points, bonus, hint cost, rounds, skips, cooldown days) live only in `src/lib/config.ts`; the numbers the buzz-in room enforces itself (skip vote share, skips per show) are Worker vars in `worker/wrangler.jsonc`.
 - Verify changes E2E with the Playwright harness in `e2e/` before pushing (see docs/testing-and-deploy.md); pushes to main auto-deploy to production.
 
 ## Detailed docs (read on demand)

@@ -7,8 +7,8 @@
 import { useSyncExternalStore } from "react";
 import { WORKER_API } from "./constants.js";
 import { songKey } from "./utils.js";
-import { loadPlayed } from "./storage.js";
-import type { GameState } from "../types";
+import { HISTORY_MS, cooldownOf, loadHistory } from "./storage.js";
+import type { GameState, PlayKind } from "../types";
 
 export interface Group {
   id: string;
@@ -34,7 +34,8 @@ export interface GroupResult {
   cast: ResultCast[];
 }
 
-type Round = { id: string; key: string };
+type Round = { id: string; key: string; kind?: PlayKind };
+export interface History { played: Record<string, number>; tired: Record<string, number> }
 interface Outbox { groupId: string; rounds: Round[]; results: GroupResult[] }
 export type SyncState = "idle" | "syncing" | "offline" | "revoked";
 export interface GroupSnapshot { group: Group | null; pending: number; sync: SyncState }
@@ -45,7 +46,6 @@ const TIMEOUT_MS = 5000;
 const ROUND_BATCH = 50;
 const OUTBOX_MAX = 500;
 const IMPORT_MAX = 1000;
-const IMPORT_WINDOW_MS = 30 * 24 * 3600 * 1000;
 export const GROUP_NAME_MAX = 32;
 
 const INVITE_RX = /([a-z2-7]{12}\.[A-Za-z0-9_-]{22})/;
@@ -139,15 +139,21 @@ async function call<T>(path: string, token: string | null, init: { method?: stri
   return body as T;
 }
 
-function localHistory(): Record<string, number> {
-  const since = Date.now() - IMPORT_WINDOW_MS;
-  const entries = Object.entries(loadPlayed() as Record<string, number>)
-    .filter(([k, v]) => k && v > since)
-    .sort((a, b) => b[1] - a[1])
+const deviceHistory = () => loadHistory() as History;
+
+/* The newest IMPORT_MAX songs of this phone's history, across both kinds. */
+function localHistory(): History {
+  const since = Date.now() - HISTORY_MS;
+  const h = deviceHistory();
+  const entries = (["played", "tired"] as const).flatMap(kind => Object.entries(h[kind]).map(([k, v]) => ({ kind, k, v })))
+    .filter(e => e.k && e.v > since)
+    .sort((a, b) => b.v - a.v)
     .slice(0, IMPORT_MAX);
-  return Object.fromEntries(entries);
+  const out: History = { played: {}, tired: {} };
+  for (const e of entries) out[e.kind][e.k] = e.v;
+  return out;
 }
-export const localHistoryCount = () => Object.keys(localHistory()).length;
+export const localHistoryCount = () => { const h = localHistory(); return new Set([...Object.keys(h.played), ...Object.keys(h.tired)]).size; };
 
 function adopt(group: Group){
   lsSet(LS_GROUP, group);
@@ -156,8 +162,8 @@ function adopt(group: Group){
 }
 
 async function importHistory(invite: string){
-  const played = localHistory();
-  if (Object.keys(played).length) await call("/group/import", invite, { body: { played } });
+  const { played, tired } = localHistory();
+  if (Object.keys(played).length || Object.keys(tired).length) await call("/group/import", invite, { body: { played, tired } });
 }
 
 export async function createGroup(name: string, withHistory: boolean){
@@ -203,9 +209,9 @@ function enqueue(add: (o: Outbox) => void){
   void flush();
 }
 
-export function recordPlay(title: string){
+export function recordPlay(title: string, kind: PlayKind = "played"){
   const key = songKey(title);
-  if (key) enqueue(o => { o.rounds.push({ id: randomId(), key }); });
+  if (key) enqueue(o => { o.rounds.push({ id: randomId(), key, kind }); });
 }
 
 export function recordResult(g: GameState){
@@ -280,21 +286,18 @@ async function send(request: () => Promise<unknown>, done: () => void){
   }
 }
 
-/* The group's cooldown map, merged with this phone's own (latest wins).
-   Returns null with no group or when the group can't be reached in time,
-   and the crate then falls back to this phone's history alone. */
-export async function groupPlayed(): Promise<Record<string, number> | null> {
+/* The group's history. Returns null with no group or when the group can't be
+   reached in time, and the crate then falls back to this phone's history alone. */
+export async function groupHistory(): Promise<History | null> {
   const g = snap.group;
   if (!g) return null;
   // Only this call's flush says the Worker is down; an "offline" left by an
   // earlier failure must not stop this read, or the group is never asked again.
   if ((await flush()) === "failed" || snap.sync === "revoked") return null;
   try {
-    const r = await call<{ played: Record<string, number> }>("/group/played", g.invite);
-    const merged = { ...(loadPlayed() as Record<string, number>) };
-    for (const [k, v] of Object.entries(r.played || {})) if (Number.isFinite(v)) merged[k] = Math.max(merged[k] || 0, v);
+    const r = await call<Partial<History>>("/group/played", g.invite);
     if (snap.group?.id === g.id && snap.sync !== "syncing") emit({ sync: "idle" });
-    return merged;
+    return { played: r.played || {}, tired: r.tired || {} };
   } catch (e){
     if (snap.group?.id === g.id){
       const status = e instanceof GroupError ? e.status : 0;
@@ -302,6 +305,13 @@ export async function groupPlayed(): Promise<Record<string, number> | null> {
     }
     return null;
   }
+}
+
+/* The cooldown for a new crate: this phone's history merged with the
+   group's, or null when there is no group or it can't be reached. */
+export async function groupCooldown(): Promise<Record<string, number> | null> {
+  const h = await groupHistory();
+  return h && (cooldownOf(deviceHistory(), h) as Record<string, number>);
 }
 
 export async function fetchResults(before?: number){
