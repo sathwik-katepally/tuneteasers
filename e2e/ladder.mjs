@@ -1,10 +1,11 @@
 /* The clip ladder, measured on the media clock, plus the countdown hand-off.
-   One turn per run: the first clip, "Hear more" twice, then Replay. A 10ms
+   One turn per run: the first clip, "Hear more" up the difficulty's ladder
+   (src/lib/config.ts), then Replay. A 10ms
    sampler records every stretch of audible audio as media time (the element
    is playing, unmuted, its clock advancing, and for Music-only the gain gate
    open), so the checks are about sound, not about what the UI claims:
-   - rung 1 plays window 0-5s, rung 2 5-12s, rung 3 12-20s, Replay 0-20s,
-     with no repeated or skipped audio between rungs;
+   - Easy plays window 0-5s, 5-12s, 12-20s, Replay 0-20s; Music-only 0-5s,
+     5-12s, Replay 0-12s; with no repeated or skipped audio between rungs;
    - Music-only never sounds outside the verified interval;
    - no audio before the listening screen is fully faded in, and "Now
      playing" and the clip bar start with the sound.
@@ -12,9 +13,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import { serve, open, args, saved } from "./harness.mjs";
+import { ladderFor } from "../src/lib/config.ts";
+import { SNIP_WINDOW_SEC } from "../src/lib/constants.js";
 
 const A = args({ profile: "desktop", difficulty: "easy", mix: "both", log: "", shots: "" });
-const SEGMENTS = [5, 7, 8];
+const music = A.difficulty !== "easy";
+const L = ladderFor(!music);
+const FULL = L.end(L.last);
 // s of media time. Easy has no audio-clock gate, so its stop rides a JS timer
 // that a busy machine can delay; seams are held tighter below.
 const TOL = 0.15;
@@ -89,12 +94,14 @@ try {
     fs.mkdirSync(A.shots, { recursive: true });
     await page.screenshot({ path: path.join(A.shots, `${A.profile}-${A.difficulty}-${name}.png`) });
   };
-  for (const [name, at, label] of [[/^Hear 7s more/, 3000, "rung2"], [/^Hear 8s more/, 0], [/^Replay/, 9000, "replay"]]){
+  const steps = L.segments.slice(1).map((sec, i) => [new RegExp(`^Hear ${sec}s more`), i ? 0 : 3000, i ? "" : "rung2"]);
+  for (const [name, at, label] of [...steps, [/^Replay/, Math.round(FULL * 450), "replay"]]){
     await btn(name).click();
     await page.getByText(/\ds left/).waitFor({ timeout: 20000 });
     if (at){ await page.waitForTimeout(at); await shot(label); }
     await listened.waitFor({ timeout: 30000 });
   }
+  if (await btn(/^Hear \d+s more/).count()) fail("a rung past the end of the ladder is offered");
   await shot("done");
   await page.waitForTimeout(300);
   const tl = await page.evaluate(() => window.__tl.slice());
@@ -103,33 +110,32 @@ try {
   const st = await saved(page);
   const track = st.game.queue[st.game.trackIdx];
   const hook = t => (t.duration > 35 ? Math.min(45, Math.max(0, t.duration - 60)) : 0);
-  const music = A.difficulty !== "easy";
   if (mode !== (music ? "snip" : "plain")) fail(`played mode ${mode}`);
   const W = music ? track.snip.startSec : hook(track);
-  if (music && track.snip.endSec - W !== 20) fail(`snip window is ${track.snip.endSec - W}s, not 20s`);
+  if (music && track.snip.endSec - W !== SNIP_WINDOW_SEC) fail(`snip window is ${track.snip.endSec - W}s, not ${SNIP_WINDOW_SEC}s`);
 
   // The engine reads media time synchronously when each clip starts playing
   // and right after it pauses; the sampler independently confirms there were
-  // exactly four audible stretches and that none escaped the window.
+  // one audible stretch per rung plus the replay, and that none escaped the window.
   const heard = tl.filter(e => e.k === "silent").map(e => ({ from: e.from - W, to: e.to - W }));
-  const spans = clips.slice(-4).map(c => ({ from: c.from - W, to: c.to - W }));
+  const expected = [...L.segments.map((_, i) => [L.start(i), L.end(i)]), [0, FULL]];
+  const spans = clips.slice(-expected.length).map(c => ({ from: c.from - W, to: c.to - W }));
   const show = list => list.map(s => `[${fmt(s.from)}, ${fmt(s.to)}]`).join(" ");
   console.log(`${A.profile} ${A.difficulty}: window starts at ${fmt(W)}s of "${track.title.slice(0, 30)}"`);
   console.log(`  clip media spans, engine (s into window): ${show(spans)}`);
   console.log(`  audible stretches, sampler (s into window): ${show(heard)}`);
-  const expected = [[0, 5], [5, 12], [12, 20], [0, 20]];
   if (heard.length !== expected.length || clips.length !== expected.length)
     fail(`expected ${expected.length} clips, engine ran ${clips.length} and ${heard.length} were heard`);
   expected.forEach(([a, b], i) => {
     if (Math.abs(spans[i].from - a) > TOL || Math.abs(spans[i].to - b) > TOL)
       fail(`play ${i + 1} covered [${fmt(spans[i].from)}, ${fmt(spans[i].to)}], expected [${a}, ${b}]`);
   });
-  for (const i of [1, 2]){
+  for (let i = 1; i <= L.last; i++){
     const overlap = spans[i - 1].to - spans[i].from;
     console.log(`  rung ${i} -> ${i + 1} seam: ${overlap >= 0 ? `${fmt(overlap * 1000)}ms repeated` : `${fmt(-overlap * 1000)}ms skipped`}`);
     if (Math.abs(overlap) > 0.08) fail(`rung ${i} -> ${i + 1} seam off by ${fmt(overlap)}s`);
   }
-  if (music && heard.concat(spans).some(s => s.from < -0.02 || s.to > 20.1)) fail("music-only sounded outside its verified interval");
+  if (music && heard.concat(spans).some(s => s.from < -0.02 || s.to > SNIP_WINDOW_SEC + 0.1)) fail("music-only sounded outside its verified interval");
 
   const at = k => tl0.find(e => e.k === k)?.t;
   const first = tl0.find(e => e.k === "audible")?.t;

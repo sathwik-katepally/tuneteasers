@@ -74,9 +74,10 @@ Difficulty: Easy plays popular songs with vocals ("full" sound, from a likely ho
 Song categories (Dance & party, Romantic, Sad, Item songs, Mass beats) narrow the pool to corpus songs carrying any chosen tag; they are passed to `buildCrate` as its 7th argument (see docs/song-loading.md).
 On the setup screen "Any" is the empty selection and clears the others; each category shows how many songs it offers for the chosen languages, eras and difficulty, and one with fewer than rounds x contestants is greyed out with "only N" (in Music-only with a note that few dance or item songs have a clean instrumental stretch).
 A chosen category that turns thin stays tappable so it can be turned off.
-Clip ladder: each turn starts with a 5s clip; "Hear 7s more" continues to 12s and "Hear 8s more" to 20s without replaying what was heard, and Replay plays from the top to the current end (docs/audio.md).
-The rung arithmetic (`CLIP_SEGMENTS`, `rungSpan`) is in `src/lib/config.ts` and the play call (`playRung`) in `src/lib/ladder.ts`, so any screen that runs a turn shares them.
-Points: 100 / 60 / 30 by rung, plus a speed bonus of up to 20 that stays full while a clip plays and fades over about 13s once it has ended, minus 20 if the film/year hint was taken, never below 10.
+Clip ladder: each turn starts with a 5s clip; "Hear 7s more" continues to 12s without replaying what was heard, and on Easy "Hear 8s more" goes on to 20s; Replay plays from the top to the current end (docs/audio.md).
+Music-only (Medium and Hard) stops at 12s because it may only play inside a verified 12-second vocal-free window.
+The ladders (`CLIP_LADDERS`, one per sound, and `ladderFor(plain)` with its `span`, `start` and `end`) are in `src/lib/config.ts` and the play call (`playRung`) in `src/lib/ladder.ts`, so any screen that runs a turn, the room host included, shares them.
+Points: 100 / 60 / 30 by rung on Easy and 100 / 60 on Music-only, plus a speed bonus of up to 20 that stays full while a clip plays and fades over about 13s once it has ended, minus 20 if the film/year hint was taken, never below 10.
 The player says the song or film aloud, then taps "I know this one" to score the current points or "I don't know this one" to score zero.
 Either choice records the turn and reveals the answer immediately.
 Teams: turns rotate through teams; if a team lists members, the phone holder rotates through them round by round.

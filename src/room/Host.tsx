@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { CLIP_POINTS, DIFFICULTY, LAST_RUNG, ROOM_ANSWER_SECS, ROOM_GRACE_SECS,
-  ROOM_SONGS_PER_ROUND, ROOM_WRONG_BEAT_MS, hookOffset, rungSpan } from "../lib/config";
+import { DIFFICULTY, ROOM_ANSWER_SECS, ROOM_GRACE_SECS, ROOM_SONGS_PER_ROUND, ROOM_WRONG_BEAT_MS,
+  hookOffset, ladderFor } from "../lib/config";
 import { nearTitles } from "../lib/answer.js";
 import { playRung } from "../lib/ladder";
 import { answerTitles as answerTitlesJs, buildCrate as buildCrateJs } from "../lib/crate.js";
@@ -28,7 +28,7 @@ type Phase = "opening" | "lobby" | "loading" | "countdown" | "song" | "reveal" |
 interface Clip { rung: number; span: { from: number; to: number }; startedAt: number; endedAt: number | null; key: number; cut: boolean }
 interface Revealed { track: Track; verdict: Verdict }
 
-const freshClip = (): Clip => ({ rung: 0, span: rungSpan(0, false), startedAt: 0, endedAt: null, key: 0, cut: false });
+const freshClip = (): Clip => ({ rung: 0, span: { from: 0, to: 0 }, startedAt: 0, endedAt: null, key: 0, cut: false });
 
 /* The host screen of a buzz-in room: the only device that plays audio. It
    runs the show (songs, clip ladder, reveals, box office) and tells the room
@@ -50,6 +50,7 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
   const msLeft = useMsLeft(view);
   const track = show ? show.queue[show.idx] ?? null : null;
   const plain = show?.plain ?? DIFFICULTY[settings.difficulty].sound === "full";
+  const ladder = ladderFor(plain);
 
   // Timers and socket callbacks read the latest values through these.
   const live = useRef({ view, show, clip, phase, track, audio });
@@ -167,7 +168,7 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
     const t = live.current.track;
     if (!t) return;
     engine.ac();
-    const span = rungSpan(rung, replay);
+    const span = ladder.span(rung, replay);
     setNote("");
     setGraceUntil(null);
     setPhase("song");
@@ -175,7 +176,7 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
     const started = () => {
       setClip(c => ({ ...c, startedAt: Date.now(), key: c.key + 1 }));
       setAudio(a => (a === "blocked" ? a : "playing"));
-      room.send({ t: "clip", rung, points: CLIP_POINTS[rung] });
+      room.send({ t: "clip", rung, points: ladder.points[rung] });
     };
     const ended = () => {
       setClip(c => ({ ...c, endedAt: Date.now() }));
@@ -203,7 +204,7 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
     if (s.state !== "live" && s.state !== "missed") return;
     const everyoneOut = v.players.length > 0 && v.players.every(pl => s.locked.includes(pl.id));
     if (everyoneOut) return giveUp();
-    if (c.rung < LAST_RUNG) return void playClip(c.rung + 1, c.cut);
+    if (c.rung < ladder.last) return void playClip(c.rung + 1, c.cut);
     if (c.cut) return void playClip(c.rung, true);
     giveUp();
   }
@@ -365,7 +366,7 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
     default:
       key = `song-${show?.idx}`;
       screen = view && show && track && (
-        <HostPlaying view={view} song={view.song?.n === show.songNo + 1 ? view.song : null} songNo={show.songNo + 1} total={show.total} clip={clip} audio={audio}
+        <HostPlaying view={view} song={view.song?.n === show.songNo + 1 ? view.song : null} songNo={show.songNo + 1} total={show.total} ladder={ladder} clip={clip} audio={audio}
           graceUntil={graceUntil} msLeft={msLeft} note={note} wrong={wrong} link={room.link}
           onPlay={() => playClip(clip.rung, true)} onMore={carryOn} onReveal={giveUp} onSkip={skipSong} />
       );

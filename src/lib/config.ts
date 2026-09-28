@@ -5,21 +5,42 @@ import { SNIP_WINDOW_SEC } from "./constants.js";
    the speed bonus, the hint cost and the show length. */
 
 /* Each rung plays the next stretch of one continuous clip window: the first
-   5s, then "Hear more" carries on for 7s, then 8s. Music-only windows are
-   verified vocal-free for their whole length, so the ladder must fit one. */
-export const CLIP_SEGMENTS = [5, 7, 8] as const;
-export const CLIP_POINTS = [100, 60, 30] as const;
-export const LAST_RUNG = CLIP_SEGMENTS.length - 1;
+   5s, then "Hear more" carries on for 7s, then 8s. Easy keeps the vocals and
+   plays from the song's hook, so its window is free. Music-only plays only
+   inside a verified vocal-free snip window (SNIP_WINDOW_SEC), so its ladder
+   stops at 12s; give it the third rung again once the index holds enough
+   20s windows (a longer SNIP_WINDOW_SEC and a rescore, docs/audio.md). */
+export const CLIP_LADDERS = {
+  full: { segments: [5, 7, 8], points: [100, 60, 30] },
+  inst: { segments: [5, 7], points: [100, 60] },
+} as const;
 
-/* Seconds into the clip window where a rung stops. */
-export const rungEnd = (rung: number) => CLIP_SEGMENTS.slice(0, Math.min(rung, LAST_RUNG) + 1).reduce((a, b) => a + b, 0);
-export const rungStart = (rung: number) => (rung > 0 ? rungEnd(rung - 1) : 0);
-export const CLIP_WINDOW = rungEnd(LAST_RUNG);
-if (CLIP_WINDOW > SNIP_WINDOW_SEC) throw new Error(`clip ladder (${CLIP_WINDOW}s) is longer than a verified snip window (${SNIP_WINDOW_SEC}s)`);
+export interface Ladder {
+  segments: readonly number[];
+  points: readonly number[];
+  last: number;
+  /* Seconds into the clip window where a rung starts and stops. */
+  start: (rung: number) => number;
+  end: (rung: number) => number;
+  /* What a play of `rung` covers: "Hear more" plays only the new stretch, a
+     replay plays everything heard so far from the top. */
+  span: (rung: number, replay: boolean) => { from: number; to: number };
+}
 
-/* What a play of `rung` covers inside the window: "Hear more" plays only the
-   new stretch, a replay plays everything heard so far from the top. */
-export const rungSpan = (rung: number, replay: boolean) => ({ from: replay ? 0 : rungStart(rung), to: rungEnd(rung) });
+function ladder({ segments, points }: { segments: readonly number[]; points: readonly number[] }): Ladder {
+  if (segments.length !== points.length) throw new Error("every clip rung needs its points");
+  const last = segments.length - 1;
+  const end = (rung: number) => segments.slice(0, Math.min(rung, last) + 1).reduce((a, b) => a + b, 0);
+  const start = (rung: number) => (rung > 0 ? end(rung - 1) : 0);
+  return { segments, points, last, start, end, span: (rung, replay) => ({ from: replay ? 0 : start(rung), to: end(rung) }) };
+}
+
+const LADDERS = { full: ladder(CLIP_LADDERS.full), inst: ladder(CLIP_LADDERS.inst) };
+if (LADDERS.inst.end(LADDERS.inst.last) > SNIP_WINDOW_SEC)
+  throw new Error(`music-only clip ladder (${LADDERS.inst.end(LADDERS.inst.last)}s) is longer than a verified snip window (${SNIP_WINDOW_SEC}s)`);
+
+/* plain: the song plays as-is (Easy); otherwise it is Music-only. */
+export const ladderFor = (plain: boolean): Ladder => LADDERS[plain ? "full" : "inst"];
 
 export const SPEED_BONUS_MAX = 20;
 export const SPEED_BONUS_FADE_SECS = 13;
@@ -70,8 +91,8 @@ export function speedBonus(clipEndedAt: number | null, now: number): number {
   return Math.max(0, Math.round(SPEED_BONUS_MAX * (1 - waited / SPEED_BONUS_FADE_SECS)));
 }
 
-export function pointsNow(rung: number, clipEndedAt: number | null, hint: boolean, now = Date.now()): number {
-  const base = CLIP_POINTS[Math.min(rung, CLIP_POINTS.length - 1)];
+export function pointsNow(l: Ladder, rung: number, clipEndedAt: number | null, hint: boolean, now = Date.now()): number {
+  const base = l.points[Math.min(rung, l.last)];
   return Math.max(POINTS_FLOOR, base + speedBonus(clipEndedAt, now) - (hint ? HINT_PENALTY : 0));
 }
 

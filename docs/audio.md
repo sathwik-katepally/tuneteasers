@@ -18,25 +18,29 @@ The game does not call these directly: `playRung(track, plain, rung, replay, cb)
 
 `public/snips.json` is built offline in CI (see docs/testing-and-deploy.md) and fetched same-origin, no-cache, once per crate build:
 
-    { "v": 3, "built": "...", "snips": { "<Saavn ID>": { "sourceId": "<Saavn ID>", "startSec": 78, "endSec": 98, "maxVoice": 0.023, "method": "continuous-v3" } }, "checked": { "<rejected Saavn ID>": "continuous-v3/0.25" }, "corpusIds": [...] }
+    { "v": 4, "built": "...", "snips": { "<Saavn ID>": { "sourceId": "<Saavn ID>", "startSec": 78, "endSec": 90, "maxVoice": 0.023, "method": "continuous-v4" } }, "checked": { "<rejected Saavn ID>": "continuous-v4/0.25" }, "corpusIds": [...] }
 
 The key and `sourceId` must both match the returned Saavn recording ID.
 `checked` records scored recordings that did not pass and never authorizes playback.
-The schema version, method name, window length (`SNIP_WINDOW_SEC`, 20 seconds) and threshold (`SNIP_CLEAN_MAX`) are shared constants in `src/lib/constants.js`, read by the scorer, the crate and the engine alike.
-The window must hold the whole clip ladder; `src/lib/config.ts` throws at load if the ladder outgrows it.
-The scorer fetches that recording, then accepts a whole-second 20-second interval only if every overlapping ~3-second patch, spaced about one second apart and covering the full interval, has voice probability below `SNIP_CLEAN_MAX`.
+The schema version, method name, window length (`SNIP_WINDOW_SEC`, 12 seconds) and threshold (`SNIP_CLEAN_MAX`) are shared constants in `src/lib/constants.js`, read by the scorer, the crate and the engine alike.
+The window must hold the whole Music-only clip ladder; `src/lib/config.ts` throws at load if that ladder outgrows it.
+Every window length gets its own schema version and method name, so an index or a saved game from another length never authorizes playback.
+The scorer fetches that recording once and scores MusiCNN voice probability for overlapping ~3-second patches every ~1 second (0.992s) across the whole song: its voice curve.
+It accepts a whole-second 12-second interval only if the chain of overlapping patches covering it end to end, from the last patch starting at or before it to the first reaching its end, all score below `SNIP_CLEAN_MAX`, and it picks the interval with the lowest such maximum.
 It uses the maximum raw patch score, without smoothing away a high-scoring patch.
-To find candidates it scores every other patch across the song, then densely scans (every ~1 second) up to four regions around the quietest stretches and verifies whole-second starts inside any run of clean patches long enough for a window.
-An index with another schema (including the old v2 10-second index), an unmatched ID, an interval that is not exactly 20 seconds, an absent entry, or a build timestamp over 30 days old cannot authorize Music-only playback.
-A saved game from the 10-second release drops its old intervals when it loads; resuming a Music-only game rebinds its queue to the current index, or shows the shortage message.
+Curves are kept in `scripts/voice-curves.json` (one byte per patch, rounded up, so a stored score is never lower than the model's), keyed by Saavn ID under one curve method; a later change of window length is judged from the stored curves without fetching any song.
+An index with another schema (the v2 10-second and v3 20-second indexes included), an unmatched ID, an interval that is not exactly 12 seconds, an absent entry, or a build timestamp over 30 days old cannot authorize Music-only playback.
+A saved game from the 10- or 20-second releases drops its old intervals when it loads; resuming a Music-only game rebinds its queue to the current index, or shows the shortage message.
 The client also checks the stream duration covers the interval.
 When the index is missing or too few safe tracks remain, the player sees a shortage message.
 
 ## The clip ladder
 
-A turn listens to one continuous 20-second clip window in three rungs: the first 5 seconds, then "Hear 7s more" continues from 5 to 12 seconds, then "Hear 8s more" from 12 to 20.
+A turn listens to one continuous clip window in rungs: the first 5 seconds, then "Hear 7s more" continues from 5 to 12 seconds, and on Easy "Hear 8s more" from 12 to 20.
+Music-only has only the first two rungs, because its window is a verified 12-second interval; Easy plays from the song's hook with the vocals in and needs no verified window.
 Replay plays everything heard so far, from 0 to the current rung's end.
-The numbers are `CLIP_SEGMENTS` in `src/lib/config.ts`; `rungSpan(rung, replay)` gives the `{ from, to }` seconds a play covers.
+The numbers are `CLIP_LADDERS` in `src/lib/config.ts`, one ladder per sound; `ladderFor(plain).span(rung, replay)` gives the `{ from, to }` seconds a play covers.
+To give Music-only its third rung back, add it to the `inst` ladder once the index holds enough 20-second windows: raise `SNIP_WINDOW_SEC`, bump `SNIP_INDEX_V` and `SNIP_METHOD`, and dispatch a full rescore (docs/testing-and-deploy.md); config.ts refuses to load a ladder longer than the window.
 A continuation always seeks, even to where the element already is: Chromium otherwise resumes a paused element about 60ms past its pause point, which would skip audio at the seam.
 The engine stops a clip at a media time, not after a wall-clock delay: a timer re-aims at the end from the element's own clock (and, for Music-only, re-aims the gain gate on the audio clock), so each rung is exact to a few milliseconds and the next one starts where it stopped.
 `currentTime` only moves in steps (100-250ms apart, and a busy WebKit reports a stale value for longer), so between steps the engine extrapolates from when it last saw the value change and polls every 15ms near the end.
@@ -44,7 +48,7 @@ The engine stops a clip at a media time, not after a wall-clock delay: a timer r
 
 ## Playback modes
 
-- `"snip"`: Medium and Hard play only inside the verified 20-second interval.
+- `"snip"`: Medium and Hard play only inside the verified 12-second interval.
   The engine seeks before unmuting, routes the CORS element through an AudioContext gain gate, and closes the gate at the clip's end on the audio clock.
   The media-time timer also pauses the element there.
   Failure to seek, wire the gate, or find a valid interval returns `"failed"` without starting raw playback.

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Eye, Play, Plus } from "lucide-react";
 import { Equalizer } from "../components/Equalizer";
-import { CLIP_POINTS, CLIP_SEGMENTS, LAST_RUNG, ROOM_WRONG_BEAT_MS, rungStart } from "../lib/config";
+import { ROOM_WRONG_BEAT_MS, type Ladder } from "../lib/config";
 import { playerName, type Link, type RoomSong, type RoomView } from "../lib/room";
 import p from "../screens/Playing.module.css";
 import sh from "../screens/shared.module.css";
@@ -14,6 +14,7 @@ interface Props {
   song: RoomSong | null;
   songNo: number;
   total: number;
+  ladder: Ladder;
   clip: { rung: number; span: { from: number; to: number }; startedAt: number; key: number };
   audio: Audio;
   graceUntil: number | null;
@@ -27,7 +28,7 @@ interface Props {
   onSkip: () => void;
 }
 
-export function HostPlaying({ view, song, songNo, total, clip, audio, graceUntil, msLeft, note, wrong, link, onPlay, onMore, onReveal, onSkip }: Props){
+export function HostPlaying({ view, song, songNo, total, ladder, clip, audio, graceUntil, msLeft, note, wrong, link, onPlay, onMore, onReveal, onSkip }: Props){
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), 200);
@@ -43,14 +44,14 @@ export function HostPlaying({ view, song, songNo, total, clip, audio, graceUntil
   const graceLeft = graceUntil && state === "live" ? Math.max(0, Math.ceil((graceUntil - now) / 1000)) : null;
   const recentWrong = wrong && now - wrong.at < ROOM_WRONG_BEAT_MS + 700 ? wrong : null;
   const { from, to } = clip.span;
-  const nextLen = clip.rung < LAST_RUNG ? CLIP_SEGMENTS[clip.rung + 1] : null;
+  const nextLen = clip.rung < ladder.last ? ladder.segments[clip.rung + 1] : null;
   const clipLeft = Math.max(0, Math.ceil(to - from - (now - clip.startedAt) / 1000));
-  const inSpan = (i: number) => i <= clip.rung && rungStart(i) >= from;
+  const inSpan = (i: number) => i <= clip.rung && ladder.start(i) >= from;
   const paused = answering || audio === "paused";
   const line = answering ? "" : state === "missed" ? "Nobody yet"
     : cueing ? "Threading the film" : playing ? "Buzz when you know it" : graceLeft !== null ? `Anyone? ${graceLeft}` : "";
   const ladderState = answering ? "Paused for an answer" : cueing ? "Loading" : playing ? `${clipLeft}s left` : state === "missed" ? "More coming" : "Buzzers open";
-  const worth = song && song.rung >= 0 ? song.points : CLIP_POINTS[clip.rung];
+  const worth = song && song.rung >= 0 ? song.points : ladder.points[clip.rung];
   const queue = song?.queue ?? [];
 
   return (
@@ -98,17 +99,17 @@ export function HostPlaying({ view, song, songNo, total, clip, audio, graceUntil
           <span className={p.ladderLabel}>Clip length</span>
           <span className={p.ladderState}>{ladderState}</span>
         </div>
-        <div className={p.strip} style={{ gridTemplateColumns: CLIP_SEGMENTS.map(sec => `${sec}fr`).join(" ") }}>
-          {CLIP_SEGMENTS.map((sec, i) => {
+        <div className={p.strip} style={{ gridTemplateColumns: ladder.segments.map(sec => `${sec}fr`).join(" ") }}>
+          {ladder.segments.map((sec, i) => {
             const heard = i < clip.rung || (i === clip.rung && !cueing);
             const running = (playing || paused) && inSpan(i) && clip.startedAt > 0;
             return (
               <div key={i} className={`${p.frame} ${heard && !running && !(cueing && inSpan(i)) ? p.frameDone : ""} ${i === clip.rung ? p.frameNow : ""} ${running ? p.frameLit : ""}`}>
                 {running && (
                   <div key={clip.key} className={`${p.frameFill} ${p.frameRun}`}
-                    style={{ animationDuration: `${sec}s`, animationDelay: `${rungStart(i) - from}s`, animationPlayState: paused ? "paused" : undefined }} />
+                    style={{ animationDuration: `${sec}s`, animationDelay: `${ladder.start(i) - from}s`, animationPlayState: paused ? "paused" : undefined }} />
                 )}
-                <span className={p.frameText}>{i ? "+" : ""}{sec}s · {CLIP_POINTS[i]}</span>
+                <span className={p.frameText}>{i ? "+" : ""}{sec}s · {ladder.points[i]}</span>
               </div>
             );
           })}
