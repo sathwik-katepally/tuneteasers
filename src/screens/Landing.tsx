@@ -3,6 +3,7 @@ import { LazyMotion, MotionConfig, domAnimation } from "motion/react";
 import * as m from "motion/react-m";
 import { ladderFor } from "../lib/config";
 import { markLandingSeen } from "../lib/save";
+import type { Play } from "../types";
 import s from "./Landing.module.css";
 
 /* Easy's ladder: the first clip, then each "Hear more" step. */
@@ -16,7 +17,7 @@ const rise = (i: number) => ({
 });
 
 /* What the game is, shown on a first visit and from the About button. */
-export function Landing({ onStart, onJoin }: { onStart: () => void; onJoin: () => void }){
+export function Landing({ onStart, onJoin }: { onStart: (play: Play) => void; onJoin: () => void }){
   useEffect(() => { markLandingSeen(); window.scrollTo(0, 0); }, []);
   return (
     <LazyMotion features={domAnimation} strict>
@@ -49,14 +50,16 @@ export function Landing({ onStart, onJoin }: { onStart: () => void; onJoin: () =
                 </ol>
               </m.div>
 
-              <m.dl className={s.modes} {...rise(5)}>
-                <div><dt>Pass the phone</dt><dd>One phone goes round the room.</dd></div>
-                <div><dt>Buzz in</dt><dd>One screen plays, everyone buzzes from their own phone.</dd></div>
-              </m.dl>
-
-              <m.div className={s.actions} {...rise(6)}>
-                <button type="button" className="btn btn-primary btn-block" onClick={onStart}>Set up a game</button>
-                <button type="button" className="link" onClick={onJoin}>Join with a code</button>
+              <m.div className={s.actions} {...rise(5)}>
+                <button type="button" className={s.mode} onClick={() => onStart("pass")}>
+                  <span className={s.modeTitle}>Pass one phone</span>
+                  <span className={s.modeSub}>Everyone takes turns on this phone.</span>
+                </button>
+                <button type="button" className={`${s.mode} ${s.modeRoom}`} onClick={() => onStart("room")}>
+                  <span className={s.modeTitle}>Buzz in from every phone</span>
+                  <span className={s.modeSub}>This screen plays, friends join with a code.</span>
+                </button>
+                <button type="button" className={`link ${s.join}`} onClick={onJoin}>Got a code? Join a show</button>
               </m.div>
             </div>
           </div>

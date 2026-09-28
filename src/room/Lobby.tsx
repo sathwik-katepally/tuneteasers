@@ -17,54 +17,68 @@ export function Lobby({ code, view, link, settings, error, onStart, onKick, onBa
   const players = view?.players ?? [];
   const ready = link === "open" && players.length > 0;
   return (
-    <div className={sh.stage}>
+    <div className={`${sh.stage} ${s.lobby}`}>
       {error && <div className={s.error} role="alert">{error}</div>}
-      <div className={s.board}>
-        <BulbFrame mode="chase" gap={22} inset={7} size={8} />
-        <span className={s.eyebrow}>Room code</span>
-        <div className={s.letters} aria-label={`Room code ${code.split("").join(" ")}`}>
-          {code.split("").map((c, i) => <span key={i} className={s.letter}>{c}</span>)}
-        </div>
-        <span className={s.status}>{link === "open" ? "Doors open" : link === "gone" ? "Room closed" : "Opening the doors"}</span>
-      </div>
-
-      <div className={s.join}>
-        <Qr text={roomLink(code)} className={s.qr} label="QR code to join this room" />
-        <p className={s.how}>
-          Scan it with your phone camera, or open <b>{siteAddress()}</b> and type the code.
-          This screen plays the songs; your phone is the buzzer.
-        </p>
-      </div>
-
-      <div className={`${sh.paper} ${s.house}`}>
-        <div className={s.houseHead}>
-          <h2 className={s.houseTitle}>In the house</h2>
-          <span className={s.count}>{players.length ? `${players.length} in` : "Empty"}</span>
-        </div>
-        {players.length ? (
-          <div className={s.chips}>
-            {players.map(p => (
-              <span key={p.id} className={`${s.chip} ${p.online ? "" : s.chipAway}`}>
-                <span className={s.chipName}>{p.name}</span>
-                <button type="button" className={s.chipX} aria-label={`Remove ${p.name}`} onClick={() => onKick(p.id)}>
-                  <X size={14} strokeWidth={3} />
-                </button>
-              </span>
-            ))}
+      <div className={s.side}>
+        <div className={s.board}>
+          <BulbFrame mode="chase" gap={22} inset={7} size={8} />
+          <span className={s.eyebrow}>Room code</span>
+          <div className={s.letters} aria-label={`Room code ${code.split("").join(" ")}`}>
+            {code.split("").map((c, i) => <span key={i} className={s.letter}>{c}</span>)}
           </div>
-        ) : <p className={s.empty}>Waiting for the first phone.</p>}
+          <span className={s.status}>{link === "open" ? "Doors open" : link === "gone" ? "Room closed" : "Opening the doors"}</span>
+        </div>
+
+        <div className={s.join}>
+          <Qr text={roomLink(code)} className={s.qr} label="QR code to join this room" />
+          <p className={s.how}>
+            Scan it with your phone camera, or open <b>{siteAddress()}</b> and type the code.
+            This screen plays the songs; your phone is the buzzer.
+          </p>
+        </div>
       </div>
 
-      <div className={sh.actions}>
-        <div className={`${s.foot} ${sh.muted}`}>
-          <span>{LANG[settings.mix]}, {DIFFICULTY[settings.difficulty].label}</span>
-          <span>{settings.rounds} rounds of {ROOM_SONGS_PER_ROUND} songs</span>
+      <div className={s.side}>
+        <div className={`${sh.paper} ${s.house}`}>
+          <div className={s.houseHead}>
+            <h2 className={s.houseTitle}>In the house</h2>
+            <span className={s.count}>{players.length ? `${players.length} in` : "Empty"}</span>
+          </div>
+          {players.length ? (
+            <div className={s.chips}>
+              {players.map(p => (
+                <span key={p.id} className={`${s.chip} ${p.online ? "" : s.chipAway}`}>
+                  <span className={s.chipName}>{p.name}</span>
+                  <button type="button" className={s.chipX} aria-label={`Remove ${p.name}`} onClick={() => onKick(p.id)}>
+                    <X size={14} strokeWidth={3} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          ) : <p className={s.empty}>Waiting for the first phone.</p>}
         </div>
-        <button type="button" className="btn btn-primary btn-block" onClick={onStart} disabled={!ready}>
-          {players.length ? "Start the show" : "Waiting for players"}
-        </button>
-        <button type="button" className={`link ${s.back}`} onClick={onBack}>Close the room</button>
+
+        <div className={sh.actions}>
+          <div className={`${s.foot} ${sh.muted}`}>
+            <span>{LANG[settings.mix]}, {DIFFICULTY[settings.difficulty].label}</span>
+            <span>{settings.rounds} rounds of {ROOM_SONGS_PER_ROUND} songs</span>
+          </div>
+          <button type="button" className="btn btn-primary btn-block" onClick={onStart} disabled={!ready}>
+            {players.length ? "Start the show" : "Waiting for players"}
+          </button>
+          <button type="button" className={`link ${s.back}`} onClick={onBack}>Close the room</button>
+        </div>
       </div>
+    </div>
+  );
+}
+
+/* The corner tag a big screen keeps up during the show, for anyone arriving late. */
+export function JoinTag({ code }: { code: string }){
+  return (
+    <div className={s.tag}>
+      <Qr text={roomLink(code)} className={s.tagQr} label="QR code to join this room" />
+      <span className={s.tagText}>Late? Join<b className={s.tagCode}>{code}</b></span>
     </div>
   );
 }

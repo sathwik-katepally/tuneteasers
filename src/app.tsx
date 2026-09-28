@@ -22,7 +22,8 @@ import { Scoreboard } from "./screens/Scoreboard";
 import { Podium } from "./screens/Podium";
 import { Landing } from "./screens/Landing";
 import { PastGames } from "./screens/PastGames";
-import type { AppState, CastMember, Category, Difficulty, GameState, Mode, Phase, RosterEntry, Settings, Track, Turn, Verdict } from "./types";
+import { GroupScreen } from "./screens/GroupScreen";
+import type { AppState, CastMember, Category, Difficulty, GameState, Mode, Phase, Play, RosterEntry, Settings, Track, Turn, Verdict } from "./types";
 
 type Crate = { error?: string; queue?: Track[]; source?: string };
 const buildCrate = buildCrateJs as (mix: string, eras: string[], sound: string, difficulty: Difficulty, minSongs: number, cooldown?: Record<string, number>, categories?: Category[]) => Promise<Crate>;
@@ -35,9 +36,10 @@ const primaryArtistOf = (t: Track | null) => (t ? String(t.artist || "").split("
 export function App(){
   const [firstVisit] = useState(isFirstVisit);
   const [roomCode, setRoomCode] = useState(roomFromUrl);
-  // A group invite link skips the landing page like a room link does.
+  const [invite, setInvite] = useState(takeInviteFromUrl);
+  // A group invite link skips the landing page like a room link does, straight to the group screen.
   const [state, setState] = useState<AppState>(() => ({ ...loadSaved(),
-    ...(roomCode ? { screen: "buzzer" as const } : firstVisit && !location.hash.startsWith("#join=") ? { screen: "landing" as const } : {}) }));
+    ...(roomCode ? { screen: "buzzer" as const } : invite ? { screen: "group" as const } : firstVisit ? { screen: "landing" as const } : {}) }));
   // Where a phone's "Back to the start" goes: wherever it came from.
   const [buzzerExit, setBuzzerExit] = useState<"landing" | "setup">(firstVisit ? "landing" : "setup");
   const screenNow = useRef(state.screen);
@@ -55,7 +57,6 @@ export function App(){
   // The title of a song just skipped as heard too much, shown on the next countdown.
   const [skipped, setSkipped] = useState("");
   const [blocked, setBlocked] = useState<string[]>(loadBlocked);
-  const [invite, setInvite] = useState(takeInviteFromUrl);
   const groupSnap = useGroup();
   const startOnShow = useRef(0);
 
@@ -66,10 +67,10 @@ export function App(){
       if (code){
         setRoomCode(code);
         const from = screenNow.current;
-        if (from === "landing" || from === "setup" || from === "past"){ setBuzzerExit(from === "landing" ? "landing" : "setup"); setState(st => ({ ...st, screen: "buzzer" })); }
+        if (from === "landing" || from === "setup" || from === "past" || from === "group"){ setBuzzerExit(from === "landing" ? "landing" : "setup"); setState(st => ({ ...st, screen: "buzzer" })); }
         return;
       }
-      const i = takeInviteFromUrl(); if (i){ setInvite(i); setState(st => ({ ...st, screen: st.screen === "past" || st.screen === "landing" ? "setup" : st.screen })); }
+      const i = takeInviteFromUrl(); if (i){ setInvite(i); setState(st => ({ ...st, screen: ["past", "landing", "setup"].includes(st.screen) ? "group" : st.screen })); }
     };
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
@@ -306,7 +307,7 @@ export function App(){
     return <Phone code={roomCode} onExit={() => { setRoomCode(""); setState(st => ({ ...st, screen: buzzerExit })); }} />;
   }
   if (state.screen === "landing"){
-    return <Landing onStart={() => setState(st => ({ ...st, screen: "setup" }))}
+    return <Landing onStart={(play: Play) => setState(st => ({ ...st, screen: "setup", settings: { ...st.settings, play } }))}
       onJoin={() => { setBuzzerExit("landing"); setRoomCode(""); setState(st => ({ ...st, screen: "buzzer" })); }} />;
   }
 
@@ -316,13 +317,16 @@ export function App(){
     screen = <Loading settings={S} />;
   } else if (state.screen === "past" && groupSnap.group){
     key = "past"; meta = "Past shows";
-    screen = <PastGames group={groupSnap.group} onBack={() => setState(st => ({ ...st, screen: "setup" }))} />;
-  } else if (state.screen === "setup" || state.screen === "past" || !g){
+    screen = <PastGames group={groupSnap.group} onBack={() => setState(st => ({ ...st, screen: "group" }))} />;
+  } else if (state.screen === "group" || state.screen === "past"){
+    key = "group"; meta = "Phone group";
+    screen = <GroupScreen invite={invite} clearInvite={() => setInvite("")} showPastGames={() => setState(st => ({ ...st, screen: "past" }))}
+      onBack={() => { setInvite(""); setState(st => ({ ...st, screen: "setup" })); }} />;
+  } else if (state.screen === "setup" || !g){
     key = "setup";
     const saved = g && !g.finished ? g : null;
     screen = <Setup error={error} settings={S} upSettings={upSettings} players={state.players} teams={state.teams} setRoster={setRoster}
       blocked={blocked} unblockArtist={unblockArtist} startGame={() => startGame()} savedGame={saved}
-      invite={invite} clearInvite={() => setInvite("")} showPastGames={() => setState(st => ({ ...st, screen: "past" }))}
       hostShow={hostShow?.started ? hostShow : null}
       openRoom={() => { engine.ac(); saveHostShow(null); setHostShow(null); setHostResume(false); setState(st => ({ ...st, screen: "host" })); }}
       resumeRoom={() => { engine.ac(); setHostResume(true); setState(st => ({ ...st, screen: "host" })); }}
@@ -378,7 +382,8 @@ export function App(){
   const inGame = state.screen === "game" && !!g && !loading;
   return (
     <Stage screenKey={key} meta={meta} game={inGame ? g : null} onHome={goHome} onEnd={endGame} onShown={key === "playing" ? shown : undefined}
-      onAbout={key === "setup" ? () => setState(st => ({ ...st, screen: "landing" })) : undefined}>
+      onAbout={key === "setup" ? () => setState(st => ({ ...st, screen: "landing" })) : undefined}
+      menu={key === "setup" ? [{ label: "Phone group", onClick: () => setState(st => ({ ...st, screen: "group" })) }] : undefined}>
       {screen}
     </Stage>
   );
