@@ -105,7 +105,7 @@ export class Room extends Server {
     this.room = {
       code, hostHash, createdAt: Date.now(), touchedAt: Date.now(),
       phase: "lobby", players: [], rules: { answerSecs: 15 },
-      mix: "both", total: 0, perRound: 1, song: null, results: [], seq: 0, skips: 0,
+      mix: "both", total: 0, perRound: 1, song: null, results: [], seq: 0, skips: 0, cues: 0,
     };
     await this.save();
     return true;
@@ -253,7 +253,7 @@ export class Room extends Server {
       seq: r.seq,
       skips: { used: r.skips || 0, max: rules.max },
       song: s && {
-        n: s.n, rung: s.rung, points: s.points, state: s.state,
+        n: s.n, cue: s.cue ?? 0, rung: s.rung, points: s.points, state: s.state,
         queue: s.queue.map(q => q.id), locked: s.locked, answering: s.answering,
         msLeft: s.deadline ? Math.max(0, s.deadline - Date.now()) : null,
         guesses: s.guesses, winner: s.winner, won: s.won,
@@ -312,15 +312,18 @@ export class Room extends Server {
   skipSong(){
     const r = this.room, s = r.song;
     r.skips = (r.skips || 0) + 1;
-    r.song = { n: s.n, rung: -1, points: 0, state: "skipped", answer: null,
+    r.song = { n: s.n, cue: s.cue, rung: -1, points: 0, state: "skipped", answer: null,
       queue: [], locked: [], answering: null, deadline: null, guesses: [], winner: null, won: 0, near: [], votes: [] };
     r.seq++;
   }
 
-  /* Votes open while the song is cued or playing, until anyone buzzes. */
-  canSkip(){
+  /* Votes open once the clip is playing (nobody can know the song before),
+     until anyone buzzes. `cue` names the song a vote or skip was meant for,
+     so one that arrives after a re-cue can't skip the replacement. */
+  canSkip(cue){
     const r = this.room, s = r.song;
-    if (!s || (s.state !== "cue" && s.state !== "live") || s.queue.length || s.guesses.length) return "not-now";
+    if (!s || cue !== s.cue) return "stale";
+    if (s.state !== "live" || s.queue.length || s.guesses.length) return "not-now";
     if ((r.skips || 0) >= skipRules(this.env).max) return "no-skips";
     return null;
   }
@@ -364,8 +367,10 @@ const HOST = {
     // so a host that re-cues (a resume, a skip) can't replay a scored song.
     if (m.n !== r.results.length + 1 || m.n > r.total) return "bad-song-number";
     if (!Array.isArray(m.near) || m.near.length > LIMITS.near) return "bad-song";
+    // Every cue, a re-cue of the same n included, gets its own id.
+    r.cues = (r.cues || 0) + 1;
     r.song = {
-      n: m.n, rung: -1, points: 0, state: "cue",
+      n: m.n, cue: r.cues, rung: -1, points: 0, state: "cue",
       answer: { title, film: clean(m.film, LIMITS.title), year: intIn(m.year, 0, 3000) ? m.year : 0, artist: clean(m.artist, LIMITS.title) },
       queue: [], locked: [], answering: null, deadline: null, guesses: [], winner: null, won: 0, votes: [],
       // Other titles that fold close to this one: judging only, never in a view.
@@ -383,9 +388,7 @@ const HOST = {
   },
   /* The host skips straight away, no vote needed; it still counts toward the cap. */
   skip(conn, m){
-    const s = this.room.song;
-    if (!s || m.n !== s.n) return "bad-song-number";
-    const err = this.canSkip();
+    const err = this.canSkip(m.cue);
     if (err) return err;
     this.skipSong();
   },
@@ -422,9 +425,9 @@ const PLAYER = {
     if (s.state !== "answering") this.nextAnswerer();
   },
   /* "Heard it too much". Only the tally and who voted are in a view. */
-  vote(conn){
+  vote(conn, m){
     const r = this.room, s = r.song, me = conn.state.seat;
-    if (this.canSkip()) return SAME;
+    if (this.canSkip(m.cue)) return SAME;
     s.votes ||= [];
     if (s.votes.includes(me)) return SAME;
     s.votes.push(me);

@@ -306,7 +306,7 @@ async function guards(code, hostToken, total){
   if (song().n !== n || song().answer) fail("a refused song number changed the room");
   // Someone has buzzed on this song, so it can no longer be skipped.
   h.got.length = 0;
-  h.ws.send(JSON.stringify({ t: "skip", n }));
+  h.ws.send(JSON.stringify({ t: "skip", cue: song().cue }));
   await sleep(300);
   if (!h.got.some(m => m.code === "not-now")) fail("the room skipped a song after a buzz");
   for (const c of [bad, none, fake, h]) try { c.ws.close(); } catch {}
@@ -505,9 +505,20 @@ try {
     if (song().n !== 5 || hostState().results.length !== 4) fail("a skip changed the song number or the results");
     await live(5, 0);
   };
+  // A second host socket, as a script would send what the app never does.
+  const rawHost = async () => {
+    const ws = new WebSocket(worker.origin.replace(/^http/, "ws") + "/parties/room/" + code, { headers: { origin } });
+    const got = [];
+    ws.onmessage = e => got.push(JSON.parse(String(e.data)));
+    await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });
+    ws.send(JSON.stringify({ t: "host", token: (await hostShow()).host }));
+    await sleep(300);
+    return { got, send: async m => { got.length = 0; ws.send(JSON.stringify(m)); await sleep(300); return got.find(x => x.t === "error")?.code; }, close: () => ws.close() };
+  };
   const cued = async () => { const s = await hostShow(); const t = s.queue[s.idx]; return { idx: s.idx, title: displayTitle(t.title), tier: t.tier ?? null }; };
   if (hostState().skips.used !== 0 || hostState().skips.max < 2) fail(`unexpected skip budget ${JSON.stringify(hostState().skips)}`);
   let before = await cued();
+  const firstCue = song().cue;
   await voteBtn(asha).click();
   await until("Asha's vote", () => song().votes.length === 1);
   await sleep(600);
@@ -520,6 +531,15 @@ try {
   await voteBtn(ravi).click();
   await skipTo(1, before);
   if (song().votes.length) fail("votes carried over to the new song");
+  if (song().cue === firstCue) fail("the replacement kept the skipped song's cue");
+  // A skip meant for the skipped song, arriving late, can't skip its replacement.
+  {
+    const h = await rawHost();
+    const code1 = await h.send({ t: "skip", cue: firstCue });
+    h.close();
+    if (code1 !== "stale") fail(`a late skip for the old cue answered ${code1}`);
+    if (hostState().skips.used !== 1 || song().state !== "live") fail("a late skip hit the replacement");
+  }
   for (let used = 2; used <= hostState().skips.max; used++){
     before = await cued();
     await hostSkip.click();
@@ -531,16 +551,10 @@ try {
   await shot(host, "host-13-skips-used");
   // The room itself holds the cap, whatever a client sends.
   {
-    const ws = new WebSocket(worker.origin.replace(/^http/, "ws") + "/parties/room/" + code, { headers: { origin } });
-    const got = [];
-    ws.onmessage = e => got.push(JSON.parse(String(e.data)));
-    await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });
-    ws.send(JSON.stringify({ t: "host", token: (await hostShow()).host }));
-    await sleep(300);
-    ws.send(JSON.stringify({ t: "skip", n: 5 }));
-    await sleep(300);
-    ws.close();
-    if (!got.some(m => m.code === "no-skips")) fail("the room skipped past its cap");
+    const h = await rawHost();
+    const capped = await h.send({ t: "skip", cue: song().cue });
+    h.close();
+    if (capped !== "no-skips") fail(`a skip past the cap answered ${capped}`);
     if (hostState().skips.used !== hostState().skips.max) fail("a refused skip changed the count");
   }
 

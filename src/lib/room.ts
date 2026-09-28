@@ -21,6 +21,8 @@ export interface Guess { id: string; text: string; ok: boolean; timeout: boolean
 export interface RoomAnswer { title: string; film: string; year: number; artist: string }
 export interface RoomSong {
   n: number;
+  /* This cue of song n; a re-cue after a skip gets a new one. */
+  cue: number;
   rung: number;
   points: number;
   state: SongState;

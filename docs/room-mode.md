@@ -44,12 +44,13 @@ Autocomplete offers every known title in the show's languages; if she is right s
 
 ## Skipping a song ("Heard it too much")
 
-While a song is cued or playing, and until anyone buzzes, each phone shows "Heard it too much".
+Once a song's clip is playing (a cued song hasn't been heard yet), and until anyone buzzes, each phone shows "Heard it too much".
 A tap sends `vote`; the room counts votes itself and skips once more than `ROOM_SKIP_VOTE_SHARE` (0.5) of the seated players have voted, so 2 of 3 or 3 of 4.
 Seated means every player with a seat, online or not; the host can always skip on its own ("Heard it too much" under the song, which sends `skip`).
 A show has `ROOM_SKIPS_PER_SHOW` (3) skips in all, votes and host skips together; "Same crowd again" gives them back.
 Both numbers are Worker vars in `worker/wrangler.jsonc`, because the room is what enforces them; the view carries `skips { used, max }` and each song's `votes` and `votesNeeded` for the screens.
 
+Every `song` the room accepts gets a new `cue` id, a re-cue of the same `n` included, and `vote` and `skip` name the cue they are for; one that arrives after a re-cue is stale and ignored, so a late vote or a replayed skip can't skip the replacement or spend the cap.
 A skip puts the song in state `skipped` without a result, a reveal or its answer, so no phone ever receives the skipped title.
 The host acts on the room's skip count rather than on a tap, so each skip happens exactly once, a reload included (`skipsSeen` in the saved show): it stops the audio, records the song as `tired` for this device and the group (docs/song-loading.md), and cues song `n` again with the next queued song from the same corpus tier, falling back to the next song when that tier has run out.
 Its countdown shows "Skipped: <title>" on the big screen only.
@@ -73,10 +74,10 @@ The first message must be a hello; anything else is refused until then, and a co
 | host | `song { n, title, film, year, artist, near }` | Arms song `n` (buzzing shut). `n` must be one past the number of results and at most `total`, so a re-cue can restart an unfinished song but never replay a scored one |
 | host | `clip { rung, points }` | A clip is playing; buzzing open at these points |
 | host | `reveal` / `end` / `kick { id }` | Nobody got it / show over / remove a player (lobby only) |
-| host | `skip { n }` | Skips song `n` straight away (cue or live, nobody has buzzed, a skip left) |
+| host | `skip { cue }` | Skips the song straight away (clip live, nobody has buzzed, a skip left) |
 | phone | `join { key, name }` | Takes a seat, or gets its seat back when the key is known |
 | phone | `buzz` / `answer { text }` / `leave` | |
-| phone | `vote` | "Heard it too much" for the current song; a majority skips it |
+| phone | `vote { cue }` | "Heard it too much" for the current song; a majority skips it |
 | room | `welcome`, `state`, `error { code }`, `kicked` | `state` is the full view for that device, sent after every change |
 
 `POST /api/rooms` (no body, so no CORS preflight) draws a free code and returns `{ code, host }`; only the SHA-256 of the host secret is stored.

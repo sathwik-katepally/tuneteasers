@@ -391,7 +391,7 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
         <HostPlaying view={view} song={view.song?.n === show.songNo + 1 ? view.song : null} songNo={show.songNo + 1} total={show.total} ladder={ladder} clip={clip} audio={audio}
           graceUntil={graceUntil} msLeft={msLeft} note={note} wrong={wrong} link={room.link}
           onPlay={() => playClip(clip.rung, true)} onMore={carryOn} onReveal={giveUp} onSkip={skipSong}
-          onHeardIt={() => room.send({ t: "skip", n: show.songNo + 1 })} />
+          onHeardIt={cue => room.send({ t: "skip", cue })} />
       );
   }
   const inShow = !!show?.started && phase !== "lobby" && phase !== "failed" && phase !== "opening";

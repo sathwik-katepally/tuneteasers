@@ -39,7 +39,7 @@ Everything is optional; with no group, or with the Worker unreachable, the game 
 | `DELETE /api/group` | owner | Deletes the group and all its rows |
 
 Each round is an event with a client-made id; the server stamps the time.
-In one D1 batch the event is inserted once (`INSERT OR IGNORE`) and `played.last_played_at` for that song and kind is upserted to `MAX(existing, event time)` from the stored event, so a retried request keeps its first timestamp and a late one cannot shorten the cooldown.
+In one D1 batch the event is inserted once (`INSERT OR IGNORE`) and its song's time in `played` or `tired` (by kind) is upserted to `MAX(existing, event time)` from the stored event, so a retried request keeps its first timestamp and a late one cannot shorten the cooldown.
 An older client that sends no `kind` records plays, and one that reads only `played` still gets every played song.
 Results are idempotent by the game's id.
 The import is the one place client timestamps are accepted, clamped to the played window and never in the future.
@@ -47,8 +47,9 @@ The import is the one place client timestamps are accepted, clamped to the playe
 ## Data and retention
 
 Schema: `worker/migrations/` (D1 migrations, applied by CI).
-Tables: `groups`, `played` (group, song key, kind, last played; one row per song and kind, since migration `0002_played_kind.sql`), `round_events` (idempotency log, with the kind), `results`.
-Windows are Worker vars: `PLAYED_TTL_DAYS` (30, for `played` and `round_events`; it must stay at least the longest client `COOLDOWN_DAYS`, the 30-day tired cooldown), `RESULT_TTL_DAYS` (365), `GROUP_IDLE_TTL_DAYS` (365 without writes).
+Tables: `groups`, `played` (group, song key, last played), `tired` (group, song key, last skipped as heard too much), `round_events` (idempotency log, with the kind), `results`.
+Migrations stay additive: `0002_tired.sql` added `tired` and `round_events.kind` (default `played`) without touching `played`, so a Worker from before it, mid-deploy or after a rollback, keeps recording plays.
+Windows are Worker vars: `PLAYED_TTL_DAYS` (30, for `played`, `tired` and `round_events`; it must stay at least the longest client `COOLDOWN_DAYS`, the 30-day tired cooldown), `RESULT_TTL_DAYS` (365), `GROUP_IDLE_TTL_DAYS` (365 without writes).
 Reads filter by these windows, and authentication refuses an idle-expired group, so an expired row is never served.
 Deletion runs from group writes, at most hourly per Worker isolate, because this account's five free cron triggers are all taken; a group nobody writes to is still hidden by the read filters and swept on the next write from any group.
 

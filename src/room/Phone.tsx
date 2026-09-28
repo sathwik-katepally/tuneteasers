@@ -177,8 +177,8 @@ function Buzzer({ view, send, online, error }: {
   const place = song ? song.queue.indexOf(me) : -1;
   const open = (state === "live" || state === "answering" || state === "missed") && !out && !queued && online;
   const titles = useAnswerTitles(view.mix);
-  // "Heard it" votes are open while the song is cued or playing, until anyone buzzes.
-  const votable = (state === "cue" || state === "live") && !!song && !song.queue.length && !song.guesses.length && online;
+  // "Heard it" votes are open once the clip plays, until anyone buzzes.
+  const votable = state === "live" && !!song && !song.queue.length && !song.guesses.length && online;
   const voted = !!song?.votes.includes(me);
   const skipsLeft = view.skips.max - view.skips.used;
   const hints = useMemo(() => suggest(text, titles, 5), [text, titles]);
@@ -270,7 +270,7 @@ function Buzzer({ view, send, online, error }: {
           </button>
           <p className={s.sub} aria-live="polite">{sub}</p>
           {votable && skipsLeft > 0 && (
-            <button type="button" className={`link ${s.vote}`} onClick={() => send({ t: "vote" })} disabled={voted}>
+            <button type="button" className={`link ${s.vote}`} onClick={() => send({ t: "vote", cue: song!.cue })} disabled={voted}>
               {voted ? `Voted to skip · ${song!.votes.length} of ${song!.votesNeeded}`
                 : song!.votes.length ? `Heard it too much · ${song!.votes.length} of ${song!.votesNeeded}` : "Heard it too much"}
             </button>
