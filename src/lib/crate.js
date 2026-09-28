@@ -90,16 +90,13 @@ const inCategories = (s, categories) => !categories.length || (Array.isArray(s.t
    "none" (no corpus) and "unresolved" (ids could not be turned into streams)
    fall through to the uncurated tiers; "thin" is a filter problem the user
    must widen, not a reason to play unverified songs. */
-async function loadFromCorpus(langs, eras, difficulty, blocked, cooldown, safeIds, minSongs, categories){
+async function loadFromCorpus(langs, eras, difficulty, blocked, cooldown, heardBy, safeIds, minSongs, categories){
   const corpus = await loadCorpus();
   if (!corpus) return { status:"none", pool:[] };
   const eligible = corpusEligible(corpus, langs, eras, blocked, safeIds).filter(s => inCategories(s, categories));
   const cands = difficultyCands(eligible, difficulty, safeIds, minSongs);
   if (cands.length < minSongs) return { status:"thin", pool:[] };
-  const now = Date.now();
-  const fresh = [], stale = [];
-  for (const s of cands) ((cooldown[songKey(s.title)] || 0) <= now ? fresh : stale).push(s);
-  stale.sort((a,b) => cooldown[songKey(a.title)] - cooldown[songKey(b.title)]);
+  const { fresh, stale } = splitCooldown(cands, s => songKey(s.title), cooldown, heardBy);
   const draw = shuffle(fresh).concat(stale).slice(0, Math.max(CORPUS_DRAW, minSongs * 2));
   const batches = [];
   for (let i = 0; i < draw.length; i += CORPUS_BATCH) batches.push(draw.slice(i, i + CORPUS_BATCH));
@@ -260,15 +257,26 @@ export async function refreshMusicQueue(queue){
   return queue.map(t => ({ ...t, snip:verifiedSnip(t, index) || undefined })).filter(t => t.snip);
 }
 
+/* Songs still sitting out go after every fresh one; among them the ones the
+   fewest people present have heard come first, then the soonest due. */
+function splitCooldown(list, keyOf, cooldown, heardBy){
+  const now = Date.now();
+  const fresh = [], stale = [];
+  for (const t of list) ((cooldown[keyOf(t)] || 0) > now ? stale : fresh).push(t);
+  stale.sort((a,b) => ((heardBy[keyOf(a)] || 0) - (heardBy[keyOf(b)] || 0)) || (cooldown[keyOf(a)] - cooldown[keyOf(b)]));
+  return { fresh, stale };
+}
+
 /* Returns { queue, source } or { error: "load" | "thin" | "safe" }.
    difficulty: "easy" | "medium" | "hard" | "mixed" (corpus tiers; the
    uncurated fallback tiers carry no difficulty and ignore it).
    cooldown: song key -> the time it may come back (cooldownOf), this
-   phone's own unless a group's is passed.
+   phone's own unless the caller merged a group's or a room's in;
+   heardBy: song key -> how many of the people present heard it.
    categories: corpus tags, any of which a song must carry; [] means every
    song. The fallback tiers carry no tags, so with categories set they never
    run and an unreachable corpus is a load error. */
-export async function buildCrate(mix, eras, sound, difficulty = "mixed", minSongs = 10, cooldown = cooldownOf(loadHistory()), categories = []){
+export async function buildCrate(mix, eras, sound, difficulty = "mixed", minSongs = 10, cooldown = cooldownOf(loadHistory()), categories = [], heardBy = {}){
   const t0 = performance.now();
   const langs = langsOf(mix);
   const key = t => songKey(t.title);
@@ -279,7 +287,7 @@ export async function buildCrate(mix, eras, sound, difficulty = "mixed", minSong
   }
   const blocked = new Set(loadBlocked().map(normArtist));
   const safeIds = sound === "inst" ? new Set(Object.keys(snips?.snips || {})) : null;
-  const corpus = await loadFromCorpus(langs, eras, difficulty, blocked, cooldown, safeIds, minSongs, categories);
+  const corpus = await loadFromCorpus(langs, eras, difficulty, blocked, cooldown, heardBy, safeIds, minSongs, categories);
   const tiers = { corpus: corpus.status === "ok" ? corpus.pool.length : corpus.status };
   if (corpus.status === "thin"){
     log("crate", { mix, difficulty, categories, source:"corpus", ...tiers, ms: ms(t0) });
@@ -331,12 +339,9 @@ export async function buildCrate(mix, eras, sound, difficulty = "mixed", minSong
   if (blocked.size) pool = pool.filter(t => !isBlocked(t, blocked));
   if (sound === "inst") pool = pool.filter(t => t.snip);
   if (pool.length < minSongs) return { error:sound === "inst" ? "safe" : "thin" };
-  // Songs still cooling down (this phone, or the whole group) sit out; when the fresh pool runs thin,
-  // repeats come back soonest-due first, queued after all fresh songs.
-  const now = Date.now();
-  const fresh = [], stale = [];
-  for (const t of pool) ((cooldown[key(t)] || 0) <= now ? fresh : stale).push(t);
-  stale.sort((a,b) => cooldown[key(a)] - cooldown[key(b)]);
+  // Songs still cooling down (this phone, the group, a room's phones) sit out; when the fresh pool
+  // runs thin, repeats come back after all fresh songs (splitCooldown).
+  const { fresh, stale } = splitCooldown(pool, key, cooldown, heardBy);
   let queue = fresh.length >= 15 ? shuffle(fresh) : shuffle(fresh).concat(stale);
   // A full show's worth of verified tracks is required before the game starts.
   if (queue.length < minSongs) return { error:sound === "inst" ? "safe" : "thin" };
@@ -379,13 +384,31 @@ export async function answerTitles(mix){
 
 /* The queue with the next song swapped for the first later one from the
    same corpus tier as the song at idx (tierless fallback songs match each
-   other), or null when none is left. A "Heard it too much" skip takes its
-   replacement from here, so skipping a hard song can't fish for an easy one. */
-export function withSameTierNext(queue, idx){
+   other), one not cooling down when there is one, or null when none is left.
+   A "Heard it too much" skip takes its replacement from here, so skipping a
+   hard song can't fish for an easy one. */
+export function withSameTierNext(queue, idx, cooldown = {}){
   const tier = queue[idx]?.tier;
-  const j = queue.findIndex((t, i) => i > idx && t.tier === tier);
+  const now = Date.now();
+  const later = (t, i) => i > idx && t.tier === tier;
+  let j = queue.findIndex((t, i) => later(t, i) && !((cooldown[songKey(t.title)] || 0) > now));
+  if (j < 0) j = queue.findIndex(later);
   if (j < 0) return null;
   const q = queue.slice();
   [q[idx + 1], q[j]] = [q[j], q[idx + 1]];
+  return q;
+}
+
+/* The queue with the song at idx swapped for the first later one of its tier
+   that is not cooling down, when it is (a phone that joined a room after the
+   crate was built heard it); the same queue otherwise. */
+export function withFreshAt(queue, idx, cooldown){
+  const now = Date.now();
+  const cooling = t => (cooldown[songKey(t.title)] || 0) > now;
+  if (!queue[idx] || !cooling(queue[idx])) return queue;
+  const j = queue.findIndex((t, i) => i > idx && t.tier === queue[idx].tier && !cooling(t));
+  if (j < 0) return queue;
+  const q = queue.slice();
+  [q[idx], q[j]] = [q[j], q[idx]];
   return q;
 }

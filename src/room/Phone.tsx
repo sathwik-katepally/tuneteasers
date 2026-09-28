@@ -8,8 +8,8 @@ import { NAME_MAX } from "../lib/config";
 import { prepareTitles, suggest } from "../lib/answer.js";
 import { answerTitles } from "../lib/crate.js";
 import { displayTitle } from "../lib/utils.js";
-import { cleanCode, dropSeat, isCode, lastName, loadSeat, newSeat, playerName, rememberName, setRoomUrl, useMsLeft, useRoom,
-  type RoomView, type Seat } from "../lib/room";
+import { cleanCode, dropSeat, heardPayload, isCode, lastName, loadSeat, newSeat, playerName, rememberName, setRoomUrl, useMsLeft,
+  useRecordHeard, useRoom, type RoomView, type Seat } from "../lib/room";
 import sh from "../screens/shared.module.css";
 import s from "./Phone.module.css";
 
@@ -35,10 +35,12 @@ export function Phone({ code: initial, onExit }: { code: string; onExit: () => v
   const [notice, setNotice] = useState("");
   // A code that came in a link is shown as fixed text; typing one is only for when it didn't work.
   const [linked, setLinked] = useState(() => isCode(initial));
-  const hello = seat ? { t: "join", key: seat.key, name: joining ?? "" } : null;
+  // Read at every (re)connect, so the seat always has this phone's latest history.
+  const hello = seat ? () => ({ t: "join", key: seat.key, name: joining ?? "", heard: heardPayload() }) : null;
   const room = useRoom(seat ? code : "", hello);
   const view = room.view;
   const me = view?.me ?? null;
+  useRecordHeard(me ? view : null);
 
   useEffect(() => { setRoomUrl(seat ? code : ""); }, [seat, code]);
 

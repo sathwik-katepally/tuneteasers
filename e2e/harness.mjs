@@ -101,6 +101,42 @@ export function args(defaults){
   return out;
 }
 
+/* The deployed Worker's host, rerouted in a browser context to `workerOrigin`
+   (a local `wrangler dev` or a preview): HTTP through Playwright, WebSockets
+   through a proxy in the test script that appends every frame to `log` as
+   { at, dir: "in" | "out", data }. onIn gets each parsed frame the page
+   receives, onOut each raw frame it sends. */
+export const WORKER_HOST = "tuneteasers-saavn.sathwik-katepally.workers.dev";
+export async function wireWorker(context, workerOrigin, pageOrigin, log, { onIn, onOut } = {}){
+  await context.route(u => u.host === WORKER_HOST, async route => {
+    const u = new URL(route.request().url());
+    try {
+      const res = await route.fetch({ url: workerOrigin + u.pathname + u.search });
+      return route.fulfill({ response: res });
+    } catch { return route.abort(); }
+  });
+  await context.routeWebSocket(u => u.host === WORKER_HOST, ws => {
+    const u = new URL(ws.url());
+    const up = new WebSocket(workerOrigin.replace(/^http/, "ws") + u.pathname + u.search, { headers: { origin: pageOrigin } });
+    const pending = [];
+    up.onopen = () => { for (const m of pending.splice(0)) up.send(m); };
+    up.onmessage = e => {
+      const data = String(e.data);
+      log.push({ at: Date.now(), dir: "in", data });
+      if (onIn) try { onIn(JSON.parse(data)); } catch {}
+      ws.send(data);
+    };
+    up.onclose = e => { try { ws.close({ code: e.code >= 4000 ? e.code : 1000, reason: e.reason }); } catch {} };
+    ws.onMessage(m => {
+      const data = String(m);
+      log.push({ at: Date.now(), dir: "out", data });
+      onOut?.(data);
+      if (up.readyState === 1) up.send(data); else pending.push(data);
+    });
+    ws.onClose(() => { try { up.close(); } catch {} });
+  });
+}
+
 export const saved = page => page.evaluate(() => JSON.parse(localStorage.getItem("tuneteasers_v7") || "null"));
 
 /* Setup keeps era, difficulty, song kinds and rounds behind its summary line; open it. */

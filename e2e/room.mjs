@@ -13,13 +13,15 @@
    - the podium matches the room, and every phone's final place does too,
    - "Heard it too much": one vote of three does not skip, a majority does,
      the host can skip on its own, the room stops at its skip cap, votes
-     close once someone buzzes, and a skipped title never reaches a phone,
-   - no phone ever receives the title before its reveal, or any stream URL.
+     close once someone buzzes, and a skipped song reaches a phone only as
+     its song key, after the skip,
+   - no phone ever receives the title before its reveal, or any stream URL,
+     or the merged song history the room keeps for the host.
    node e2e/room.mjs [--host=phone] [--difficulty=easy|medium|hard] [--categories=item,mass] [--phone-engine=chromium] [--worker=https://...] [--shots=dir] */
 import fs from "node:fs";
 import path from "node:path";
 import { chromium, webkit, devices } from "playwright";
-import { serve, args, localWorker, silence, skipLanding, moreSettings, MUTE_ARGS } from "./harness.mjs";
+import { serve, args, localWorker, silence, skipLanding, moreSettings, wireWorker, MUTE_ARGS } from "./harness.mjs";
 import { displayTitle } from "../src/lib/utils.js";
 import { CATEGORIES, DIFFICULTY, ROOM_ANSWER_SECS, ladderFor } from "../src/lib/config.ts";
 import { songKey } from "../src/lib/utils.js";
@@ -30,7 +32,6 @@ const CLIP_POINTS = LADDER.points;
 const categories = A.categories ? A.categories.split(",") : [];
 const shotsDir = A.shots && A.shots !== "true" ? A.shots : null;
 if (shotsDir) fs.mkdirSync(shotsDir, { recursive: true });
-const WORKER_HOST = "tuneteasers-saavn.sathwik-katepally.workers.dev";
 
 const worker = A.worker ? { origin: A.worker.replace(/\/$/, ""), stop(){} } : await localWorker();
 const server = await serve();
@@ -43,36 +44,10 @@ const traffic = {}; // label -> [{ at, dir, data }]
 const latest = {};  // label -> last room state that label received
 let buzzLog = [];   // [label] in the order buzz frames were forwarded to the room
 
-async function wire(context, label){
-  await context.route(u => u.host === WORKER_HOST, async route => {
-    const u = new URL(route.request().url());
-    try {
-      const res = await route.fetch({ url: worker.origin + u.pathname + u.search });
-      return route.fulfill({ response: res });
-    } catch { return route.abort(); }
-  });
-  await context.routeWebSocket(u => u.host === WORKER_HOST, ws => {
-    const u = new URL(ws.url());
-    const up = new WebSocket(worker.origin.replace(/^http/, "ws") + u.pathname + u.search, { headers: { origin } });
-    const pending = [];
-    const log = traffic[label] ||= [];
-    up.onopen = () => { for (const m of pending.splice(0)) up.send(m); };
-    up.onmessage = e => {
-      const data = String(e.data);
-      log.push({ at: Date.now(), dir: "in", data });
-      try { const m = JSON.parse(data); if (m.t === "state") latest[label] = m; } catch {}
-      ws.send(data);
-    };
-    up.onclose = e => { try { ws.close({ code: e.code >= 4000 ? e.code : 1000, reason: e.reason }); } catch {} };
-    ws.onMessage(m => {
-      const data = String(m);
-      log.push({ at: Date.now(), dir: "out", data });
-      if (data.includes('"t":"buzz"')) buzzLog.push(label);
-      if (up.readyState === 1) up.send(data); else pending.push(data);
-    });
-    ws.onClose(() => { try { up.close(); } catch {} });
-  });
-}
+const wire = (context, label) => wireWorker(context, worker.origin, origin, traffic[label] ||= [], {
+  onIn: m => { if (m.t === "state") latest[label] = m; },
+  onOut: data => { if (data.includes('"t":"buzz"')) buzzLog.push(label); },
+});
 
 // --host=phone runs the host screen on a WebKit iPhone too (a room with no laptop).
 const hostOnPhone = A.host === "phone";
@@ -645,8 +620,10 @@ try {
       if (/saavncdn|https?:|\.mp4|\.m4a|stream/i.test(f.data)) fail(`${p.label} received a URL or stream: ${f.data.slice(0, 160)}`);
       const m = JSON.parse(f.data);
       if (m.t === "titles" || Array.isArray(m.titles)) fail(`${p.label} received a title list`);
+      if (m.t === "heard") fail(`${p.label} received the room's song history`);
       if (m.t === "state"){
         for (const r of m.results || []) shown.add(songKey(r.title));
+        for (const x of m.skipped || []) shown.add(x.key);
         if (m.song?.answer){
           if (m.song.state !== "revealed") fail(`${p.label} got the answer to song ${m.song.n} before the reveal`);
           shown.add(songKey(m.song.answer.title));
@@ -654,7 +631,7 @@ try {
       }
       for (const t of show.queue){
         if (shown.has(songKey(t.title))) continue;
-        if (quoted(t.title).some(q => f.data.includes(q))) fail(`${p.label} saw "${t.title}" before its reveal: ${f.data.slice(0, 160)}`);
+        if ([...quoted(t.title), JSON.stringify(songKey(t.title))].some(q => f.data.includes(q))) fail(`${p.label} saw "${t.title}" before its reveal: ${f.data.slice(0, 160)}`);
       }
     }
   }

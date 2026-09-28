@@ -3,13 +3,13 @@ import { DIFFICULTY, ROOM_ANSWER_SECS, ROOM_GRACE_SECS, ROOM_SONGS_PER_ROUND, RO
   hookOffset, ladderFor } from "../lib/config";
 import { nearTitles } from "../lib/answer.js";
 import { playRung } from "../lib/ladder";
-import { answerTitles as answerTitlesJs, buildCrate as buildCrateJs, withSameTierNext as withSameTierNextJs } from "../lib/crate.js";
+import { answerTitles as answerTitlesJs, buildCrate as buildCrateJs, withFreshAt as withFreshAtJs, withSameTierNext as withSameTierNextJs } from "../lib/crate.js";
 import { engine, keepAwake } from "../lib/engine.js";
-import { markPlayed } from "../lib/storage.js";
+import { cooldownOf, loadHistory, markPlayed } from "../lib/storage.js";
 import { displayTitle } from "../lib/utils.js";
 import { log } from "../lib/log.js";
 import { groupCooldown, recordPlay } from "../lib/group";
-import { createRoom, loadHostShow, playerName, saveHostShow, useMsLeft, useRoom, type HostShow, type RoomView } from "../lib/room";
+import { createRoom, loadHostShow, playerName, saveHostShow, useMsLeft, useRoom, withRoomHeard, type HostShow, type RoomView } from "../lib/room";
 import { Stage } from "../components/Stage";
 import { Countdown } from "../screens/Countdown";
 import { Loading } from "../screens/Loading";
@@ -21,8 +21,10 @@ import { HostPlaying, type Audio } from "./HostPlaying";
 import type { Category, Difficulty, GameState, Settings, Track, Verdict } from "../types";
 
 type Crate = { error?: string; queue?: Track[] };
-const buildCrate = buildCrateJs as (mix: string, eras: string[], sound: string, difficulty: Difficulty, minSongs: number, cooldown: Record<string, number> | undefined, categories: Category[]) => Promise<Crate>;
-const withSameTierNext = withSameTierNextJs as (queue: Track[], idx: number) => Track[] | null;
+type Cooldown = Record<string, number>;
+const buildCrate = buildCrateJs as (mix: string, eras: string[], sound: string, difficulty: Difficulty, minSongs: number, cooldown: Cooldown, categories: Category[], heardBy: Record<string, number>) => Promise<Crate>;
+const withSameTierNext = withSameTierNextJs as (queue: Track[], idx: number, cooldown: Cooldown) => Track[] | null;
+const withFreshAt = withFreshAtJs as (queue: Track[], idx: number, cooldown: Cooldown) => Track[];
 const answerTitles = answerTitlesJs as (mix: string) => Promise<string[]>;
 
 type Phase = "opening" | "lobby" | "loading" | "countdown" | "song" | "reveal" | "board" | "done" | "failed";
@@ -55,8 +57,14 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
   const ladder = ladderFor(plain);
 
   // Timers and socket callbacks read the latest values through these.
-  const live = useRef({ view, show, clip, phase, track, audio });
-  live.current = { view, show, clip, phase, track, audio };
+  const live = useRef({ view, show, clip, phase, track, audio, heard: room.heard });
+  live.current = { view, show, clip, phase, track, audio, heard: room.heard };
+  /* This screen's history (and its group's, at the start of a show) with
+     every seated phone's: those songs sit out. A phone that sat down after
+     the crate was built is caught when the next song is picked. */
+  const own = useRef<Cooldown | null>(null);
+  const cooldownNow = () => withRoomHeard(own.current ?? cooldownOf(loadHistory()) as Cooldown, live.current.heard).cooldown;
+  const freshCue = (s: HostShow): HostShow => ({ ...s, queue: withFreshAt(s.queue, s.idx, cooldownNow()) });
 
   useEffect(() => {
     if (phase !== "opening") return;
@@ -121,8 +129,9 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
     engine.ac();
     setPhase("loading");
     setError("");
-    const cooldown = await groupCooldown();
-    const crate = await buildCrate(show.mix, show.eras, show.plain ? "full" : "inst", show.difficulty, show.total, cooldown ?? undefined, show.categories);
+    own.current = (await groupCooldown()) ?? (cooldownOf(loadHistory()) as Cooldown);
+    const { cooldown, heardBy } = withRoomHeard(own.current, live.current.heard);
+    const crate = await buildCrate(show.mix, show.eras, show.plain ? "full" : "inst", show.difficulty, show.total, cooldown, show.categories, heardBy);
     if (crate.error || !crate.queue){
       setError(crate.error === "safe" ? "Not enough verified music-only clips for this show. Go back and pick Easy or fewer rounds."
         : crate.error === "thin" ? `Not enough songs match your picks. Go back and pick more eras${show.categories.length ? " or another kind of song" : ""}.`
@@ -134,7 +143,8 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
     await titlePool(show.mix);
     // No titles go to the room here: phones load the public list themselves.
     room.send({ t: "start", mix: show.mix, total: show.total, perRound: show.perRound, answerSecs: ROOM_ANSWER_SECS });
-    const next = { ...show, queue, idx: 0, songNo: 0, started: true, skipsSeen: 0 };
+    // A phone that sat down while the crate loaded is only in the latest heard.
+    const next = freshCue({ ...show, queue, idx: 0, songNo: 0, started: true, skipsSeen: 0 });
     setShow(next);
     // No prime here: the crate took the tap's gesture with it, and a prime
     // outside a gesture only races the first clip. A strict browser shows
@@ -290,7 +300,9 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
     engine.stop();
     if (revealed.verdict.finished) room.send({ t: "end" });
     if (revealed.verdict.roundOver){ setPhase("board"); return; }
-    engine.prime(show.queue[show.idx], show.plain);
+    const s = freshCue(show);
+    setShow(s);
+    engine.prime(s.queue[s.idx], s.plain);
     toCountdown();
   }
 
@@ -302,14 +314,14 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
     nextTrack(show);
   }
   function nextTrack(s: HostShow, skippedTitle = ""){
-    const idx = s.idx + 1;
-    setShow({ ...s, idx });
-    if (idx >= s.queue.length){
+    const next = freshCue({ ...s, idx: s.idx + 1 });
+    setShow(next);
+    if (next.idx >= next.queue.length){
       room.send({ t: "end" });
       setPhase("board");
       return;
     }
-    engine.prime(s.queue[idx], s.plain);
+    engine.prime(next.queue[next.idx], next.plain);
     toCountdown(skippedTitle);
   }
 
@@ -326,7 +338,7 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
     markPlayed(t.title, "tired");
     recordPlay(t.title, "tired");
     log("skip", { tired: true, room: true, title: String(t.title).slice(0, 28) });
-    nextTrack({ ...sh, queue: withSameTierNext(sh.queue, sh.idx) ?? sh.queue, skipsSeen: v.skips.used }, displayTitle(t.title));
+    nextTrack({ ...sh, queue: withSameTierNext(sh.queue, sh.idx, cooldownNow()) ?? sh.queue, skipsSeen: v.skips.used }, displayTitle(t.title));
   }, [view?.skips.used, view?.song?.state, phase]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function leaveBoard(){
@@ -337,7 +349,9 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
       setPhase("done");
       return;
     }
-    engine.prime(show.queue[show.idx], show.plain);
+    const s = freshCue(show);
+    setShow(s);
+    engine.prime(s.queue[s.idx], s.plain);
     toCountdown();
   }
 
