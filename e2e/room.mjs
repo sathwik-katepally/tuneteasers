@@ -512,7 +512,7 @@ try {
   await until("Asha's vote", () => song().votes.length === 1);
   await sleep(600);
   if (song().state !== "live" || hostState().skips.used !== 0) fail("one vote of three skipped the song");
-  await host.page.getByText(/^Heard it: 1 of 2/).waitFor();
+  await host.page.getByText(/^Skip votes 1 of 2/).waitFor();
   await asha.page.getByRole("button", { name: "Voted to skip · 1 of 2" }).waitFor();
   await ravi.page.getByRole("button", { name: "Heard it too much · 1 of 2" }).waitFor();
   await shot(host, "host-12-skip-vote");

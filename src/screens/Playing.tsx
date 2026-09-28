@@ -113,8 +113,8 @@ export function Playing({ name, track, plain, phase, turn, note, onPlay, onJudge
           </button>
           {note.includes("Skip it") ? <button type="button" className={s.link} onClick={onSkip}>Skip this song</button>
             : (onHeardIt || !skipsLeft) && (
-              <button type="button" className={s.link} onClick={onHeardIt} disabled={!skipsLeft || cueing}>
-                Heard it too much <span className={s.stub}>{skipsLeft ? `${skipsLeft} left` : "Used"}</span>
+              <button type="button" className={`${s.link} ${s.heard}`} onClick={onHeardIt} disabled={!skipsLeft || cueing}>
+                <span className={s.heardText}>Heard it<span className={s.heardMore}> too much</span></span> <span className={s.stub}>{skipsLeft ? `${skipsLeft} left` : "Used"}</span>
               </button>
             )}
         </div>

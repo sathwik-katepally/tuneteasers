@@ -191,6 +191,10 @@
   margin-left: auto;
 }
 
+.caption .votes {
+  letter-spacing: 0;
+}
+
 @media (min-width: 900px) {
   .screen {
     min-height: 280px;

@@ -146,11 +146,11 @@ export function HostPlaying({ view, song, songNo, total, ladder, clip, audio, gr
         </div>
         <p className={s.caption}>
           <span>{link !== "open" ? "Reconnecting to the room"
-            : votes ? <>Heard it: <b>{votes} of {song!.votesNeeded}</b> to skip</>
+            : votes ? <>Skip votes <b className={s.votes}>{votes} of {song!.votesNeeded}</b></>
             : <>Buzz on your phone. Room <b>{view.code}</b></>}</span>
           {note ? <button type="button" className={`link ${s.skip}`} onClick={onSkip}>Skip this song</button>
-            : <button type="button" className={`${p.link} ${s.skip}`} onClick={onHeardIt} disabled={!skipsLeft || !skippable || link !== "open"}>
-              Heard it too much <span className={p.stub}>{skipsLeft ? `${skipsLeft} left` : "Used"}</span>
+            : <button type="button" className={`${p.link} ${p.heard} ${s.skip}`} onClick={onHeardIt} disabled={!skipsLeft || !skippable || link !== "open"}>
+              <span className={p.heardText}>Heard it<span className={p.heardMore}> too much</span></span> <span className={p.stub}>{skipsLeft ? `${skipsLeft} left` : "Used"}</span>
             </button>}
         </p>
       </div>

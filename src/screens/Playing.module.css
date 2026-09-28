@@ -139,9 +139,30 @@
 
 .link {
   composes: link from global;
+  white-space: nowrap;
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+
+/* Only the words are underlined: WebKit would also underline the stub. */
+.heard {
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+@media (max-width: 359px) {
+  .heardMore {
+    display: none;
+  }
+}
+
+.heardText {
+  text-decoration: underline;
+}
+
+.link[disabled] .heardText {
+  text-decoration: none;
 }
 
 /* The skip budget as a ticket stub, notched at both ends. */

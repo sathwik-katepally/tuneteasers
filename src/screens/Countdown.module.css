@@ -39,9 +39,9 @@
 
 .skipped {
   position: absolute;
-  top: 44px;
-  left: 36px;
-  right: 36px;
+  top: 52px;
+  left: 50%;
+  width: min(calc(100% - 72px), 340px);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -52,7 +52,7 @@
   background: var(--cream);
   border: 2px solid var(--ink);
   box-shadow: 4px 4px 0 var(--vermilion-deep);
-  transform: rotate(-2deg);
+  transform: translateX(-50%) rotate(-2deg);
   z-index: 1;
 }
 
