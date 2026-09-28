@@ -43,9 +43,11 @@ const MIN_ENTRIES = 80;  // refuse to write a final result thinner than this
 const CHECKED_METHOD = `${SNIP_METHOD}/${SNIP_CLEAN_MAX}`;
 const PAGE_RECYCLE = 10; // songs per page before recycling (decode memory)
 const PROGRESS_EVERY = 20;
-// Bump when the model, patch geometry or extraction changes: stored curves
-// of another method are thrown away and every song is scored again.
+// The detector whose curves decide windows. Bump it when the model, patch
+// geometry or extraction changes: every song is then scored again, and the
+// old detector's curves stay in the store beside the new ones.
 const CURVE_METHOD = "musicnn-voice-dense-v1";
+const CURVE_MODEL = "MusiCNN voice/instrumental (essentia.js), p(voice) per mel patch";
 const CURVE_SCALE = 255;
 // Earlier schemas whose windows passed the same every-patch check, so any
 // stretch of one is clean too.
@@ -136,33 +138,39 @@ function carriedWindow(id, e){
   return { sourceId:id, startSec:e.startSec, endSec:e.startSec + SNIP_WINDOW_SEC, maxVoice:e.maxVoice, method:SNIP_METHOD };
 }
 
-/* -- voice curves: p(voice) per patch, one byte each, rounded up so a
-   window judged from the stored curve is never cleaner than the model said.
-   Patch k covers [k * strideSec, k * strideSec + patchSec]. -- */
+/* -- voice curves: one per song and detector, each self-describing: patch k
+   covers [k * hopSec, k * hopSec + patchSec] and scores q[k] / scale, a
+   voice probability rounded up so a window judged from the stored curve is
+   never cleaner than the detector said. Any detector that scores fixed
+   patches on a fixed hop (a vocal-stem level, say) fits the same shape. -- */
 function loadCurves(file = CURVES){
   const j = readJson(file);
-  if (!j || j.v !== 1 || j.method !== CURVE_METHOD || !j.songs || typeof j.songs !== "object")
-    return { strideSec:null, patchSec:null, songs:{} };
-  return { strideSec:j.strideSec, patchSec:j.patchSec, songs:j.songs };
+  const ok = j && j.v === 2 && j.songs && typeof j.songs === "object";
+  return { detectors: ok && j.detectors ? j.detectors : {}, songs: ok ? j.songs : {} };
 }
 function writeCurves(store, file = CURVES){
   const ids = Object.keys(store.songs).sort();
   const rows = ids.map(id => `${JSON.stringify(id)}:${JSON.stringify(store.songs[id])}`);
-  const head = JSON.stringify({ v:1, method:CURVE_METHOD, strideSec:store.strideSec, patchSec:store.patchSec, scale:CURVE_SCALE });
+  const head = JSON.stringify({ v:2, detectors:store.detectors });
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, `${head.slice(0, -1)},"songs":{\n${rows.join(",\n")}\n}}\n`);
 }
-const encodeCurve = probs => Buffer.from(probs.map(p => Math.min(CURVE_SCALE, Math.max(0, Math.ceil(p * CURVE_SCALE))))).toString("base64");
+const curveOf = (store, id) => store.songs[id]?.[CURVE_METHOD];
+function addCurve(store, id, r){
+  store.detectors[CURVE_METHOD] = { model: CURVE_MODEL };
+  const q = Buffer.from(r.curve.map(p => Math.min(CURVE_SCALE, Math.max(0, Math.ceil(p * CURVE_SCALE))))).toString("base64");
+  store.songs[id] = { ...store.songs[id], [CURVE_METHOD]: { hopSec:r.hopSec, patchSec:r.patchSec, scale:CURVE_SCALE, dur:Math.round(r.dur * 100) / 100, q } };
+}
 
 /* The cleanest whole-second window of `secs` in a stored curve. A window is
    judged by the chain of overlapping patches that covers it end to end, from
    the last patch starting at or before it to the first reaching its end, and
    every one must score below SNIP_CLEAN_MAX. Ties go to the earlier start. */
-function windowFromCurve(song, store, secs = SNIP_WINDOW_SEC){
-  const q = Buffer.from(song.q, "base64"), S = store.strideSec, P = store.patchSec;
-  if (!q.length || !(S > 0) || !(P > 0) || !(S < P)) return null;
+function windowFromCurve(c, secs = SNIP_WINDOW_SEC){
+  const q = Buffer.from(c.q, "base64"), S = c.hopSec, P = c.patchSec, scale = c.scale;
+  if (!q.length || !(S > 0) || !(P > 0) || !(S < P) || !(scale > 0)) return null;
   let best = null;
-  for (let t = 0; t <= Math.floor(song.dur) - secs - 1; t++){
+  for (let t = 0; t <= Math.floor(c.dur) - secs - 1; t++){
     // Rounding can only widen the chain.
     const k0 = Math.floor(t / S), k1 = Math.ceil((t + secs - P) / S);
     if (k1 >= q.length) break;
@@ -170,8 +178,8 @@ function windowFromCurve(song, store, secs = SNIP_WINDOW_SEC){
     for (let k = k0; k <= k1; k++) if (q[k] > m) m = q[k];
     if (!best || m < best.m) best = { t, m };
   }
-  if (!best || !(best.m / CURVE_SCALE < SNIP_CLEAN_MAX)) return null;
-  return { startSec:best.t, endSec:best.t + secs, maxVoice:Math.ceil(best.m / CURVE_SCALE * 1000) / 1000 };
+  if (!best || !(best.m / scale < SNIP_CLEAN_MAX)) return null;
+  return { startSec:best.t, endSec:best.t + secs, maxVoice:Math.ceil(best.m / scale * 1000) / 1000 };
 }
 
 /* -- local harness server -- */
@@ -257,10 +265,8 @@ function merge(){
   }
   for (const f of files.filter(f => path.basename(f) === "voice-curves.json")){
     const c = loadCurves(f);
-    if (!c.strideSec) continue;
-    if (store.strideSec && (store.strideSec !== c.strideSec || store.patchSec !== c.patchSec)) throw new Error(`${f} has another patch geometry`);
-    store.strideSec = c.strideSec; store.patchSec = c.patchSec;
-    Object.assign(store.songs, c.songs);
+    Object.assign(store.detectors, c.detectors);
+    for (const [id, curves] of Object.entries(c.songs)) store.songs[id] = { ...store.songs[id], ...curves };
   }
   for (const id of Object.keys(entries)) if (!corpusIds.has(id)) delete entries[id];
   for (const id of Object.keys(store.songs)) if (!corpusIds.has(id)) delete store.songs[id];
@@ -298,15 +304,15 @@ function merge(){
     if (w){ entries[s.id] = w; carried++; }
   }
   const judge = s => {
-    const w = windowFromCurve(store.songs[s.id], store);
+    const w = windowFromCurve(curveOf(store, s.id));
     if (w){ entries[s.id] = { sourceId:s.id, ...w, method:SNIP_METHOD }; delete checked[s.id]; }
     else checked[s.id] = CHECKED_METHOD;
     return w;
   };
-  for (const s of corpus) if (!entries[s.id] && store.songs[s.id]){ judge(s); derived++; }
+  for (const s of corpus) if (!entries[s.id] && curveOf(store, s.id)){ judge(s); derived++; }
   // Only songs with neither a window nor a stored curve are fetched; new corpus IDs first.
   const shardOf = id => [...id].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % SHARDS;
-  const todo = corpus.filter(s => !entries[s.id] && !store.songs[s.id] && shardOf(s.id) === SHARD)
+  const todo = corpus.filter(s => !entries[s.id] && !curveOf(store, s.id) && shardOf(s.id) === SHARD)
     .sort((a,b) => Number(previousIds.has(a.id)) - Number(previousIds.has(b.id)))
     .slice(0, LIMIT);
   console.log(`${reused} reused, ${carried} carried over from the earlier schema, ${derived} judged from stored curves, ${todo.length} to score${SHARDS > 1 ? ` (shard ${SHARD}/${SHARDS})` : ""}`);
@@ -334,10 +340,7 @@ function merge(){
     try { r = await page.evaluate(u => window.__scoreCurve(u), s.stream); }
     catch (e){ r = { error: String(e && e.message || e).slice(0, 200), stage: "page" }; }
     if (r.error){ failures.push({ ...s, error: r.error, stage: r.stage }); return null; }
-    if (store.strideSec && (store.strideSec !== r.strideSec || store.patchSec !== r.patchSec))
-      throw new Error("harness patch geometry differs from the stored curves; bump CURVE_METHOD");
-    store.strideSec = r.strideSec; store.patchSec = r.patchSec;
-    store.songs[s.id] = { dur: Math.round(r.dur * 100) / 100, q: encodeCurve(r.curve) };
+    addCurve(store, s.id, r);
     const w = judge(s);
     if (w) kept++;
     return `${s.lang} ${w ? `maxVoice=${w.maxVoice.toFixed(3)} start=${w.startSec}s` : "no clean window"} patches=${r.curve.length} dur=${Math.round(r.dur)}s ${r.ms}ms  ${s.title.slice(0, 40)}`;

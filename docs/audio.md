@@ -28,7 +28,9 @@ Every window length gets its own schema version and method name, so an index or 
 The scorer fetches that recording once and scores MusiCNN voice probability for overlapping ~3-second patches every ~1 second (0.992s) across the whole song: its voice curve.
 It accepts a whole-second 12-second interval only if the chain of overlapping patches covering it end to end, from the last patch starting at or before it to the first reaching its end, all score below `SNIP_CLEAN_MAX`, and it picks the interval with the lowest such maximum.
 It uses the maximum raw patch score, without smoothing away a high-scoring patch.
-Curves are kept in `scripts/voice-curves.json` (one byte per patch, rounded up, so a stored score is never lower than the model's), keyed by Saavn ID under one curve method; a later change of window length is judged from the stored curves without fetching any song.
+Curves are kept in `scripts/voice-curves.json`, per Saavn ID and per detector (`CURVE_METHOD` in the scorer, described under `detectors`), and each curve carries its own hop, patch length and scale: one byte per patch, rounded up so a stored score is never lower than the detector's.
+A later change of window length is judged from the stored curves without fetching any song, and another detector (a vocal-stem level from a separation model, say) can store its curves beside MusiCNN's in the same shape.
+Judged from the September 2026 curves, the songs that failed at 20 seconds hold 385 clean 12-second windows, 203 at 15 seconds and 26 at 20.
 An index with another schema (the v2 10-second and v3 20-second indexes included), an unmatched ID, an interval that is not exactly 12 seconds, an absent entry, or a build timestamp over 30 days old cannot authorize Music-only playback.
 A saved game from the 10- or 20-second releases drops its old intervals when it loads; resuming a Music-only game rebinds its queue to the current index, or shows the shortage message.
 The client also checks the stream duration covers the interval.

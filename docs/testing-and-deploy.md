@@ -84,7 +84,7 @@ It reuses only valid entries of the current schema (v4) for the same source ID a
 Only songs with neither an index entry nor a stored voice curve are fetched and scored; every song with a curve is judged from it on each run, so the scorer never rescans a recording.
 Each scheduled run scores at most 300 such IDs (a full-song dense scan takes 30 to 70 seconds per song) and records rejected IDs in `checked`.
 Shards write their new curves next to their partial index, and the merge commits `public/snips.json` and `scripts/voice-curves.json` together.
-Changing the model, patch geometry or extraction means a new `CURVE_METHOD` in `scripts/build-snips.mjs`, which discards the stored curves.
+Changing the model, patch geometry or extraction means a new `CURVE_METHOD` in `scripts/build-snips.mjs`: every song is scored again under it, and the old detector's curves stay in the store.
 New IDs in the weekly corpus are prioritized using the previous index's `corpusIds` snapshot.
 The resolver tries both Saavn endpoints with short retries and fails with an endpoint summary after three empty corpus batches; the existing workflow failure alert remains active.
 It refuses to write fewer than 80 entries.

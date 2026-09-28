@@ -127,7 +127,7 @@ async function scanCurve(extractor, model, pcm){
   return curve;
 }
 
-/* Returns { curve, strideSec, patchSec, dur, ms } or { error, stage }. */
+/* Returns { curve, hopSec, patchSec, dur, ms } or { error, stage }. */
 window.__scoreCurve = async function(url){
   const t0 = performance.now();
   let stage = "init";
@@ -151,7 +151,7 @@ window.__scoreCurve = async function(url){
     const extractor = new EssentiaTFInputExtractor(EssentiaWASM, "musicnn", false);
     try {
       const curve = await scanCurve(extractor, model, pcm);
-      return { curve, strideSec:STRIDE_SEC, patchSec:PATCH_SEC, dur:buf.duration, ms:Math.round(performance.now() - t0) };
+      return { curve, hopSec:STRIDE_SEC, patchSec:PATCH_SEC, dur:buf.duration, ms:Math.round(performance.now() - t0) };
     } finally { extractor.delete(); }
   } catch (e){
     return { error: String((e && e.message) || e).slice(0, 200), stage };
