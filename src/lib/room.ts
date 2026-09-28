@@ -1,11 +1,12 @@
 /* Buzz-in room client: making a room, the room link, the WebSocket to the
    room's Durable Object (worker/src/room.js, protocol in docs/room-mode.md),
-   and the two things a device remembers so a reload or a dropped connection
-   lands back in the same seat: a phone's seat key, the host's show. */
+   the two things a device remembers so a reload or a dropped connection
+   lands back in the same seat (a phone's seat key, the host's show), and the
+   song history a phone brings to its seat so the host leaves those songs out. */
 import { useEffect, useRef, useState } from "react";
 import { usePartySocket } from "partysocket/react";
-import { WORKER_API } from "./constants.js";
-import { sanitizeTrack } from "./storage.js";
+import { ROOM_HEARD, WORKER_API } from "./constants.js";
+import { cooldownOf, loadHistory, markPlayed, sanitizeTrack } from "./storage.js";
 import { randomId } from "./group";
 import type { Category, Difficulty, Mix, Track } from "../types";
 
@@ -39,6 +40,8 @@ export interface RoomSong {
   votesNeeded: number;
 }
 export interface RoomResult { n: number; title: string; winner: string | null; points: number }
+/* A song skipped this show, by its song key; tired when this phone voted for the skip. */
+export interface RoomSkipped { key: string; tired: boolean }
 export interface RoomView {
   phase: "lobby" | "show" | "over";
   code: string;
@@ -48,6 +51,7 @@ export interface RoomView {
   answerSecs: number;
   players: RoomPlayer[];
   results: RoomResult[];
+  skipped: RoomSkipped[];
   seq: number;
   /* "Heard it too much" skips this show, and the room's cap. */
   skips: { used: number; max: number };
@@ -119,6 +123,52 @@ export function loadHostShow(): HostShow | null {
 }
 export const saveHostShow = (s: HostShow | null) => (s ? lsSet(LS_HOST, s) : lsDel(LS_HOST));
 
+/* What a phone brings to its seat: the songs it is still sitting out, as
+   song key -> hours until it may come back (hours, not a time, so the
+   phone's and the host's clocks never need to agree). */
+export function heardPayload(): Record<string, number> {
+  const now = Date.now();
+  return Object.fromEntries(Object.entries(cooldownOf(loadHistory()) as Record<string, number>)
+    .filter(([k, at]) => at > now && k.length <= ROOM_HEARD.key)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, ROOM_HEARD.songs)
+    .map(([k, at]) => [k, Math.min(ROOM_HEARD.hours, Math.ceil((at - now) / 3600e3))]));
+}
+
+/* The seated phones' songs as the room sends them to the host
+   ({ key: [hours, seats] }), merged into the host's own cooldown map. The
+   host's own history counts as one more person for the order of repeats. */
+export type RoomHeard = Record<string, [number, number]>;
+export function withRoomHeard(own: Record<string, number>, heard: RoomHeard | null){
+  const now = Date.now();
+  const cooldown = { ...own };
+  const heardBy: Record<string, number> = {};
+  for (const [k, at] of Object.entries(own)) if (at > now) heardBy[k] = 1;
+  for (const [k, [hours, seats]] of Object.entries(heard || {})){
+    cooldown[k] = Math.max(cooldown[k] || 0, now + hours * 3600e3);
+    heardBy[k] = (heardBy[k] || 0) + seats;
+  }
+  return { cooldown, heardBy };
+}
+
+/* A phone keeps what it heard in the room in its own history, so the next
+   room (or pass-the-phone game) leaves it out: every revealed song as
+   played, a skipped one as tired when this phone voted for the skip. Once
+   per page load and title is enough; recording again only moves the time. */
+export function useRecordHeard(view: RoomView | null){
+  const done = useRef(new Set<string>());
+  useEffect(() => {
+    if (!view) return;
+    const record = (id: string, title: string, kind: "played" | "tired") => {
+      if (done.current.has(id)) return;
+      done.current.add(id);
+      markPlayed(title, kind);
+    };
+    for (const r of view.results) record(`r:${r.title}`, r.title, "played");
+    for (const x of view.skipped || []) record(`s:${x.key}`, x.key, x.tired ? "tired" : "played");
+  }, [view?.seq]); // eslint-disable-line react-hooks/exhaustive-deps
+}
+
 export async function createRoom(): Promise<{ code: string; host: string }> {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), 8000);
@@ -136,9 +186,10 @@ export type Link = "connecting" | "open" | "retrying" | "gone";
 const FINAL = new Set([4404, 4403, 4410]);
 
 /* One live connection to a room. `hello` is sent on every (re)connect, which
-   is how a dropped phone gets its seat back. */
-export function useRoom(code: string, hello: object | null){
+   is how a dropped phone gets its seat back; a function is called each time. */
+export function useRoom(code: string, hello: object | (() => object) | null){
   const [view, setView] = useState<RoomView | null>(null);
+  const [heard, setHeard] = useState<RoomHeard | null>(null);
   const [link, setLink] = useState<Link>("connecting");
   const [error, setError] = useState<{ code: string; at: number } | null>(null);
   const [gone, setGone] = useState<{ code: number; kicked: boolean } | null>(null);
@@ -157,12 +208,14 @@ export function useRoom(code: string, hello: object | null){
     shouldReconnectOnClose: e => !FINAL.has(e.code),
     onOpen(){
       setLink("open");
-      if (helloRef.current) socket.send(JSON.stringify(helloRef.current));
+      const h = helloRef.current;
+      if (h) socket.send(JSON.stringify(typeof h === "function" ? h() : h));
     },
     onMessage(e){
       let m: any;
       try { m = JSON.parse(String(e.data)); } catch { return; }
       if (m.t === "state") setView({ ...m, at: Date.now() });
+      else if (m.t === "heard" && m.songs && typeof m.songs === "object") setHeard(m.songs);
       else if (m.t === "error") setError({ code: String(m.code), at: Date.now() });
       else if (m.t === "kicked") kicked.current = true;
     },
@@ -174,7 +227,7 @@ export function useRoom(code: string, hello: object | null){
     },
   });
 
-  useEffect(() => { setView(null); setGone(null); setError(null); setLink("connecting"); kicked.current = false; }, [code]);
+  useEffect(() => { setView(null); setHeard(null); setGone(null); setError(null); setLink("connecting"); kicked.current = false; }, [code]);
 
   const send = (m: object) => {
     if (socket.readyState !== WebSocket.OPEN) return false;
@@ -182,7 +235,7 @@ export function useRoom(code: string, hello: object | null){
     return true;
   };
   const leave = () => socket.close();
-  return { view, link, error, gone, send, leave };
+  return { view, heard, link, error, gone, send, leave };
 }
 
 /* Milliseconds left on the answer clock, ticking locally from the last view. */

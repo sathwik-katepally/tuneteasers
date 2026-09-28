@@ -76,3 +76,9 @@ export const SNIP_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 
 export const ERAS = ["2000s","2010s","2020s"];
 export const eraOf = y => y >= 2020 ? "2020s" : y >= 2010 ? "2010s" : "2000s";
+
+/* What a phone may bring to a buzz-in room of its own song history
+   (docs/room-mode.md): at most `songs` song keys of up to `key` characters,
+   each with the hours until it may come back. The room enforces these; the
+   phone sends the ones sitting out longest when it has more. */
+export const ROOM_HEARD = { songs: 300, key: 80, hours: 24 * 366 };

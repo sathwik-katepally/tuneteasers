@@ -5,9 +5,14 @@
    scores. It learns each song's title from the host and never sends it to a
    phone before the reveal; it never sees a stream URL at all.
    Everything lives in this object's storage and is wiped when the room has
-   been idle for ROOM_TTL_MS. Nothing is written to D1. */
+   been idle for ROOM_TTL_MS. Nothing is written to D1.
+   A phone brings the song keys it has heard recently when it takes its seat;
+   they are kept per seat and only the host gets them, merged, to leave those
+   songs out of its crate. */
 import { Server } from "partyserver";
 import { isCorrect } from "../../src/lib/answer.js";
+import { ROOM_HEARD } from "../../src/lib/constants.js";
+import { songKey } from "../../src/lib/utils.js";
 
 export const CODE_ALPHABET = "BCDFGHJKLMNPQRSTVWXZ";
 export const CODE_RX = /^[BCDFGHJKLMNPQRSTVWXZ]{4}$/;
@@ -15,6 +20,8 @@ const KEY_RX = /^[A-Za-z0-9_-]{16,64}$/;
 const TOKEN_RX = /^[A-Za-z0-9_-]{22}$/;
 const MIXES = ["bolly", "telugu", "both"];
 const CONTROL_RX = /[\u0000-\u001f\u007f]/g;
+const HAS_CONTROL = /[\u0000-\u001f\u007f]/;
+const HOUR = 3600e3;
 
 const ROOM_TTL_MS = 3 * 3600e3;
 const HELLO_MS = 10e3;
@@ -28,6 +35,8 @@ const LIMITS = {
   songs: 200,
   points: 1000,
   playerMsg: 1024,
+  // A join carries the phone's heard songs (ROOM_HEARD), so it may be bigger.
+  joinMsg: 32 * 1024,
   hostMsg: 64 * 1024,
   answerSecs: [5, 60],
 };
@@ -61,6 +70,21 @@ export function randomCode(){
   const b = crypto.getRandomValues(new Uint8Array(4));
   return Array.from(b, x => CODE_ALPHABET[x % CODE_ALPHABET.length]).join("");
 }
+/* A phone's heard songs, { key: hours until it may come back }, to
+   { key: time it may come back } on this room's clock. Anything malformed is
+   dropped; past the cap the rest is ignored. null when there is no map. */
+function cleanHeard(h){
+  if (!h || typeof h !== "object" || Array.isArray(h)) return null;
+  const now = Date.now(), out = new Map();
+  for (const [k, v] of Object.entries(h)){
+    if (out.size >= ROOM_HEARD.songs) break;
+    if (!k || k.length > ROOM_HEARD.key || HAS_CONTROL.test(k) || !intIn(v, 1, ROOM_HEARD.hours)) continue;
+    out.set(k, now + v * HOUR);
+  }
+  return Object.fromEntries(out);
+}
+const heardKey = seat => `heard:${seat}`;
+
 async function hash(s){
   const d = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s)));
   return Array.from(d, x => x.toString(16).padStart(2, "0")).join("");
@@ -105,7 +129,7 @@ export class Room extends Server {
     this.room = {
       code, hostHash, createdAt: Date.now(), touchedAt: Date.now(),
       phase: "lobby", players: [], rules: { answerSecs: 15 },
-      mix: "both", total: 0, perRound: 1, song: null, results: [], seq: 0, skips: 0, cues: 0,
+      mix: "both", total: 0, perRound: 1, song: null, results: [], skipped: [], seq: 0, skips: 0, cues: 0,
     };
     await this.save();
     return true;
@@ -175,7 +199,8 @@ export class Room extends Server {
     // Every frame is charged before anything else looks at it.
     if (!this.allow(conn)) return;
     const role = conn.state?.role;
-    const max = role === "host" || (!role && typeof raw === "string" && raw.startsWith('{"t":"host"')) ? LIMITS.hostMsg : LIMITS.playerMsg;
+    const hello = !role && typeof raw === "string" ? raw.slice(0, 11) : "";
+    const max = role === "host" || hello === '{"t":"host"' ? LIMITS.hostMsg : hello === '{"t":"join"' ? LIMITS.joinMsg : LIMITS.playerMsg;
     const size = typeof raw === "string" ? raw.length : raw.byteLength ?? 0;
     // The app never sends a frame this big or a binary one, so the peer goes.
     if (size > max || typeof raw !== "string") return conn.close(1009, "message too big");
@@ -194,6 +219,7 @@ export class Room extends Server {
     if (err === SAME) return;
     if (err) return this.fail(conn, err);
     await this.save();
+    if (m.t === "kick" || m.t === "leave") await this.dropHeard();
     this.broadcastState();
   }
 
@@ -206,6 +232,7 @@ export class Room extends Server {
     conn.setState({ role: "host" });
     conn.send(JSON.stringify({ t: "welcome", role: "host", code: this.room.code }));
     conn.send(JSON.stringify(this.view(null)));
+    conn.send(JSON.stringify(await this.heard()));
     await this.arm();
   }
 
@@ -223,9 +250,49 @@ export class Room extends Server {
       r.players.push(p);
       await this.save();
     }
+    // Every hello brings the phone's history as it is now; one without any
+    // keeps what the seat brought before.
+    const heard = cleanHeard(m.heard);
+    if (heard){
+      await this.ctx.storage.put(heardKey(p.id), heard);
+      await this.sendHeard();
+    }
     conn.setState({ role: "player", seat: p.id });
     conn.send(JSON.stringify({ t: "welcome", role: "player", code: r.code, seat: p.id, name: p.name }));
     this.broadcastState();
+  }
+
+  /* For the host only: every seated phone's heard songs merged, as
+     { key: [hours until it may come back, how many seats heard it] }.
+     Seated means with a seat, online or not, as for skip votes. */
+  async heard(){
+    const r = this.room, now = Date.now();
+    const got = r.players.length ? await this.ctx.storage.get(r.players.map(p => heardKey(p.id))) : new Map();
+    const songs = new Map();
+    for (const h of got.values()){
+      for (const [k, at] of Object.entries(h || {})){
+        if (!(at > now)) continue;
+        const [hours, n] = songs.get(k) || [0, 0];
+        songs.set(k, [Math.max(hours, Math.ceil((at - now) / HOUR)), n + 1]);
+      }
+    }
+    return { t: "heard", songs: Object.fromEntries(songs) };
+  }
+
+  async sendHeard(){
+    const hosts = [...this.getConnections()].filter(c => c.state?.role === "host");
+    if (!hosts.length) return;
+    const m = JSON.stringify(await this.heard());
+    for (const c of hosts) c.send(m);
+  }
+
+  /* A seat that is gone (kicked, or left the lobby) takes its songs with it. */
+  async dropHeard(){
+    const seats = new Set(this.room.players.map(p => heardKey(p.id)));
+    const stale = [...(await this.ctx.storage.list({ prefix: "heard:" })).keys()].filter(k => !seats.has(k));
+    if (!stale.length) return;
+    await this.ctx.storage.delete(stale);
+    await this.sendHeard();
   }
 
   online(){
@@ -250,6 +317,7 @@ export class Room extends Server {
       answerSecs: r.rules.answerSecs,
       players: r.players.map(p => ({ id: p.id, name: p.name, score: p.score, online: on.has(p.id) })),
       results: r.results,
+      skipped: (r.skipped || []).map(x => ({ key: x.key, tired: x.voters.includes(seat) })),
       seq: r.seq,
       skips: { used: r.skips || 0, max: rules.max },
       song: s && {
@@ -308,10 +376,13 @@ export class Room extends Server {
 
   /* "Heard it too much": song n is dropped without a result or a reveal and
      the host re-cues n with another song. The title stays in this object;
-     no phone ever sees it. */
+     phones get only its song key, after the skip (the big screen shows the
+     title then anyway), to keep it out of their own next crates: as tired
+     for those who voted, as played for everyone else. */
   skipSong(){
     const r = this.room, s = r.song;
     r.skips = (r.skips || 0) + 1;
+    (r.skipped ||= []).push({ key: songKey(s.answer.title), voters: s.votes || [] });
     r.song = { n: s.n, cue: s.cue, rung: -1, points: 0, state: "skipped", answer: null,
       queue: [], locked: [], answering: null, deadline: null, guesses: [], winner: null, won: 0, near: [], votes: [] };
     r.seq++;
@@ -354,6 +425,7 @@ const HOST = {
     r.rules = { answerSecs: m.answerSecs };
     r.song = null;
     r.results = [];
+    r.skipped = [];
     r.skips = 0;
     for (const p of r.players) p.score = 0;
     r.seq++;
