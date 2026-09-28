@@ -4,7 +4,7 @@
    Fallback 1: raw JioSaavn search (unverified years, no tiers).
    Fallback 2: catalog.json baked into the site (rebuilt weekly by CI, 30s hook clips).
    Fallback 3: live iTunes search, throttled to stay under Apple's rate limit. */
-import { SAAVN_BASES, SAAVN_QUERIES, SAAVN_PAGES, SAAVN_MIN_PLAYS, CORPUS_DRAW, CORPUS_BATCH, DIFFICULTY_TIERS, ITUNES_TERMS, ITUNES_LANG_OK, EXCLUDE_RX, ERAS, eraOf, SNIP_CLEAN_MAX, SNIP_INDEX_V, SNIP_METHOD, SNIP_WINDOW_SEC, SNIP_MAX_AGE_MS } from "./constants.js";
+import { SAAVN_BASES, SAAVN_QUERIES, SAAVN_PAGES, SAAVN_MIN_PLAYS, CORPUS_DRAW, CORPUS_BATCH, DIFFICULTY_TIERS, ITUNES_TERMS, ITUNES_LANG_OK, EXCLUDE_RX, ERAS, eraOf, SNIP_ACCEPTED, SNIP_WINDOW_SEC, SNIP_MAX_AGE_MS } from "./constants.js";
 import { de, songKey, shuffle, safeUrl, displayTitle } from "./utils.js";
 import { sanitizeTrack, loadPlayed, loadBlocked, normArtist, isBlocked, PLAY_COOLDOWN } from "./storage.js";
 import { log, ms } from "./log.js";
@@ -237,7 +237,7 @@ async function fetchSnips(){
     if (!r.ok) return null;
     const j = await r.json();
     const age = Date.now() - Date.parse(j?.built);
-    const index = (j && j.v === SNIP_INDEX_V && Number.isFinite(age) && age >= 0 && age <= SNIP_MAX_AGE_MS && j.snips &&
+    const index = (j && Object.hasOwn(SNIP_ACCEPTED, j.v) && Number.isFinite(age) && age >= 0 && age <= SNIP_MAX_AGE_MS && j.snips &&
       typeof j.snips === "object" && !Array.isArray(j.snips)) ? j : null;
     if (index) snipsCache = { at: Date.now(), index };
     return index;
@@ -246,13 +246,12 @@ async function fetchSnips(){
 
 function verifiedSnip(t, index){
   if (!index || !t.sourceId || t.hook) return null;
-  const e = index.snips[t.sourceId];
-  if (!e || e.sourceId !== t.sourceId || e.method !== SNIP_METHOD ||
-      !Number.isFinite(e.startSec) || !Number.isFinite(e.endSec) ||
-      !Number.isFinite(e.maxVoice) || e.maxVoice >= SNIP_CLEAN_MAX ||
+  const e = index.snips[t.sourceId], accept = SNIP_ACCEPTED[index.v];
+  if (!e || !accept || e.sourceId !== t.sourceId || e.method !== accept.method ||
+      !Number.isFinite(e.startSec) || !Number.isFinite(e.endSec) || !accept.clean(e) ||
       e.startSec < 0 || e.endSec - e.startSec !== SNIP_WINDOW_SEC ||
       e.endSec + 1 > t.duration) return null;
-  return { startSec:e.startSec, endSec:e.endSec, sourceId:t.sourceId, indexBuilt:index.built };
+  return { startSec:e.startSec, endSec:e.endSec, sourceId:t.sourceId, method:accept.method, indexBuilt:index.built };
 }
 
 export async function refreshMusicQueue(queue){

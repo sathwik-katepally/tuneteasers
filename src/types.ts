@@ -9,7 +9,7 @@ export interface Track {
   lang: string;
   hook: boolean;
   sourceId?: string;
-  snip?: { startSec: number; endSec: number; sourceId: string; indexBuilt: string };
+  snip?: { startSec: number; endSec: number; sourceId: string; method: string; indexBuilt: string };
   tier?: string;
   music?: string;
 }

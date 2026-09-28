@@ -64,14 +64,25 @@ export const EXCLUDE_RX = /(remix|mashup|lo-?fi|slowed|reverb|medley|unplugged|a
 
 /* The snips.json contract shared by the offline scorer and the client: every
    Music-only interval is exactly SNIP_WINDOW_SEC long, which must hold the
-   whole Music-only clip ladder (CLIP_LADDER in src/lib/config.ts), and every
-   patch across it scores below SNIP_CLEAN_MAX. Changing the window length
-   means a new SNIP_INDEX_V and SNIP_METHOD, so an index or a saved game from
-   another length can never authorize playback, and a full rescore. */
-export const SNIP_INDEX_V = 4;
-export const SNIP_METHOD = "continuous-v4";
+   whole Music-only clip ladder (CLIP_LADDER in src/lib/config.ts), and was
+   judged vocal-free by the detector its schema version names. Two versions
+   may authorize: MusiCNN's v4 index (every patch below 0.25 voice
+   probability) serves until the vocal-stem curves cover the corpus, and then
+   the scorer publishes v5 by itself (separated vocal stems below
+   SNIP_VOCAL_MAX_DB dBFS). Each entry must carry its version's method and
+   pass its version's check, and a saved snip must carry an accepted method.
+   Changing the window length or a detector means a new version and method,
+   so an index or a saved game from before can never authorize playback. */
+export const SNIP_INDEX_V = 5;
+export const SNIP_METHOD = "vocal-stem-v5";
 export const SNIP_WINDOW_SEC = 12;
-export const SNIP_CLEAN_MAX = 0.25;
+export const SNIP_VOCAL_MAX_DB = -50;
+export const SNIP_LEGACY = { v: 4, method: "continuous-v4", maxVoice: 0.25 };
+export const SNIP_ACCEPTED = {
+  [SNIP_INDEX_V]: { method: SNIP_METHOD, clean: e => Number.isFinite(e.vocalDb) && e.vocalDb < SNIP_VOCAL_MAX_DB },
+  [SNIP_LEGACY.v]: { method: SNIP_LEGACY.method, clean: e => Number.isFinite(e.maxVoice) && e.maxVoice < SNIP_LEGACY.maxVoice },
+};
+export const snipMethodOk = m => Object.values(SNIP_ACCEPTED).some(a => a.method === m);
 export const SNIP_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 
 export const ERAS = ["2000s","2010s","2020s"];
