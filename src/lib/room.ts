@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { usePartySocket } from "partysocket/react";
 import { ROOM_HEARD, WORKER_API } from "./constants.js";
 import { cooldownOf, loadHistory, markPlayed, sanitizeTrack } from "./storage.js";
+import { songKey } from "./utils.js";
 import { randomId } from "./group";
 import type { Category, Difficulty, Mix, Track } from "../types";
 
@@ -154,18 +155,21 @@ export function withRoomHeard(own: Record<string, number>, heard: RoomHeard | nu
 /* A phone keeps what it heard in the room in its own history, so the next
    room (or pass-the-phone game) leaves it out: every revealed song as
    played, a skipped one as tired when this phone voted for the skip. Once
-   per page load and title is enough; recording again only moves the time. */
+   per page load, song and kind is enough (recording again only moves the
+   time), but per kind: a song skipped as played in one show and voted out
+   in a later one must still become tired. */
 export function useRecordHeard(view: RoomView | null){
   const done = useRef(new Set<string>());
   useEffect(() => {
     if (!view) return;
-    const record = (id: string, title: string, kind: "played" | "tired") => {
+    const record = (title: string, kind: "played" | "tired") => {
+      const id = `${kind}:${songKey(title)}`;
       if (done.current.has(id)) return;
       done.current.add(id);
       markPlayed(title, kind);
     };
-    for (const r of view.results) record(`r:${r.title}`, r.title, "played");
-    for (const x of view.skipped || []) record(`s:${x.key}`, x.key, x.tired ? "tired" : "played");
+    for (const r of view.results) record(r.title, "played");
+    for (const x of view.skipped || []) record(x.key, x.tired ? "tired" : "played");
   }, [view?.seq]); // eslint-disable-line react-hooks/exhaustive-deps
 }
 
