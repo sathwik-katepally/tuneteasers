@@ -11,7 +11,7 @@ export function LandingB({ onStart, onJoin }: LandingProps){
   const tear = () => { if (torn) return; setTorn(true); setTimeout(onStart, TEAR_MS); };
   return (
     <m.div className={s.root} exit={{ opacity: 0 }} transition={{ duration: 0.25 }}>
-      <Theatre meta="Box office open" game={null} onHome={() => {}} onEnd={() => {}}>
+      <Theatre meta="Box office" game={null} onHome={() => {}} onEnd={() => {}}>
         <div className={s.stage}>
           <m.div className={`${s.ticket} ${torn ? s.torn : ""}`} initial={{ y: 24, opacity: 0, rotate: -3 }} animate={{ y: 0, opacity: 1, rotate: -1 }}
             transition={{ type: "spring", stiffness: 260, damping: 24 }}>
