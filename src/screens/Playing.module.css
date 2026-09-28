@@ -144,17 +144,18 @@
   gap: 6px;
 }
 
-/* The skip budget as a torn ticket stub. */
+/* The skip budget as a ticket stub, notched at both ends. */
 .stub {
-  padding: 1px 6px 0;
+  display: inline-block;
+  padding: 2px 9px 0;
   font-size: 11px;
   letter-spacing: 0.1em;
   color: var(--vermilion-deep);
   background: var(--cream);
-  border-left: 2px dashed var(--ink);
-  text-decoration: none;
-  mask: radial-gradient(circle at 100% 50%, transparent 4px, #000 4.5px);
-  -webkit-mask: radial-gradient(circle at 100% 50%, transparent 4px, #000 4.5px);
+  --notch: radial-gradient(circle at 0 50%, transparent 4px, #000 4.5px) left / 51% 100% no-repeat,
+    radial-gradient(circle at 100% 50%, transparent 4px, #000 4.5px) right / 51% 100% no-repeat;
+  mask: var(--notch);
+  -webkit-mask: var(--notch);
 }
 
 .link[disabled] .stub {

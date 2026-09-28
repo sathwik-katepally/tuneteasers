@@ -271,7 +271,8 @@ function Buzzer({ view, send, online, error }: {
           <p className={s.sub} aria-live="polite">{sub}</p>
           {votable && skipsLeft > 0 && (
             <button type="button" className={`link ${s.vote}`} onClick={() => send({ t: "vote" })} disabled={voted}>
-              {voted ? `You said heard it · ${song!.votes.length} of ${song!.votesNeeded}` : "Heard it too much"}
+              {voted ? `Voted to skip · ${song!.votes.length} of ${song!.votesNeeded}`
+                : song!.votes.length ? `Heard it too much · ${song!.votes.length} of ${song!.votesNeeded}` : "Heard it too much"}
             </button>
           )}
         </div>
