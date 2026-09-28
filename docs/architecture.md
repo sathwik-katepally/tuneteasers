@@ -7,14 +7,14 @@
 - `src/app.tsx` - the state owner for pass-the-phone and the home screen, and the router into the buzz-in room owners (`screen: "host" | "buzzer"`).
 - `src/room/` - buzz-in rooms (docs/room-mode.md): `Host` (the host screen's state owner, with `Lobby` and `HostPlaying`) and `Phone` (a phone's join, buzzer and answer pad).
 - `src/types.ts` - shared types for saved state, tracks, turns and verdicts.
-- `src/lib/config.ts` - every gameplay number: clip ladder and its rung spans, points per rung, speed bonus, hint cost, round options, difficulty table; also the song category labels.
+- `src/lib/config.ts` - every gameplay number: clip ladder and its rung spans, points per rung, speed bonus, hint cost, round options, difficulty table, skips per contestant and the cooldown days; also the song category labels.
 - `src/lib/save.ts` - the saved game: `loadSaved` (sanitize, migrate v6) and `save`.
 - `src/lib/constants.js` - search queries, language/era tables, exclusion regex.
 - `src/lib/utils.js` - pure helpers (`songKey`, `displayTitle`, `shuffle`, `safeUrl`, ...).
-- `src/lib/storage.js` - track sanitization, the played and tired history stores, `cooldownOf`, and the blocked-artist store.
+- `src/lib/storage.js` - track sanitization, the song history behind the cooldown (`tt_played`, `tt_tired`, `cooldownOf`, `heardCount`) and the blocked-artist store.
 - `src/lib/group.ts` - optional group sync: the group invite, the write outbox, the group history fetch, the group's tickets and past results (docs/group-sync.md).
 - `src/lib/me.ts` - optional personal ticket: the ticket and its outbox, preference sync, passkey registration and recovery, and the cooldown for the people present (docs/tickets.md).
-- `src/lib/crate.js` - song loading (`buildCrate`) across the 3 source tiers, and `answerTitles` (the public title list a room phone autocompletes from).
+- `src/lib/crate.js` - song loading (`buildCrate`) across the 3 source tiers, `withSameTierNext` (a skip's same-tier replacement), and `answerTitles` (the public title list a room phone autocompletes from).
 - `src/lib/room.ts` - buzz-in room client: `createRoom`, the `#room=` link, `useRoom` (PartySocket), seat and host-show storage.
 - `src/lib/answer.js` - answer folding, matching and autocomplete, shared with the Worker.
 - `src/lib/engine.js` - the audio engine (songs and synthesised sound effects) and screen wake lock.
@@ -40,7 +40,7 @@ A `max-height: 760px` pass tightens spacing so every in-game screen fits a short
 `App` holds one persisted `state` object: `{ screen, settings, players, teams, game }`.
 `settings` is `{ mix, eras, difficulty, categories, mode, rounds }`; `categories` lists the chosen song categories (`[]` is "Any", which is also what saves from before categories load as, and unknown ids are dropped); `players` and `teams` are the setup rosters (`{ id, name, members, people? }`, members only used by teams, `people` the ticket ids playing as that entry).
 `game` is `{ id, queue, trackIdx, turn, round, totalRounds, totalSongs, source, mode, difficulty, mix, cast, history, finished }` or null; `id` makes the finished show's group result idempotent.
-`cast` is a snapshot of the roster with a `score` each, taken at game start, so editing the roster on the home screen never disturbs a saved game.
+`cast` is a snapshot of the roster with a `score` and the "Heard it too much" `skips` used, taken at game start, so editing the roster on the home screen never disturbs a saved game.
 `history` holds one `{ id, song, points, round }` entry per judged turn; the box office derives each round's gains from it.
 Every `state` change is saved to localStorage (`tuneteasers_v7`) by an effect; `loadSaved` restores and sanitizes it on boot.
 A save from the pre-points version (`tuneteasers_v6`) is migrated once: players keep their names, scores are multiplied by `LEGACY_SCORE_SCALE`, "With vocals" becomes Easy and "Music only" Medium, and the old key is removed on the next save.
@@ -66,7 +66,7 @@ Within `game`, `phase` runs `handover → countdown → cueing → playing ⇄ l
 The screen wrapper is keyed per screen inside `AnimatePresence`, so every screen remounts and cross-fades.
 Never change the key twice within one cross-fade (220 ms): `AnimatePresence mode="wait"` then stays on the old screen. The room host keys its countdown and song screens alike for this reason, since a buzz can land that fast.
 After the last contestant of a round the box office (`board`) shows; after the final round (or when the crate runs out) it reads "Final count" and leads to the podium.
-Skip keeps the same contestant and goes straight to a new countdown.
+A skip keeps the same contestant and goes straight to a new countdown (see Skips below).
 
 ## Gameplay rules
 
@@ -82,3 +82,17 @@ Points: 100 / 60 / 30 by rung on Easy and 100 / 60 on Music-only, plus a speed b
 The player says the song or film aloud, then taps "I know this one" to score the current points or "I don't know this one" to score zero.
 Either choice records the turn and reveals the answer immediately.
 Teams: turns rotate through teams; if a team lists members, the phone holder rotates through them round by round.
+
+## Skips
+
+There are two ways to skip a song while listening, and both keep the same contestant.
+
+- **"Heard it too much"** is for a song the player has heard to death.
+  Each contestant (player or team) gets `SKIPS_PER_PLAYER` (1) per show, shown as a ticket stub next to the link ("1 left", then "Used"), and it is offered until the player judges.
+  The replacement is the next queued song from the same corpus tier (`withSameTierNext`), so skipping a hard song cannot fish for an easy one; when no song of that tier is left the link is not offered.
+  The skipped title goes up on the next countdown ("Skipped: Kesariya") so the room sees what was skipped.
+  The song is recorded as `tired` on the device and the group, which keeps it out of crates for longer than a played song (docs/song-loading.md).
+- **"Skip this song"** shows only after a stream error, instead of the link above.
+  It is free and unlimited, takes the next song in the queue, and records nothing: a song that only failed to stream may play fine next time.
+
+Buzz-in rooms have their own vote-based version (docs/room-mode.md).

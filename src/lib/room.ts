@@ -17,12 +17,14 @@ const LS_HOST = "tt_room_host";
 const LS_NAME = "tt_room_name";
 const LS_ROOM_OUTBOX = "tt_room_outbox";
 
-export type SongState = "cue" | "live" | "answering" | "missed" | "revealed";
+export type SongState = "cue" | "live" | "answering" | "missed" | "revealed" | "skipped";
 export interface RoomPlayer { id: string; name: string; score: number; online: boolean; ticket: boolean }
 export interface Guess { id: string; text: string; ok: boolean; timeout: boolean }
 export interface RoomAnswer { title: string; film: string; year: number; artist: string }
 export interface RoomSong {
   n: number;
+  /* This cue of song n; a re-cue after a skip gets a new one. */
+  cue: number;
   rung: number;
   points: number;
   state: SongState;
@@ -34,6 +36,9 @@ export interface RoomSong {
   winner: string | null;
   won: number;
   answer: RoomAnswer | null;
+  /* Seats that voted "Heard it" for this song, and how many votes skip it. */
+  votes: string[];
+  votesNeeded: number;
 }
 export interface RoomResult { n: number; title: string; winner: string | null; points: number }
 export interface RoomView {
@@ -46,6 +51,8 @@ export interface RoomView {
   players: RoomPlayer[];
   results: RoomResult[];
   seq: number;
+  /* "Heard it too much" skips this show, and the room's cap. */
+  skips: { used: number; max: number };
   song: RoomSong | null;
   me: string | null;
   // Local clock time the view arrived, so a countdown can run from msLeft.
@@ -102,12 +109,15 @@ export interface HostShow {
   eras: string[];
   categories: Category[];
   started: boolean;
+  /* The room's skip count this screen has already acted on, so a skip is
+     swapped for a new song exactly once, across reloads too. */
+  skipsSeen: number;
 }
 export function loadHostShow(): HostShow | null {
   const s = lsGet(LS_HOST) as HostShow | null;
   if (!s || !isCode(s.code) || typeof s.host !== "string" || !Array.isArray(s.queue)) return null;
   const queue = s.queue.map(t => sanitizeTrack(t)).filter(Boolean) as Track[];
-  return { ...s, queue, categories: Array.isArray(s.categories) ? s.categories : [] };
+  return { ...s, queue, categories: Array.isArray(s.categories) ? s.categories : [], skipsSeen: Number.isInteger(s.skipsSeen) ? s.skipsSeen : 0 };
 }
 export const saveHostShow = (s: HostShow | null) => (s ? lsSet(LS_HOST, s) : lsDel(LS_HOST));
 

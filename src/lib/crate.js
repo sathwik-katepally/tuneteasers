@@ -381,3 +381,16 @@ export async function answerTitles(mix){
   for (const t of catalog) add(t.title);
   return out;
 }
+
+/* The queue with the next song swapped for the first later one from the
+   same corpus tier as the song at idx (tierless fallback songs match each
+   other), or null when none is left. A "Heard it too much" skip takes its
+   replacement from here, so skipping a hard song can't fish for an easy one. */
+export function withSameTierNext(queue, idx){
+  const tier = queue[idx]?.tier;
+  const j = queue.findIndex((t, i) => i > idx && t.tier === tier);
+  if (j < 0) return null;
+  const q = queue.slice();
+  [q[idx + 1], q[j]] = [q[j], q[idx + 1]];
+  return q;
+}

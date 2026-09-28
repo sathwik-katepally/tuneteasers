@@ -1,15 +1,13 @@
-/* Device-local stores (localStorage): track sanitization, the recent-play
-   cooldown and the blocked-artist list. A ticket (me.ts) mirrors the blocked
-   list here so the game works with the Worker unreachable.
+/* Device-local stores (localStorage), there are no accounts: track
+   sanitization, the song history behind the cooldown and the blocked-artist list.
    The saved game itself lives in save.ts. */
 import { DIFFICULTIES, SNIP_WINDOW_SEC } from "./constants.js";
-import { COOLDOWN_DAYS } from "./config.ts";
 import { songKey, safeUrl } from "./utils.js";
+import { COOLDOWN_DAYS } from "./config";
 
-const LS_PLAYED = "tt_played";   // { titleKey: lastPlayedMs } — this phone's recently heard songs
-const LS_TIRED = "tt_tired";     // { titleKey: lastSkippedMs } — songs skipped here as heard too often
-const LS_BLOCKED = "tt_blocked"; // [ artistName ] — device-local "never play this artist" list
-const HISTORY_KEEP_MS = 30*24*3600*1000;
+const LS_PLAYED = "tt_played";   // { titleKey: lastPlayedMs }, songs heard through to the reveal
+const LS_TIRED = "tt_tired";     // { titleKey: lastSkippedMs }, songs skipped as heard too much
+const LS_BLOCKED = "tt_blocked"; // [ artistName ], device-local "never play this artist" list
 const lsGet = k => { try { return JSON.parse(localStorage.getItem(k)); } catch(e){ return null; } };
 const lsSet = (k,v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch(e){} };
 
@@ -35,63 +33,47 @@ export function sanitizeTrack(t){
   };
 }
 
-export const PLAY_COOLDOWN = COOLDOWN_DAYS.played*24*3600*1000;
 const DAY = 24*3600*1000;
-export function loadPlayed(){ return loadMap(LS_PLAYED); }
-export function loadTired(){ return loadMap(LS_TIRED); }
-/* This phone's own history, per kind. */
-export const loadHistory = () => ({ played: loadPlayed(), tired: loadTired() });
-function loadMap(key){
-  const raw = lsGet(key);
+// Kept as long as the longest cooldown; a group import reads the same window.
+export const HISTORY_MS = Math.max(...Object.values(COOLDOWN_DAYS)) * DAY;
+
+function loadMap(k){
+  const raw = lsGet(k);
   if (Array.isArray(raw)){ // migrate the old list format: treat every entry as just played
     const m = {}; const t = Date.now();
-    for (const k of raw) if (typeof k === "string") m[songKey(k)] = t;
+    for (const x of raw) if (typeof x === "string") m[songKey(x)] = t;
     return m;
   }
   if (!raw || typeof raw !== "object") return {};
   // Re-key through songKey: entries written before the key normalization
   // strengthened (e.g. 'song - from "movie"') collapse to the current key.
   const m = {};
-  for (const [k, v] of Object.entries(raw)) m[songKey(k)] = Math.max(m[songKey(k)] || 0, v);
+  for (const [k, v] of Object.entries(raw)) if (Number.isFinite(v)) m[songKey(k)] = Math.max(m[songKey(k)] || 0, v);
   return m;
 }
+
+/* This device's history: { played: { key: ms }, tired: { key: ms } }. */
+export const loadHistory = () => ({ played: loadMap(LS_PLAYED), tired: loadMap(LS_TIRED) });
+
 export function markPlayed(title, kind = "played"){
-  const key = kind === "tired" ? LS_TIRED : LS_PLAYED;
-  const m = loadMap(key);
+  const k = kind === "tired" ? LS_TIRED : LS_PLAYED;
+  const m = loadMap(k);
   m[songKey(title)] = Date.now();
-  const cutoff = Date.now() - HISTORY_KEEP_MS;
-  for (const k of Object.keys(m)) if (!(m[k] > cutoff)) delete m[k];
-  lsSet(key, m);
+  const cutoff = Date.now() - HISTORY_MS;
+  for (const key of Object.keys(m)) if (!(m[key] > cutoff)) delete m[key];
+  lsSet(k, m);
 }
 
-/* Folds any number of histories ({ played, tired } maps, this phone's, a
-   group's, each present person's) into one map of song key -> the time the
-   song may come back; the latest wins. buildCrate takes this map. */
+/* Histories (this device, a group, ...) to one map of song key -> the time
+   the song may come back, each kind sitting out its own COOLDOWN_DAYS. */
 export function cooldownOf(...histories){
   const until = {};
-  for (const h of histories){
-    if (!h) continue;
-    for (const kind of ["played", "tired"]){
-      const days = COOLDOWN_DAYS[kind];
-      for (const [k, at] of Object.entries(h[kind] || {})){
-        if (!Number.isFinite(at)) continue;
-        const t = at + days*DAY;
-        if (!(until[k] >= t)) until[k] = t;
-      }
+  for (const h of histories) for (const kind of Object.keys(COOLDOWN_DAYS)){
+    for (const [k, at] of Object.entries(h?.[kind] || {})){
+      if (Number.isFinite(at)) until[k] = Math.max(until[k] || 0, at + COOLDOWN_DAYS[kind] * DAY);
     }
   }
   return until;
-}
-
-/* How many of the given histories (one per present person) hold each song. */
-export function heardCount(...histories){
-  const n = {};
-  for (const h of histories){
-    if (!h) continue;
-    const keys = new Set([...Object.keys(h.played || {}), ...Object.keys(h.tired || {})]);
-    for (const k of keys) n[k] = (n[k] || 0) + 1;
-  }
-  return n;
 }
 
 export const normArtist = s => String(s||"").trim().toLowerCase();
@@ -99,3 +81,13 @@ export const loadBlocked = () => { const l = lsGet(LS_BLOCKED); return Array.isA
 export const saveBlocked = l => lsSet(LS_BLOCKED, l.slice(0,50));
 export const trackArtists = t => String(t.artist||"").split(",").map(normArtist).filter(Boolean);
 export const isBlocked = (t, set) => trackArtists(t).some(a=>set.has(a));
+
+/* How many of the given histories (one per person present) hold each song. */
+export function heardCount(...histories){
+  const n = {};
+  for (const h of histories){
+    if (!h) continue;
+    for (const k of new Set([...Object.keys(h.played || {}), ...Object.keys(h.tired || {})])) n[k] = (n[k] || 0) + 1;
+  }
+  return n;
+}

@@ -7,8 +7,9 @@
 import { useSyncExternalStore } from "react";
 import { WORKER_API } from "./constants.js";
 import { songKey } from "./utils.js";
-import { cooldownOf, loadHistory } from "./storage.js";
+import { HISTORY_MS, cooldownOf, loadHistory } from "./storage.js";
 import type { GameState, History, PlayKind } from "../types";
+export type { History } from "../types";
 
 export interface Group {
   id: string;
@@ -49,7 +50,6 @@ const TIMEOUT_MS = 5000;
 const ROUND_BATCH = 50;
 const OUTBOX_MAX = 500;
 const IMPORT_MAX = 1000;
-const IMPORT_WINDOW_MS = 30 * 24 * 3600 * 1000;
 export const GROUP_NAME_MAX = 32;
 
 const INVITE_RX = /([a-z2-7]{12}\.[A-Za-z0-9_-]{22})/;
@@ -152,14 +152,21 @@ export async function call<T>(path: string, token: string | null, init: { method
   return body as T;
 }
 
-/* This phone's recent history, the shape the import routes take. */
+const deviceHistory = () => loadHistory() as History;
+
+/* The newest IMPORT_MAX songs of this phone's history, across both kinds. */
 export function localHistory(): History {
-  const since = Date.now() - IMPORT_WINDOW_MS;
-  const h = loadHistory() as History;
-  const clamp = (m: Record<string, number>) => Object.fromEntries(Object.entries(m).filter(([k, v]) => k && v > since).sort((a, b) => b[1] - a[1]).slice(0, IMPORT_MAX));
-  return { played: clamp(h.played), tired: clamp(h.tired) };
+  const since = Date.now() - HISTORY_MS;
+  const h = deviceHistory();
+  const entries = (["played", "tired"] as const).flatMap(kind => Object.entries(h[kind]).map(([k, v]) => ({ kind, k, v })))
+    .filter(e => e.k && e.v > since)
+    .sort((a, b) => b.v - a.v)
+    .slice(0, IMPORT_MAX);
+  const out: History = { played: {}, tired: {} };
+  for (const e of entries) out[e.kind][e.k] = e.v;
+  return out;
 }
-export const localHistoryCount = () => { const h = localHistory(); return Object.keys(h.played).length + Object.keys(h.tired).length; };
+export const localHistoryCount = () => { const h = localHistory(); return new Set([...Object.keys(h.played), ...Object.keys(h.tired)]).size; };
 
 function adopt(group: Group){
   lsSet(LS_GROUP, group);
@@ -169,8 +176,8 @@ function adopt(group: Group){
 }
 
 async function importHistory(invite: string){
-  const h = localHistory();
-  if (Object.keys(h.played).length + Object.keys(h.tired).length) await call("/group/import", invite, { body: h });
+  const { played, tired } = localHistory();
+  if (Object.keys(played).length || Object.keys(tired).length) await call("/group/import", invite, { body: { played, tired } });
 }
 
 export async function createGroup(name: string, withHistory: boolean){

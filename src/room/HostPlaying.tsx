@@ -26,9 +26,10 @@ interface Props {
   onMore: () => void;
   onReveal: () => void;
   onSkip: () => void;
+  onHeardIt: (cue: number) => void;
 }
 
-export function HostPlaying({ view, song, songNo, total, ladder, clip, audio, graceUntil, msLeft, note, wrong, link, onPlay, onMore, onReveal, onSkip }: Props){
+export function HostPlaying({ view, song, songNo, total, ladder, clip, audio, graceUntil, msLeft, note, wrong, link, onPlay, onMore, onReveal, onSkip, onHeardIt }: Props){
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), 200);
@@ -53,6 +54,10 @@ export function HostPlaying({ view, song, songNo, total, ladder, clip, audio, gr
   const ladderState = answering ? "Paused for an answer" : cueing ? "Loading" : playing ? `${clipLeft}s left` : state === "missed" ? "More coming" : "Buzzers open";
   const worth = song && song.rung >= 0 ? song.points : ladder.points[clip.rung];
   const queue = song?.queue ?? [];
+  const skipsLeft = Math.max(0, view.skips.max - view.skips.used);
+  // The room takes "Heard it" votes, and the host's own skip, once the clip plays and until anyone buzzes.
+  const skippable = state === "live" && !queue.length && !song?.guesses.length;
+  const votes = skippable ? song?.votes.length ?? 0 : 0;
 
   return (
     <div className={sh.stage}>
@@ -140,8 +145,13 @@ export function HostPlaying({ view, song, songNo, total, ladder, clip, audio, gr
           </button>
         </div>
         <p className={s.caption}>
-          <span>{link === "open" ? <>Buzz on your phone. Room <b>{view.code}</b></> : "Reconnecting to the room"}</span>
-          {note && <button type="button" className={`link ${s.skip}`} onClick={onSkip}>Skip this song</button>}
+          <span>{link !== "open" ? "Reconnecting to the room"
+            : votes ? <>Skip votes <b className={s.votes}>{votes} of {song!.votesNeeded}</b></>
+            : <>Buzz on your phone. Room <b>{view.code}</b></>}</span>
+          {note ? <button type="button" className={`link ${s.skip}`} onClick={onSkip}>Skip this song</button>
+            : <button type="button" className={`${p.link} ${p.heard} ${s.skip}`} onClick={() => song && onHeardIt(song.cue)} disabled={!skipsLeft || !skippable || link !== "open"}>
+              <span className={p.heardText}>Heard it<span className={p.heardMore}> too much</span></span> <span className={p.stub}>{skipsLeft ? `${skipsLeft} left` : "Used"}</span>
+            </button>}
         </p>
       </div>
     </div>

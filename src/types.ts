@@ -44,7 +44,11 @@ export interface RosterEntry {
 
 export interface CastMember extends RosterEntry {
   score: number;
+  /* "Heard it too much" skips used this show. */
+  skips: number;
 }
+
+/* How a song left the stage: heard through to the reveal, or skipped as heard too much. */
 
 export interface HistoryEntry {
   id: string;
