@@ -6,6 +6,7 @@ import "./styles/tokens.css";
 import "./styles/global.css";
 import { App } from "./app";
 import { DebugLog } from "./components/DebugLog";
+import { Protos } from "./proto/Protos";
 import { log } from "./lib/log.js";
 
 // A "boot" with no preceding "pagehide" means the last page instance died
@@ -14,4 +15,5 @@ import { log } from "./lib/log.js";
 // its status ("snips") and the verified-track count ("snipped").
 log("boot", { ua: navigator.userAgent.replace(/^Mozilla\/5\.0 /, "").slice(0, 80) });
 
-createRoot(document.getElementById("root")!).render(<><App /><DebugLog /></>);
+const proto = new URLSearchParams(location.search).get("proto");
+createRoot(document.getElementById("root")!).render(proto !== null ? <Protos which={proto} /> : <><App /><DebugLog /></>);
