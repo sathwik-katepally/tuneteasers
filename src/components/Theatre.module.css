@@ -166,6 +166,27 @@
   flex: none;
 }
 
+.aboutBtn {
+  position: relative;
+  flex: none;
+  height: 30px;
+  padding: 0 12px;
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--bulb);
+  border: 2px solid var(--cream-shade);
+  background: var(--maroon-deep);
+}
+
+/* Slim enough to clear the bulb rows, with a full-size tap target. */
+.aboutBtn::after {
+  content: '';
+  position: absolute;
+  inset: -8px -4px;
+}
+
 .menuBtn {
   display: flex;
   align-items: center;
@@ -262,6 +283,11 @@
     width: 42px;
     height: 42px;
   }
+  .aboutBtn {
+    height: 42px;
+    padding: 0 16px;
+    font-size: 13px;
+  }
 }
 
 @media (max-height: 760px) and (max-width: 899px) {
@@ -271,5 +297,12 @@
   }
   .title {
     font-size: 24px;
+  }
+}
+
+/* Next to the About button a narrow marquee only has room for the title. */
+@media (max-width: 419px) {
+  .marqueeInner:has(.aboutBtn) .marqueeMeta {
+    visibility: hidden;
   }
 }

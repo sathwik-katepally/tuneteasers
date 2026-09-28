@@ -68,16 +68,23 @@ export function silence(){
   } });
 }
 
+/* The landing page shows only on a first visit. Scripts that are not about
+   it start every page as a returning visitor, even after clearing storage. */
+export function skipLanding(){
+  try { localStorage.setItem("tt_landing_seen", "1"); } catch {}
+}
+
 export const PROFILES = {
   phone: { type: webkit, context: { ...devices["iPhone 13"] } },
   desktop: { type: chromium, launch: { args: ["--autoplay-policy=no-user-gesture-required", ...MUTE_ARGS] }, context: { viewport: { width: 1440, height: 900 } } },
 };
 
-export async function open(profile, { reducedMotion = false } = {}){
+export async function open(profile, { reducedMotion = false, landing = false } = {}){
   const p = PROFILES[profile];
   const browser = await p.type.launch(p.launch || {});
   const context = await browser.newContext({ ...p.context, reducedMotion: reducedMotion ? "reduce" : "no-preference" });
   await context.addInitScript(silence);
+  if (!landing) await context.addInitScript(skipLanding);
   const page = await context.newPage();
   const errors = [];
   page.on("pageerror", e => errors.push(String(e.message)));

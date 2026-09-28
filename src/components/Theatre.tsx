@@ -9,12 +9,13 @@ interface Props {
   game: GameState | null;
   onHome: () => void;
   onEnd: () => void;
+  onAbout?: () => void;
   children: ReactNode;
 }
 
 /* The single-screen cinema around every screen: bulb marquee on top, and on
    wide screens red curtains either side of the stage and seat backs below. */
-export function Theatre({ meta, game, onHome, onEnd, children }: Props){
+export function Theatre({ meta, game, onHome, onEnd, onAbout, children }: Props){
   return (
     <div className={s.theatre}>
       <header className={s.marquee}>
@@ -22,6 +23,7 @@ export function Theatre({ meta, game, onHome, onEnd, children }: Props){
         <div className={s.marqueeInner}>
           <h1 className={s.title}>Tune Teasers</h1>
           <div className={s.marqueeMeta}>{meta}</div>
+          {onAbout && <button type="button" className={s.aboutBtn} onClick={onAbout}>About</button>}
           {game && <GameMenu game={game} onHome={onHome} onEnd={onEnd} />}
         </div>
         <BulbRow className={s.bulbsBottom} gap={26} size={7} />

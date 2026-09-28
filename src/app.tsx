@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { loadSaved, save } from "./lib/save";
+import { isFirstVisit, loadSaved, save } from "./lib/save";
 import { DIFFICULTY, hookOffset, pointsNow, rungSpan } from "./lib/config";
 import { playRung } from "./lib/ladder";
 import { markPlayed, loadBlocked, saveBlocked, normArtist, isBlocked } from "./lib/storage.js";
@@ -20,6 +20,7 @@ import { Playing } from "./screens/Playing";
 import { Reveal } from "./screens/Reveal";
 import { Scoreboard } from "./screens/Scoreboard";
 import { Podium } from "./screens/Podium";
+import { Landing } from "./screens/Landing";
 import { PastGames } from "./screens/PastGames";
 import type { AppState, CastMember, Category, Difficulty, GameState, Mode, Phase, RosterEntry, Settings, Track, Turn, Verdict } from "./types";
 
@@ -31,8 +32,15 @@ const freshTurn = (): Turn => ({ rung: 0, span: rungSpan(0, false), clipEndedAt:
 const primaryArtistOf = (t: Track | null) => (t ? String(t.artist || "").split(",")[0].trim() : "");
 
 export function App(){
+  const [firstVisit] = useState(isFirstVisit);
   const [roomCode, setRoomCode] = useState(roomFromUrl);
-  const [state, setState] = useState<AppState>(() => ({ ...loadSaved(), ...(roomCode ? { screen: "buzzer" as const } : {}) }));
+  // A group invite link skips the landing page like a room link does.
+  const [state, setState] = useState<AppState>(() => ({ ...loadSaved(),
+    ...(roomCode ? { screen: "buzzer" as const } : firstVisit && !location.hash.startsWith("#join=") ? { screen: "landing" as const } : {}) }));
+  // Where a phone's "Back to the start" goes: wherever it came from.
+  const [buzzerExit, setBuzzerExit] = useState<"landing" | "setup">(firstVisit ? "landing" : "setup");
+  const screenNow = useRef(state.screen);
+  screenNow.current = state.screen;
   const [hostResume, setHostResume] = useState(false);
   const [hostShow, setHostShow] = useState(loadHostShow);
   const [phase, setPhase] = useState<Phase>("handover");
@@ -52,8 +60,13 @@ export function App(){
   useEffect(() => {
     const onHash = () => {
       const code = roomFromUrl();
-      if (code){ setRoomCode(code); setState(st => (st.screen === "setup" || st.screen === "past" ? { ...st, screen: "buzzer" } : st)); return; }
-      const i = takeInviteFromUrl(); if (i){ setInvite(i); setState(st => ({ ...st, screen: st.screen === "past" ? "setup" : st.screen })); }
+      if (code){
+        setRoomCode(code);
+        const from = screenNow.current;
+        if (from === "landing" || from === "setup" || from === "past"){ setBuzzerExit(from === "landing" ? "landing" : "setup"); setState(st => ({ ...st, screen: "buzzer" })); }
+        return;
+      }
+      const i = takeInviteFromUrl(); if (i){ setInvite(i); setState(st => ({ ...st, screen: st.screen === "past" || st.screen === "landing" ? "setup" : st.screen })); }
     };
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
@@ -270,7 +283,11 @@ export function App(){
     }} />;
   }
   if (state.screen === "buzzer"){
-    return <Phone code={roomCode} onExit={() => { setRoomCode(""); setState(st => ({ ...st, screen: "setup" })); }} />;
+    return <Phone code={roomCode} onExit={() => { setRoomCode(""); setState(st => ({ ...st, screen: buzzerExit })); }} />;
+  }
+  if (state.screen === "landing"){
+    return <Landing onStart={() => setState(st => ({ ...st, screen: "setup" }))}
+      onJoin={() => { setBuzzerExit("landing"); setRoomCode(""); setState(st => ({ ...st, screen: "buzzer" })); }} />;
   }
 
   let key: string, screen: React.ReactNode, meta = "Now showing";
@@ -290,7 +307,7 @@ export function App(){
       openRoom={() => { engine.ac(); saveHostShow(null); setHostShow(null); setHostResume(false); setState(st => ({ ...st, screen: "host" })); }}
       resumeRoom={() => { engine.ac(); setHostResume(true); setState(st => ({ ...st, screen: "host" })); }}
       discardRoom={() => { saveHostShow(null); setHostShow(null); }}
-      joinRoom={() => { setRoomCode(""); setState(st => ({ ...st, screen: "buzzer" })); }}
+      joinRoom={() => { setBuzzerExit("setup"); setRoomCode(""); setState(st => ({ ...st, screen: "buzzer" })); }}
       resumeGame={async () => {
         if (!g) return;
         if (DIFFICULTY[g.difficulty].sound === "inst"){
@@ -339,7 +356,8 @@ export function App(){
 
   const inGame = state.screen === "game" && !!g && !loading;
   return (
-    <Stage screenKey={key} meta={meta} game={inGame ? g : null} onHome={goHome} onEnd={endGame} onShown={key === "playing" ? shown : undefined}>
+    <Stage screenKey={key} meta={meta} game={inGame ? g : null} onHome={goHome} onEnd={endGame} onShown={key === "playing" ? shown : undefined}
+      onAbout={key === "setup" ? () => setState(st => ({ ...st, screen: "landing" })) : undefined}>
       {screen}
     </Stage>
   );

@@ -1,6 +1,6 @@
 /* The saved game: written on every state change, restored and sanitized on
-   boot. A page load always lands on the home screen; an unfinished game is
-   offered there as a Resume card. Saves from the pre-points version
+   boot. A page load lands on the home screen (the landing page on a first
+   visit); an unfinished game is offered there as a Resume card. Saves from the pre-points version
    (tuneteasers_v6) are migrated once, then that key is dropped. */
 import { ERAS } from "./constants.js";
 import { sanitizeTrack } from "./storage.js";
@@ -10,6 +10,7 @@ import type { AppState, CastMember, Category, Difficulty, GameState, HistoryEntr
 
 const KEY = "tuneteasers_v7";
 const LEGACY_KEY = "tuneteasers_v6";
+const LANDING_SEEN_KEY = "tt_landing_seen";
 
 type Raw = Record<string, unknown>;
 const obj = (v: unknown): Raw => (v && typeof v === "object" && !Array.isArray(v) ? v as Raw : {});
@@ -166,6 +167,15 @@ export function loadSaved(): AppState {
     teams: parseRoster(r.teams, DEFAULTS.teams, "t"),
     game: parseGame(obj(r.game), settings.mode, settings.difficulty, settings.mix),
   };
+}
+
+/* The landing page shows once. Anyone with a save (including players from
+   before the landing existed) is a returning visitor. */
+export function isFirstVisit(): boolean {
+  try { return !localStorage.getItem(LANDING_SEEN_KEY) && read(KEY) === null && read(LEGACY_KEY) === null; } catch { return false; }
+}
+export function markLandingSeen(){
+  try { localStorage.setItem(LANDING_SEEN_KEY, "1"); } catch {}
 }
 
 export function save(s: AppState){
