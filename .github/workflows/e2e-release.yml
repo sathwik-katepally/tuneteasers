@@ -1,7 +1,9 @@
 name: E2E release matrix
 
 # The rest of the release matrix (docs/testing-and-deploy.md) on top of the
-# key suites in e2e.yml, which run on every pull request. Runner choice per
+# key suites in e2e.yml, which run on every pull request. The category games
+# play Easy: in Music-only (the harness default, Medium) the item and mass
+# chips are too thin to pick. Runner choice per
 # suite follows the same rule: WebKit that plays songs on macOS, Chromium and
 # the buzz room on Linux (see the header of e2e.yml).
 on:
@@ -35,7 +37,7 @@ jobs:
               npm run e2e:game -- --profile=phone --mode=teams --mix=bolly --difficulty=easy --rounds=5 &&
               npm run e2e:game -- --profile=phone --mix=telugu --difficulty=hard &&
               npm run e2e:game -- --profile=phone --reduced &&
-              npm run e2e:game -- --profile=phone --categories=item
+              npm run e2e:game -- --profile=phone --categories=item --difficulty=easy
           - name: game desktop matrix
             os: ubuntu-latest
             browsers: chromium
@@ -43,7 +45,7 @@ jobs:
               npm run e2e:game -- --profile=desktop --mix=bolly --difficulty=hard &&
               npm run e2e:game -- --profile=desktop --mix=telugu --difficulty=medium --rounds=5 &&
               npm run e2e:game -- --profile=desktop --no-worker &&
-              npm run e2e:game -- --profile=desktop --categories=mass
+              npm run e2e:game -- --profile=desktop --categories=mass --difficulty=easy
           - name: ladder window at 0s phone
             os: macos-latest
             browsers: webkit
