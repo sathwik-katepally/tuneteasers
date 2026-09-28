@@ -1,11 +1,16 @@
 import fs from "node:fs";
 import { serve, open, saved, moreSettings } from "./harness.mjs";
 import { ladderFor } from "../src/lib/config.ts";
-import { SNIP_INDEX_V, SNIP_METHOD, SNIP_WINDOW_SEC } from "../src/lib/constants.js";
+import { SNIP_ACCEPTED, SNIP_INDEX_V, SNIP_LEGACY, SNIP_WINDOW_SEC } from "../src/lib/constants.js";
 
-const index = JSON.parse(fs.readFileSync(new URL("../public/snips.json", import.meta.url)));
-if (index.v !== SNIP_INDEX_V || Object.values(index.snips).some(e => e.method !== SNIP_METHOD || e.endSec - e.startSec !== SNIP_WINDOW_SEC))
-  throw new Error(`public/snips.json is not a v${SNIP_INDEX_V} index of ${SNIP_WINDOW_SEC}s windows`);
+// The index the build serves: the committed one, or the v5 fixture copied in
+// to check the switch (docs/testing-and-deploy.md).
+const index = JSON.parse(fs.readFileSync(new URL("../dist/snips.json", import.meta.url)));
+const accept = SNIP_ACCEPTED[index.v];
+if (!accept || Object.values(index.snips).some(e => e.method !== accept.method || !accept.clean(e) || e.endSec - e.startSec !== SNIP_WINDOW_SEC))
+  throw new Error(`dist/snips.json is not an accepted index of ${SNIP_WINDOW_SEC}s windows`);
+console.log(`index v${index.v} (${accept.method}), ${Object.keys(index.snips).length} windows`);
+const other = index.v === SNIP_INDEX_V ? SNIP_LEGACY.v : SNIP_INDEX_V;
 const server = await serve();
 const fail = message => { throw new Error(message); };
 
@@ -48,14 +53,18 @@ async function ladder(page, difficulty){
   if (await page.getByRole("button", { name:/^Hear \d+s more/ }).count()) fail(`${difficulty}: offers a rung past its ladder`);
 }
 
-/* The previous release saved 20s snips inside the queue (and an older one
-   10s snips and 100/70/50/30 scores). Such a save must resume on the current
-   index, rebound to SNIP_WINDOW_SEC windows, with its score and history
-   untouched. */
+/* Earlier releases saved their snips inside the queue: MusiCNN's 12s and 20s
+   windows, and 10s ones with 100/70/50/30 scores before that. Such a save
+   must resume on the current index, rebound to its SNIP_WINDOW_SEC windows,
+   with its score and history untouched. */
 async function resumeOldSave(page, oldSecs){
   const st = await saved(page);
   const me = st.game.cast[0];
-  st.game.queue = st.game.queue.map(t => (t.snip ? { ...t, snip:{ ...t.snip, endSec:t.snip.startSec + oldSecs } } : t));
+  st.game.queue = st.game.queue.map(t => {
+    if (!t.snip) return t;
+    const { method, ...old } = t.snip, startSec = old.startSec + 3;
+    return { ...t, snip:{ ...old, startSec, endSec:startSec + oldSecs } };
+  });
   st.game.cast = st.game.cast.map(c => ({ ...c, score:c.id === me.id ? 70 : 0 }));
   st.game.history = [{ id:me.id, song:"Old release song", points:70, round:1 }];
   st.game.turn = 1 % st.game.cast.length;
@@ -69,7 +78,9 @@ async function resumeOldSave(page, oldSecs){
   if (await page.evaluate(() => window.__ttLastMode) !== "snip") fail("old save did not play a verified snip");
   const now = await saved(page);
   const t = now.game.queue[now.game.trackIdx];
-  if (!t.snip || t.snip.endSec - t.snip.startSec !== SNIP_WINDOW_SEC) fail(`old save resumed on a ${t.snip ? t.snip.endSec - t.snip.startSec : "missing"}s window`);
+  const e = index.snips[t.sourceId];
+  if (!t.snip || !e || t.snip.startSec !== e.startSec || t.snip.endSec !== e.endSec || t.snip.method !== accept.method)
+    fail(`old save resumed on ${JSON.stringify(t.snip)}, not the current window ${JSON.stringify(e)}`);
   if (now.game.cast.find(c => c.id === me.id).score !== 70 || now.game.history.length !== 1) fail("old save lost its score or history");
 }
 
@@ -89,9 +100,9 @@ async function run(profile){
       await ladder(page, difficulty);
       console.log(`PASS ${profile} ${difficulty} max rung and replay`);
     }
-    for (const secs of [20, 10]){
+    for (const secs of [SNIP_WINDOW_SEC, 20, 10]){
       await resumeOldSave(page, secs);
-      console.log(`PASS ${profile} a save from the ${secs}s-window release resumes on ${SNIP_WINDOW_SEC}s windows with its score`);
+      console.log(`PASS ${profile} a save from the ${secs}s-window release resumes on the current windows with its score`);
     }
     await page.getByRole("button", { name:"Game menu" }).click();
     await page.getByRole("button", { name:"Home, keep the game" }).click();
@@ -102,13 +113,15 @@ async function run(profile){
     if (await page.evaluate(() => window.__playCalls || 0) !== beforeResume) fail("resume played without current index");
     await page.unroute("**/snips.json");
     console.log(`PASS ${profile} stale saved game cannot resume without index`);
-    for (const variant of ["missing", "mismatched", "legacy", "v2", "v3", "short", "long", "stale"]){
+    for (const variant of ["missing", "mismatched", "legacy", "v2", "v3", "crossed", "unknown", "short", "long", "stale"]){
       await page.route("**/snips.json", route => {
         if (variant === "missing") return route.fulfill({ status:404, body:"" });
         const resize = (secs, extra = {}) => Object.fromEntries(Object.entries(index.snips).map(([id,e]) => [id,{ ...e, endSec:e.startSec + secs, ...extra }]));
         const bad = variant === "legacy" ? { v:1, snips:{} }
           : variant === "v2" ? { ...index, v:2, snips:resize(10, { method:"continuous-v2" }) }
           : variant === "v3" ? { ...index, v:3, snips:resize(20, { method:"continuous-v3" }) }
+          : variant === "crossed" ? { ...index, v:other }
+          : variant === "unknown" ? { ...index, v:99 }
           : variant === "short" ? { ...index, snips:resize(SNIP_WINDOW_SEC - 2) }
           : variant === "long" ? { ...index, snips:resize(20) }
           : variant === "stale" ? { ...index, built:"2020-01-01T00:00:00.000Z" }

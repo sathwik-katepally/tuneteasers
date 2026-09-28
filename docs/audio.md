@@ -18,23 +18,39 @@ The game does not call these directly: `playRung(track, plain, rung, replay, cb)
 
 `public/snips.json` is built offline in CI (see docs/testing-and-deploy.md) and fetched same-origin, no-cache, once per crate build:
 
-    { "v": 4, "built": "...", "snips": { "<Saavn ID>": { "sourceId": "<Saavn ID>", "startSec": 78, "endSec": 90, "maxVoice": 0.023, "method": "continuous-v4" } }, "checked": { "<rejected Saavn ID>": "continuous-v4/0.25" }, "corpusIds": [...] }
+    { "v": 5, "built": "...", "snips": { "<Saavn ID>": { "sourceId": "<Saavn ID>", "startSec": 78, "endSec": 90, "vocalDb": -63.5, "limitDb": -50, "method": "vocal-stem-v5" } }, "checked": { "<rejected Saavn ID>": "vocal-stem-v5/-50" }, "corpusIds": [...] }
 
 The key and `sourceId` must both match the returned Saavn recording ID.
 `checked` records scored recordings that did not pass and never authorizes playback.
-The schema version, method name, window length (`SNIP_WINDOW_SEC`, 12 seconds) and threshold (`SNIP_CLEAN_MAX`) are shared constants in `src/lib/constants.js`, read by the scorer, the crate and the engine alike.
+The window length (`SNIP_WINDOW_SEC`, 12 seconds) and the accepted schema versions (`SNIP_ACCEPTED`) are shared constants in `src/lib/constants.js`, read by the scorer, the crate and the engine alike.
+Two versions authorize playback, each with its own method and check: v4 (`continuous-v4`, MusiCNN, `maxVoice` below 0.25) and v5 (`vocal-stem-v5`, separated vocal stems, `vocalDb` below `SNIP_VOCAL_MAX_DB`, -50 dBFS).
+The v4 index stays live while the scorer builds vocal-stem curves for the corpus; once they cover 95% of it, the scorer publishes v5 on its own and never goes back (see "How windows are judged" below).
+An index of any other version, an entry whose method is not its version's, an unmatched ID, an interval that is not exactly 12 seconds, an absent entry, or a build timestamp over 30 days old cannot authorize Music-only playback.
 The window must hold the whole Music-only clip ladder; `src/lib/config.ts` throws at load if that ladder outgrows it.
-Every window length gets its own schema version and method name, so an index or a saved game from another length never authorizes playback.
-The scorer fetches that recording once and scores MusiCNN voice probability for overlapping ~3-second patches every ~1 second (0.992s) across the whole song: its voice curve.
-It accepts a whole-second 12-second interval only if the chain of overlapping patches covering it end to end, from the last patch starting at or before it to the first reaching its end, all score below `SNIP_CLEAN_MAX`, and it picks the interval with the lowest such maximum.
-It uses the maximum raw patch score, without smoothing away a high-scoring patch.
-Curves are kept in `scripts/voice-curves.json`, per Saavn ID and per detector (`CURVE_METHOD` in the scorer, described under `detectors`), and each curve carries its own hop, patch length and scale: one byte per patch, rounded up so a stored score is never lower than the detector's.
-A later change of window length is judged from the stored curves without fetching any song, and another detector (a vocal-stem level from a separation model, say) can store its curves beside MusiCNN's in the same shape.
-Judged from the September 2026 curves, the songs that failed at 20 seconds hold 385 clean 12-second windows, 203 at 15 seconds and 26 at 20.
-An index with another schema (the v2 10-second and v3 20-second indexes included), an unmatched ID, an interval that is not exactly 12 seconds, an absent entry, or a build timestamp over 30 days old cannot authorize Music-only playback.
-A saved game from the 10- or 20-second releases drops its old intervals when it loads; resuming a Music-only game rebinds its queue to the current index, or shows the shortage message.
+A queued track keeps its window's method; a saved snip without an accepted method (every save before v5, and the 10- and 20-second releases) is dropped when it loads, and resuming a Music-only game rebinds its queue to the current index, or shows the shortage message.
 The client also checks the stream duration covers the interval.
 When the index is missing or too few safe tracks remain, the player sees a shortage message.
+
+## How windows are judged
+
+MusiCNN, the v4 detector, labels whole tracks as vocal or instrumental; it never saw Indian film music, lets vocal tails into windows and reads flute, strings and shehnai as voice.
+v5 separates the vocal stem instead and measures how loud it is.
+`scripts/vocal-curve.py` decodes each song once, separates its vocal stem with htdemucs, and measures the stem and the mix every 0.1s; Whisper (large-v3-turbo) then transcribes the stem.
+The scorer keeps three curves per song in `scripts/voice-curves.json`, one byte per 0.5s patch: the stem level (the loudest 0.1s in the patch), the mix level, and the highest probability of any word Whisper heard over the patch.
+The best candidate windows are then separated again with Mel-Band RoFormer, a second separator of a different design, over the window and its margins only, and Whisper transcribes that stem too; up to three candidates per song, cleanest first.
+A whole-second 12-second window passes only if:
+
+- both vocal stems stay below the song's limit from 2 seconds before the window to its end (the lead-in stops a vocal tail from leaking into the first seconds);
+- the limit is -50 dBFS, or 38 dB below the song's own singing level if that is lower, where the singing level is the median htdemucs stem level over patches holding a word Whisper is sure of (probability 0.8 or more);
+- neither Whisper heard a word (probability 0.5 or more) within a second of that span, counting only words over a stem louder than -60 dBFS.
+
+The scorer picks the passing window with the quietest stems.
+The numbers were calibrated without listening, from the songs' own sung regions: across 262 songs, 99.7% of the stretches Whisper was sure were sung peaked above -51 dBFS and within 38 dB of their song's singing level, so both limits sit below nearly all recognisable singing.
+The word floor is there because over a silent stem Whisper invents words (mostly "झाल"); a voice one separator missed is the other separator's to catch.
+Every merge prints the same calibration for the whole corpus (the share of sure-sung stretches the limits would let through).
+Curves are self-describing (hop, patch length, and either `lo`/`step` in dBFS or a probability `scale`), rounded up so a stored level is never quieter than measured, and kept per Saavn ID and per detector name; MusiCNN's `musicnn-voice-dense-v1` curves stay beside them.
+The RoFormer curves are partial: patches it never measured hold 255 (+27.5 dBFS), so they can never pass.
+A later change of window length is judged from the stored curves, but any window outside what RoFormer measured then fails until that song is scored again.
 
 ## The clip ladder
 
@@ -61,11 +77,11 @@ The engine stops a clip at a media time, not after a wall-clock delay: a timer r
 
 ## What verification can and cannot say
 
-MusiCNN is a voice detector, not proof that a clip has no vocals.
-Quiet singing, speech under loud instruments, unusual vocal timbres, and model mistakes can pass its threshold.
-The overlapping patches close the old uncovered gaps, but even continuous model coverage cannot guarantee zero audible vocals.
-The `sourceId`, exact start/end, method, and maximum raw voice probability in the index make each decision auditable against the live Saavn recording.
-For a listening audit, resolve an indexed `sourceId` from the song endpoint, play the exact `[startSec,endSec]` interval from its HTTPS `downloadUrl`, and record any audible vocals before adjusting the index or threshold.
+Two separators and a speech recogniser agreeing that a window is quiet is strong evidence, not proof.
+Separators can leave a soft voice in the accompaniment, both can miss the same unusual timbre (a heavily processed chorus, a wordless hum), and Whisper cannot hear lyrics a separator removed.
+The design leans on rejection: a window needs both stems below the limit, and any doubt (a missed RoFormer check, an unmeasured patch, a word over an audible stem) rejects it.
+Each entry's `sourceId`, exact start and end, `vocalDb` (the loudest patch of either stem over the lead-in and window) and `limitDb` make every decision auditable against the stored curves and the live recording.
+To audit automatically, separate `[startSec - 3, endSec + 1]` of the HTTPS `downloadUrl` again (htdemucs, RoFormer, or another separator), measure the stem and run a lyric or singing tagger on it; there is no manual review step.
 
 ## Buffering and the stall guard
 

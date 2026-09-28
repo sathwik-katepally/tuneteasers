@@ -10,7 +10,7 @@ React 19 + TypeScript + Vite SPA, deployed by GitHub Actions to GitHub Pages at 
 - `npm run build` - production build to `dist/`
 - `npm run e2e:game -- --profile=phone|desktop ...` (and `e2e:categories`, `e2e:ladder`, `e2e:migrate`, `e2e:autoplay`, `e2e:offline`, `e2e:snips`, `e2e:group`, `e2e:group-edge`, `e2e:room`, `e2e:room-norepeat`, `e2e:landing`, `e2e:journeys`) - Playwright E2E against `dist/`
 - `npm run build:catalog` - regenerate `public/catalog.json` from iTunes (slow; sequential requests to respect Apple's ~20 req/min rate limit)
-- `npm run build:snips` - regenerate `public/snips.json`, the offline-scored instrumental-window index (slow; scores songs in a Playwright Chromium page)
+- `npm run build:snips` - regenerate `public/snips.json`, the offline-scored instrumental-window index (slow; separates each song's vocal stem in Python, see docs/testing-and-deploy.md)
 - `cd worker && npx wrangler dev` - run the Worker (Saavn proxy, group API, buzz-in rooms) locally; CI deploys it and its D1 migrations on push to main
 
 ## Hard rules

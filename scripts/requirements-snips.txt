@@ -1,0 +1,7 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.14.0
+audio-separator==0.47.0
+faster-whisper==1.2.1
+demucs==4.1.0
+numpy==2.4.6
+scipy==1.17.1

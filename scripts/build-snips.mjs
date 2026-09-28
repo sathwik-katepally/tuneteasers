@@ -1,57 +1,99 @@
 #!/usr/bin/env node
 /* Build public/snips.json from current Saavn IDs in the curated corpus.
-   Headless Chromium decodes each recording once and scores overlapping
-   MusiCNN patches (~3s every ~1s) across the whole song. That voice curve is
-   kept in scripts/voice-curves.json, so windows of any length come from it
-   without fetching the song again. A SNIP_WINDOW_SEC interval is accepted
-   only if every patch overlapping it scores below the clean threshold.
+   scripts/vocal-curve.py separates each recording's vocal stem once with
+   htdemucs and transcribes it with Whisper. The stem's loudness, the mix's
+   loudness and the recognised words are kept as curves in
+   scripts/voice-curves.json, so windows of any length come from them without
+   fetching the song again. The best candidate windows are then separated
+   again with Mel-Band RoFormer, and a SNIP_WINDOW_SEC interval is accepted
+   only if both vocal stems stay near silent from a lead-in before it to its
+   end and Whisper heard no word near it in either (gate() below,
+   docs/audio.md).
 
    Run: node scripts/build-snips.mjs   (CI: .github/workflows/refresh-snips.yml)
+   Needs python3 with scripts/requirements-snips.txt, and ffmpeg.
    Env:
      SNIP_CORPUS     corpus.json path override (default public/corpus.json)
-     PLAYWRIGHT_DIR  path to a playwright package dir, used when the repo has
-                     no playwright devDependency installed
-     SNIP_WORKERS    parallel scoring pages (default 3)
+     SNIP_PYTHON     python interpreter (default python3)
      SNIP_OUT        output path override (default public/snips.json)
-     SNIP_CURVES     voice curve store (default scripts/voice-curves.json)
-     SNIP_PRIOR      an index of an earlier schema whose verified windows at
-                     least SNIP_WINDOW_SEC long carry over without scoring;
-                     defaults to the output file while it holds an older schema
-     SNIP_LIMIT      score at most N songs (default 300 per scheduled run)
+     SNIP_CURVES     curve store (default scripts/voice-curves.json)
+     SNIP_LIMIT      score at most N songs (default 300)
+     SNIP_BUDGET_MIN stop taking new songs after this many minutes (default
+                     300), so a CI job ends cleanly inside its 6h limit
      SNIP_SHARD      "i/n": score only this runner's share of the songs and
                      write a partial index (no size floor) for a later merge
      SNIP_MERGE      directory of shard outputs (snips.json and voice-curves.json
                      each): merge them into SNIP_OUT and SNIP_CURVES without
-                     scoring anything; the size floor applies here */
+                     scoring anything; the size floor applies here
+     SNIP_PLAN       print only "todo=<n>", the corpus songs still without
+                     curves (reads the files, no network), for sizing CI
+
+   Until curves cover SWITCH_COVERAGE of the corpus, the index it publishes
+   is still MusiCNN's v4 one, carried over with a fresh build time; from then
+   on it publishes the v5 index judged from the curves, and stays on it. */
 import fs from "node:fs";
-import http from "node:http";
 import path from "node:path";
-import { createRequire } from "node:module";
+import readline from "node:readline";
+import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { songKey } from "../src/lib/utils.js";
-import { SAAVN_BASES, CORPUS_BATCH, SNIP_CLEAN_MAX, SNIP_INDEX_V, SNIP_METHOD, SNIP_WINDOW_SEC } from "../src/lib/constants.js";
+import { SAAVN_BASES, CORPUS_BATCH, SNIP_ACCEPTED, SNIP_LEGACY, SNIP_VOCAL_MAX_DB, SNIP_INDEX_V, SNIP_METHOD, SNIP_WINDOW_SEC } from "../src/lib/constants.js";
 
 const REPO = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const OUT = process.env.SNIP_OUT || path.join(REPO, "public/snips.json");
 const CURVES = process.env.SNIP_CURVES || path.join(REPO, "scripts/voice-curves.json");
 const CORPUS = process.env.SNIP_CORPUS || path.join(REPO, "public/corpus.json");
-const WORKERS = Math.max(1, parseInt(process.env.SNIP_WORKERS) || 3);
+const PYTHON = process.env.SNIP_PYTHON || "python3";
 const LIMIT = Math.max(1, parseInt(process.env.SNIP_LIMIT) || 300);
+const BUDGET_MS = Math.max(1, parseFloat(process.env.SNIP_BUDGET_MIN) || 300) * 60e3;
 const [SHARD, SHARDS] = (process.env.SNIP_SHARD || "0/1").split("/").map(n => parseInt(n));
 const MERGE = process.env.SNIP_MERGE;
+const PLAN = !!process.env.SNIP_PLAN;
+const SWITCH_COVERAGE = 0.95;
 const MIN_ENTRIES = 80;  // refuse to write a final result thinner than this
-const CHECKED_METHOD = `${SNIP_METHOD}/${SNIP_CLEAN_MAX}`;
-const PAGE_RECYCLE = 10; // songs per page before recycling (decode memory)
-const PROGRESS_EVERY = 20;
-// The detector whose curves decide windows. Bump it when the model, patch
-// geometry or extraction changes: every song is then scored again, and the
-// old detector's curves stay in the store beside the new ones.
-const CURVE_METHOD = "musicnn-voice-dense-v1";
-const CURVE_MODEL = "MusiCNN voice/instrumental (essentia.js), p(voice) per mel patch";
-const CURVE_SCALE = 255;
-// Earlier schemas whose windows passed the same every-patch check, so any
-// stretch of one is clean too.
-const CARRY_METHODS = new Set(["continuous-v3"]);
+const PROGRESS_EVERY = 5;
+const SONG_TIMEOUT_MS = 40 * 60e3;
+
+/* The curves that decide windows, one stored series each. Bump a name when
+   its model or extraction changes: every song is then scored again, and the
+   old curves stay in the store beside the new ones (as MusiCNN's do).
+   The RoFormer curves are partial: only the candidate windows it was asked
+   to confirm are measured, and every other patch holds the byte 255 (+27.5
+   dBFS), so an unmeasured stretch can never pass. */
+const CURVE_METHOD = "htdemucs-vocal-db-v1";
+const WORDS_METHOD = "htdemucs-whisper-turbo-words-v1";
+const MIX_METHOD = "mix-db-v1";
+const CONFIRM_METHOD = "melband-kim-vocal-db-v1";
+const CONFIRM_WORDS = "melband-kim-whisper-turbo-words-v1";
+const LEVEL = "dBFS, loudest 0.1s RMS in each patch";
+const WORDS = "highest probability of a word Whisper large-v3-turbo (faster-whisper, int8) recognised in the stem, over the patch";
+const DETECTORS = {
+  [CURVE_METHOD]: { model: "htdemucs (Demucs v4) vocal stem, whole song", unit: LEVEL },
+  [WORDS_METHOD]: { model: "Whisper on the htdemucs vocal stem, whole song", unit: WORDS },
+  [MIX_METHOD]: { model: "the decoded stream itself", unit: LEVEL },
+  [CONFIRM_METHOD]: { model: "Mel-Band RoFormer vocals (Kimberley Jensen, audio-separator) on candidate windows only; 255 = not measured", unit: LEVEL },
+  [CONFIRM_WORDS]: { model: "Whisper on the Mel-Band RoFormer vocal stem of the same candidate windows", unit: WORDS },
+};
+const HOP = 0.5, BLOCKS = 5; // curve patches: 0.5s, each the loudest of five 0.1s blocks
+const DB = { lo: -100, step: 0.5 };
+const UNMEASURED = 255;
+
+/* The window gate. The numbers come from the September 2026 calibration on
+   262 songs (docs/audio.md), and the merge prints them again from the whole
+   corpus on every run (calibration()):
+   - both vocal stems stay below the song's limit from LEAD_SEC before the
+     window to its end. The limit is min(SNIP_VOCAL_MAX_DB, the song's own
+     singing level - SONG_DROP_DB); the singing level is the median htdemucs
+     stem level over patches holding a word Whisper is sure of (SURE_P), when
+     the song has at least SURE_WORDS of them. 99.7% of the loudest patches of
+     such sure words sat above -51 dBFS and within 38 dB of their song's level.
+   - Whisper recognised no word (WORD_P) within WORD_PAD_SEC of that span in
+     either stem. A word only counts where its stem is at least WORD_FLOOR_DB:
+     over a silent stem Whisper invents words (mostly "झाल"), and a separator
+     that missed a voice is the other separator's job to catch.
+   Each song gets up to CONFIRMS RoFormer checks, cleanest candidate first. */
+const GATE = { LEAD_SEC: 2, SONG_DROP_DB: 38, WORD_P: 0.5, WORD_PAD_SEC: 1, WORD_FLOOR_DB: -60, SURE_P: 0.8, SURE_WORDS: 10, CONFIRMS: 3 };
+const CHECKED_METHOD = `${SNIP_METHOD}/${SNIP_VOCAL_MAX_DB}`;
 
 /* -- corpus songs -> stream URLs (the same batch endpoint the client uses) -- */
 const keyOf = songKey;
@@ -122,27 +164,18 @@ async function collectSongs(){
   return pool;
 }
 
-/* -- reuse only source-bound entries of the current schema; an index of an
-   earlier schema only lends its verified windows that are long enough -- */
 const readJson = f => { try { return JSON.parse(fs.readFileSync(f, "utf8")); } catch (e){ return null; } };
-function loadExisting(){
-  const j = readJson(OUT);
-  const current = j && j.v === SNIP_INDEX_V && j.snips && typeof j.snips === "object";
-  const prior = process.env.SNIP_PRIOR ? readJson(process.env.SNIP_PRIOR) : current ? null : j;
-  const priorSnips = prior && Number.isInteger(prior.v) && prior.v < SNIP_INDEX_V && prior.snips && typeof prior.snips === "object" ? prior.snips : {};
-  return { snips: current ? j.snips : {}, checked: current ? j.checked || {} : {}, corpusIds: Array.isArray(j?.corpusIds) ? j.corpusIds : [], priorSnips };
-}
-function carriedWindow(id, e){
-  if (!e || e.sourceId !== id || !CARRY_METHODS.has(e.method) || !Number.isInteger(e.startSec) || e.startSec < 0 ||
-      !(e.endSec - e.startSec >= SNIP_WINDOW_SEC) || !(e.maxVoice < SNIP_CLEAN_MAX)) return null;
-  return { sourceId:id, startSec:e.startSec, endSec:e.startSec + SNIP_WINDOW_SEC, maxVoice:e.maxVoice, method:SNIP_METHOD };
-}
+const loadIndex = (f = OUT) => {
+  const j = readJson(f);
+  return j && Object.hasOwn(SNIP_ACCEPTED, j.v) && j.snips && typeof j.snips === "object" ? j : null;
+};
 
-/* -- voice curves: one per song and detector, each self-describing: patch k
-   covers [k * hopSec, k * hopSec + patchSec] and scores q[k] / scale, a
-   voice probability rounded up so a window judged from the stored curve is
-   never cleaner than the detector said. Any detector that scores fixed
-   patches on a fixed hop (a vocal-stem level, say) fits the same shape. -- */
+/* -- curves: one per song and detector, each self-describing: patch k covers
+   [k * hopSec, k * hopSec + patchSec] and holds q[k] (one byte, base64),
+   read as lo + q[k] * step, or q[k] / scale for a probability. Every value is
+   rounded up, so a stored curve is never quieter or less sure than what was
+   measured. MusiCNN's curves (musicnn-voice-dense-v1, p(voice) per ~3s
+   patch) keep the same shape. -- */
 function loadCurves(file = CURVES){
   const j = readJson(file);
   const ok = j && j.v === 2 && j.songs && typeof j.songs === "object";
@@ -155,75 +188,131 @@ function writeCurves(store, file = CURVES){
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, `${head.slice(0, -1)},"songs":{\n${rows.join(",\n")}\n}}\n`);
 }
-const curveOf = (store, id) => store.songs[id]?.[CURVE_METHOD];
-function addCurve(store, id, r){
-  store.detectors[CURVE_METHOD] = { model: CURVE_MODEL };
-  const q = Buffer.from(r.curve.map(p => Math.min(CURVE_SCALE, Math.max(0, Math.ceil(p * CURVE_SCALE))))).toString("base64");
-  store.songs[id] = { ...store.songs[id], [CURVE_METHOD]: { hopSec:r.hopSec, patchSec:r.patchSec, scale:CURVE_SCALE, dur:Math.round(r.dur * 100) / 100, q } };
-}
-
-/* The cleanest whole-second window of `secs` in a stored curve. A window is
-   judged by the chain of overlapping patches that covers it end to end, from
-   the last patch starting at or before it to the first reaching its end, and
-   every one must score below SNIP_CLEAN_MAX. Ties go to the earlier start. */
-function windowFromCurve(c, secs = SNIP_WINDOW_SEC){
-  const q = Buffer.from(c.q, "base64"), S = c.hopSec, P = c.patchSec, scale = c.scale;
-  if (!q.length || !(S > 0) || !(P > 0) || !(S < P) || !(scale > 0)) return null;
-  let best = null;
-  for (let t = 0; t <= Math.floor(c.dur) - secs - 1; t++){
-    // Rounding can only widen the chain.
-    const k0 = Math.floor(t / S), k1 = Math.ceil((t + secs - P) / S);
-    if (k1 >= q.length) break;
-    let m = 0;
-    for (let k = k0; k <= k1; k++) if (q[k] > m) m = q[k];
-    if (!best || m < best.m) best = { t, m };
-  }
-  if (!best || !(best.m / scale < SNIP_CLEAN_MAX)) return null;
-  return { startSec:best.t, endSec:best.t + secs, maxVoice:Math.ceil(best.m / scale * 1000) / 1000 };
-}
-
-/* -- local harness server -- */
-const ROUTES = {
-  "/": [path.join(REPO, "scripts/snip-harness.html"), "text/html"],
-  "/constants.js": [path.join(REPO, "src/lib/constants.js"), "text/javascript"],
-  "/vendor/tf.min.js": [path.join(REPO, "node_modules/@tensorflow/tfjs/dist/tf.min.js"), "text/javascript"],
-  "/vendor/tf-backend-wasm.min.js": [path.join(REPO, "node_modules/@tensorflow/tfjs-backend-wasm/dist/tf-backend-wasm.min.js"), "text/javascript"],
+const values = c => {
+  const q = Buffer.from(c.q, "base64");
+  return Float64Array.from(q, v => (c.scale ? v / c.scale : c.lo + v * c.step));
 };
-const DIRS = {
-  "/tfjs/": path.join(REPO, "scripts/vad-assets/tfjs"),
-  "/models/": path.join(REPO, "scripts/vad-assets/models"),
-  "/essentia/": path.join(REPO, "node_modules/essentia.js/dist"),
-};
-const MIME = { ".js": "text/javascript", ".json": "application/json", ".wasm": "application/wasm", ".bin": "application/octet-stream", ".html": "text/html" };
-function serve(req, res){
-  const u = req.url.split("?")[0];
-  let file = null, type = null;
-  if (ROUTES[u]) [file, type] = ROUTES[u];
-  else for (const [prefix, dir] of Object.entries(DIRS)){
-    if (!u.startsWith(prefix)) continue;
-    const f = path.normalize(path.join(dir, u.slice(prefix.length)));
-    if (f.startsWith(dir)){ file = f; type = MIME[path.extname(f)] || "application/octet-stream"; }
-  }
-  if (!file){ res.writeHead(404); res.end(); return; }
-  fs.readFile(file, (e, d) => {
-    if (e){ res.writeHead(404); res.end(); return; }
-    res.writeHead(200, { "Content-Type": type });
-    res.end(d);
-  });
+const scored = (store, id) => [CURVE_METHOD, WORDS_METHOD, MIX_METHOD].every(m => store.songs[id]?.[m]);
+const hasCurves = (store, id) => scored(store, id) && !!store.songs[id][CONFIRM_METHOD];
+
+const patches = (blocks, n) => Array.from({ length: n }, (_, k) => Math.max(...blocks.slice(k * BLOCKS, k * BLOCKS + BLOCKS)));
+const dbq = v => Math.min(255, Math.max(0, Math.ceil((v - DB.lo) / DB.step)));
+const pq = p => Math.min(255, Math.ceil(p * 255));
+const b64 = a => Buffer.from(a).toString("base64");
+function wordPatches(words, n, from = 0){
+  const w = new Array(n).fill(0);
+  for (const [a, b, p] of words)
+    for (let k = Math.max(0, Math.floor(a / HOP)); k < n && k * HOP < b; k++) if (k * HOP >= from) w[k] = Math.max(w[k], p);
+  return w;
 }
 
-/* -- playwright: repo devDependency if installed, else PLAYWRIGHT_DIR -- */
-function loadPlaywright(){
-  const require = createRequire(import.meta.url);
-  try { return require("playwright"); } catch (e){}
-  if (process.env.PLAYWRIGHT_DIR){
-    try { return require(process.env.PLAYWRIGHT_DIR); }
-    catch (e){ throw new Error(`PLAYWRIGHT_DIR (${process.env.PLAYWRIGHT_DIR}) did not resolve: ${e.message}`); }
-  }
-  throw new Error("playwright not found: npm install it or set PLAYWRIGHT_DIR to a playwright package dir");
+function addSongCurves(store, id, r){
+  const n = Math.floor(r.stem.length / BLOCKS);
+  const base = { hopSec:HOP, patchSec:HOP, dur:r.dur };
+  Object.assign(store.detectors, DETECTORS);
+  store.songs[id] = {
+    ...store.songs[id],
+    [CURVE_METHOD]: { ...base, ...DB, q: b64(patches(r.stem, n).map(dbq)) },
+    [WORDS_METHOD]: { ...base, scale:255, q: b64(wordPatches(r.words, n).map(pq)) },
+    [MIX_METHOD]: { ...base, ...DB, q: b64(patches(r.mix, n).map(dbq)) },
+  };
 }
 
-function writeSnips(entries, checked, corpusIds, { final }){
+/* Folds a RoFormer answer for [r.from, ...) into the song's partial curves;
+   patches outside it keep what earlier checks measured. */
+function addConfirm(store, id, r){
+  const song = store.songs[id], ref = song[CURVE_METHOD];
+  const n = Buffer.from(ref.q, "base64").length, base = { hopSec:HOP, patchSec:HOP, dur:ref.dur };
+  const lv = song[CONFIRM_METHOD] ? [...Buffer.from(song[CONFIRM_METHOD].q, "base64")] : new Array(n).fill(UNMEASURED);
+  const wd = song[CONFIRM_WORDS] ? [...Buffer.from(song[CONFIRM_WORDS].q, "base64")] : new Array(n).fill(0);
+  if (r){
+    const k0 = Math.round(r.from / HOP), m = Math.floor(r.stem.length / BLOCKS);
+    const got = patches(r.stem, m), w = wordPatches(r.words, n, r.from);
+    for (let i = 0; i < m && k0 + i < n; i++){ lv[k0 + i] = dbq(got[i]); wd[k0 + i] = pq(w[k0 + i]); }
+  }
+  Object.assign(store.detectors, DETECTORS);
+  store.songs[id] = { ...song, [CONFIRM_METHOD]: { ...base, ...DB, q: b64(lv) }, [CONFIRM_WORDS]: { ...base, scale:255, q: b64(wd) } };
+}
+
+/* The song's limit (see GATE) and its whole-second windows of `secs` that
+   pass, cleanest first (ties to the earlier start). With `confirmed` false
+   the RoFormer curves are ignored: that lists the candidates to check. */
+function windows(curves, { confirmed = true, secs = SNIP_WINDOW_SEC } = {}){
+  const cv = curves?.[CURVE_METHOD], cw = curves?.[WORDS_METHOD];
+  if (!cv || !cw) return { limit: null, list: [] };
+  const voc = values(cv), n = voc.length, S = cv.hopSec, P = cv.patchSec;
+  const heard = (w, st) => w.map((p, k) => (st[k] >= GATE.WORD_FLOOR_DB ? p : 0));
+  let level = voc, words = heard(values(cw), voc);
+  const sureW = values(cw);
+  const sure = [...voc].filter((v, k) => sureW[k] >= GATE.SURE_P && v >= GATE.WORD_FLOOR_DB).sort((a, b) => a - b);
+  const sing = sure.length >= GATE.SURE_WORDS ? sure[Math.floor(sure.length / 2)] : null;
+  const limit = Math.min(SNIP_VOCAL_MAX_DB, sing === null ? Infinity : sing - GATE.SONG_DROP_DB);
+  if (confirmed){
+    const rv = curves[CONFIRM_METHOD], rw = curves[CONFIRM_WORDS];
+    if (!rv || !rw) return { limit, list: [] };
+    const rlv = values(rv), rwd = heard(values(rw), rlv);
+    level = voc.map((v, k) => Math.max(v, rlv[k] ?? Infinity));
+    words = words.map((p, k) => Math.max(p, rwd[k] ?? 1));
+  }
+  const span = (a, b) => [Math.max(0, Math.floor((a - P) / S) + 1), Math.min(n - 1, Math.ceil(b / S) - 1)];  // patches overlapping [a, b)
+  const list = [];
+  for (let t = 0; t + secs + 1 <= Math.floor(cv.dur) && Math.ceil((t + secs) / S) <= n; t++){
+    const [k0, k1] = span(t - GATE.LEAD_SEC, t + secs);
+    const [w0, w1] = span(t - GATE.LEAD_SEC - GATE.WORD_PAD_SEC, t + secs + GATE.WORD_PAD_SEC);
+    let m = -Infinity, said = false;
+    for (let k = k0; k <= k1; k++) if (level[k] > m) m = level[k];
+    for (let k = w0; k <= w1; k++) if (words[k] >= GATE.WORD_P){ said = true; break; }
+    if (!said && m < limit) list.push({ startSec:t, endSec:t + secs, vocalDb:m, limitDb:limit });
+  }
+  list.sort((a, b) => a.vocalDb - b.vocalDb || a.startSec - b.startSec);
+  return { limit, list };
+}
+const gate = curves => windows(curves).list[0] || null;
+
+/* The stretch a RoFormer check separates for a candidate: everything the
+   gate reads for it. */
+const confirmSpan = w => ({ from: Math.max(0, w.startSec - GATE.LEAD_SEC - GATE.WORD_PAD_SEC), to: w.endSec + GATE.WORD_PAD_SEC });
+function nextCandidate(curves){
+  const measured = curves[CONFIRM_METHOD] ? Buffer.from(curves[CONFIRM_METHOD].q, "base64") : null;
+  return windows(curves, { confirmed: false }).list.find(w => {
+    const { from, to } = confirmSpan(w);
+    if (!measured) return true;
+    for (let k = Math.floor(from / HOP); k < Math.ceil(to / HOP) && k < measured.length; k++) if (measured[k] === UNMEASURED) return true;
+    return false;
+  }) || null;
+}
+
+/* Every quiet stretch of recognised singing in the corpus, as the gate's
+   own numbers see it: the loudest htdemucs patch of each run of sure-word
+   patches, absolute and against its song's singing level. The share of
+   those runs a limit would let through is how loose it is. */
+function calibration(store, ids){
+  const abs = [], rel = [];
+  let songs = 0;
+  for (const id of ids){
+    const c = store.songs[id];
+    if (!c?.[CURVE_METHOD] || !c[WORDS_METHOD]) continue;
+    const voc = values(c[CURVE_METHOD]), w = values(c[WORDS_METHOD]);
+    const sure = voc.map((v, k) => w[k] >= GATE.SURE_P && v >= GATE.WORD_FLOOR_DB);
+    const lv = [...voc].filter((_, k) => sure[k]).sort((a, b) => a - b);
+    if (lv.length < GATE.SURE_WORDS) continue;
+    const sing = lv[Math.floor(lv.length / 2)];
+    songs++;
+    for (let k = 0; k < voc.length; k++){
+      if (!sure[k]) continue;
+      let j = k, pk = -Infinity;
+      while (j < voc.length && sure[j]) pk = Math.max(pk, voc[j++]);
+      abs.push(pk); rel.push(pk - sing); k = j;
+    }
+  }
+  if (!abs.length) return;
+  const q = (a, p) => [...a].sort((x, y) => x - y)[Math.floor(p * (a.length - 1))];
+  const share = (a, lim) => a.filter(v => v < lim).length / a.length;
+  console.log(`calibration: ${abs.length} runs of sure words in ${songs} songs; 0.3% quantile ${q(abs, 0.003).toFixed(1)} dBFS and ${q(rel, 0.003).toFixed(1)} dB from the song's level`);
+  console.log(`  runs quieter than the ceiling ${SNIP_VOCAL_MAX_DB} dBFS: ${(100 * share(abs, SNIP_VOCAL_MAX_DB)).toFixed(2)}%, more than ${GATE.SONG_DROP_DB} dB under their song: ${(100 * share(rel, -GATE.SONG_DROP_DB)).toFixed(2)}%`);
+}
+
+function writeSnips(v, entries, checked, corpusIds, { final }){
   const keys = Object.keys(entries).sort();
   if (final && keys.length < MIN_ENTRIES){
     console.error(`REFUSING to write ${OUT}: only ${keys.length} entries (< ${MIN_ENTRIES})`);
@@ -233,10 +322,33 @@ function writeSnips(entries, checked, corpusIds, { final }){
   for (const k of keys) snips[k] = entries[k];
   const rejected = {};
   for (const id of Object.keys(checked).sort()) if (!snips[id]) rejected[id] = checked[id];
-  const body = JSON.stringify({ v: SNIP_INDEX_V, built: new Date().toISOString(), snips, checked:rejected, corpusIds:[...corpusIds].sort() });
+  const body = JSON.stringify({ v, built: new Date().toISOString(), snips, checked:rejected, corpusIds:[...corpusIds].sort() });
   fs.mkdirSync(path.dirname(OUT), { recursive: true });
   fs.writeFileSync(OUT, body + "\n");
   return keys.length;
+}
+
+/* Writes the index the client should use now (see the header): the v5 one
+   judged from the curves once they cover the corpus, else the previous v4
+   index, carried over for the songs still in the corpus. */
+function publish(store, entries, checked, corpusIds, prev, { final, quiet = false }){
+  const covered = [...corpusIds].filter(id => hasCurves(store, id)).length;
+  const coverage = corpusIds.size ? covered / corpusIds.size : 0;
+  const switched = prev?.v === SNIP_INDEX_V || coverage >= SWITCH_COVERAGE;
+  const log = quiet ? () => {} : console.log;
+  log(`curve coverage: ${covered}/${corpusIds.size} corpus songs (${Math.round(100 * coverage)}%, switch at ${100 * SWITCH_COVERAGE}%)`);
+  if (switched || prev?.v !== SNIP_LEGACY.v){
+    const n = writeSnips(SNIP_INDEX_V, entries, checked, corpusIds, { final });
+    log(`wrote ${OUT}: v${SNIP_INDEX_V} (${SNIP_METHOD}), ${n} entries`);
+    return;
+  }
+  const accept = SNIP_ACCEPTED[SNIP_LEGACY.v];
+  const legacy = Object.fromEntries(Object.entries(prev.snips).filter(([id, e]) =>
+    corpusIds.has(id) && e.sourceId === id && e.method === accept.method && accept.clean(e) &&
+    Number.isInteger(e.startSec) && e.startSec >= 0 && e.endSec - e.startSec === SNIP_WINDOW_SEC));
+  const legacyChecked = Object.fromEntries(Object.entries(prev.checked || {}).filter(([id]) => corpusIds.has(id)));
+  const n = writeSnips(SNIP_LEGACY.v, legacy, legacyChecked, corpusIds, { final });
+  log(`wrote ${OUT}: still v${SNIP_LEGACY.v} (${SNIP_LEGACY.method}), ${n} entries; v${SNIP_INDEX_V} would hold ${Object.keys(entries).length}`);
 }
 
 /* Kept entries per language and corpus tier, and the share of scored
@@ -251,34 +363,81 @@ function report(entries, checked){
   console.log(`entries by language/tier: ${Object.entries(cells).sort().map(([k, n]) => `${k}=${n}`).join(" ")}`);
 }
 
+/* Every corpus song with curves is judged from them on each run. */
+function judgeAll(ids, store, entries, checked){
+  for (const id of ids){
+    if (!hasCurves(store, id)) continue;
+    const w = gate(store.songs[id]);
+    if (w){ entries[id] = { sourceId:id, ...w, method:SNIP_METHOD }; delete checked[id]; }
+    else { delete entries[id]; checked[id] = CHECKED_METHOD; }
+  }
+}
+
 function merge(){
   const files = fs.readdirSync(MERGE, { recursive: true }).map(f => path.join(MERGE, f));
-  const entries = {}, checked = {}, corpusIds = new Set();
+  const checked = {}, corpusIds = new Set();
   const store = loadCurves();
   const shards = files.filter(f => path.basename(f) === "snips.json");
   for (const f of shards){
-    const j = JSON.parse(fs.readFileSync(f, "utf8"));
-    if (j?.v !== SNIP_INDEX_V) throw new Error(`${f} is not a v${SNIP_INDEX_V} shard`);
-    Object.assign(entries, j.snips);
-    Object.assign(checked, j.checked);
+    const j = loadIndex(f);
+    if (!j) throw new Error(`${f} is not a snips index`);
     for (const id of j.corpusIds || []) corpusIds.add(id);
   }
+  // A night with nothing to score has no shards: keep the last run's
+  // resolved songs that are still in the corpus.
+  const prev = loadIndex();
+  if (!shards.length){
+    const inCorpus = new Set(loadCorpus().map(s => s.id));
+    for (const id of prev?.corpusIds || []) if (inCorpus.has(id)) corpusIds.add(id);
+  }
+  if (!corpusIds.size) throw new Error("no corpus IDs from shards or the previous index; refusing to prune the curve store");
   for (const f of files.filter(f => path.basename(f) === "voice-curves.json")){
     const c = loadCurves(f);
     Object.assign(store.detectors, c.detectors);
     for (const [id, curves] of Object.entries(c.songs)) store.songs[id] = { ...store.songs[id], ...curves };
   }
-  for (const id of Object.keys(entries)) if (!corpusIds.has(id)) delete entries[id];
+  // MusiCNN's curves stay only for songs still in the corpus, like the rest.
   for (const id of Object.keys(store.songs)) if (!corpusIds.has(id)) delete store.songs[id];
+  const entries = {};
+  judgeAll(corpusIds, store, entries, checked);
   console.log(`merging ${shards.length} shards`);
-  const n = writeSnips(entries, checked, corpusIds, { final: true });
+  publish(store, entries, checked, corpusIds, prev, { final: true });
   writeCurves(store);
-  console.log(`wrote ${OUT}: ${n} entries; ${CURVES}: ${Object.keys(store.songs).length} curves`);
+  console.log(`${CURVES}: ${Object.keys(store.songs).length} songs with curves`);
   report(entries, checked);
+  calibration(store, corpusIds);
+}
+
+function plan(){
+  const store = loadCurves();
+  console.log(`todo=${loadCorpus().filter(s => s.id && !hasCurves(store, s.id)).length}`);
+}
+
+/* One long-lived python process; models load once. Answers come back in
+   job order, one line each. */
+function startExtractor(){
+  const py = spawn(PYTHON, [path.join(REPO, "scripts/vocal-curve.py")], { stdio: ["pipe", "pipe", "inherit"] });
+  const lines = readline.createInterface({ input: py.stdout })[Symbol.asyncIterator]();
+  let dead = null;
+  py.on("exit", code => { dead = `extractor exited (${code})`; });
+  const next = async ms => {
+    let timer;
+    const r = await Promise.race([lines.next(), new Promise(res => { timer = setTimeout(() => res({ timeout: true }), ms); })]);
+    clearTimeout(timer);
+    if (r.timeout) throw new Error("extractor timed out");
+    if (r.done) throw new Error(dead || "extractor closed");
+    return JSON.parse(r.value);
+  };
+  return {
+    ready: () => next(30 * 60e3),
+    run: async job => { py.stdin.write(JSON.stringify(job) + "\n"); return next(SONG_TIMEOUT_MS); },
+    stop: () => { py.stdin.end(); py.kill(); },
+  };
 }
 
 (async () => {
   if (MERGE) return merge();
+  if (PLAN) return plan();
   const t0 = Date.now();
   console.log("resolving corpus songs to streams...");
   const corpus = await collectSongs();
@@ -286,135 +445,78 @@ function merge(){
   console.log(`corpus: ${corpus.length} unique songs (${perLang("bolly")} hindi, ${perLang("telugu")} telugu)`);
   if (!corpus.length){ console.error("no corpus songs resolved, aborting without touching snips.json"); process.exit(1); }
 
-  const prev = loadExisting();
+  const prev = loadIndex();
   const store = loadCurves();
   const corpusIds = new Set(corpus.map(s => s.id));
-  const previousIds = new Set(prev.corpusIds);
-  const entries = Object.fromEntries(Object.entries(prev.snips).filter(([id, e]) =>
-    corpusIds.has(id) && e.sourceId === id && e.method === SNIP_METHOD &&
-    Number.isInteger(e.startSec) && e.startSec >= 0 && e.endSec - e.startSec === SNIP_WINDOW_SEC &&
-    Number.isFinite(e.maxVoice) && e.maxVoice < SNIP_CLEAN_MAX));
-  const checked = Object.fromEntries(Object.entries(prev.checked).filter(([id, method]) =>
-    corpusIds.has(id) && method === CHECKED_METHOD));
-  const reused = Object.keys(entries).length;
-  let carried = 0, derived = 0;
-  for (const s of corpus){
-    if (entries[s.id]) continue;
-    const w = carriedWindow(s.id, prev.priorSnips[s.id]);
-    if (w){ entries[s.id] = w; carried++; }
-  }
-  const judge = s => {
-    const w = windowFromCurve(curveOf(store, s.id));
-    if (w){ entries[s.id] = { sourceId:s.id, ...w, method:SNIP_METHOD }; delete checked[s.id]; }
-    else checked[s.id] = CHECKED_METHOD;
-    return w;
-  };
-  for (const s of corpus) if (!entries[s.id] && curveOf(store, s.id)){ judge(s); derived++; }
-  // Only songs with neither a window nor a stored curve are fetched; new corpus IDs first.
+  const previousIds = new Set(prev?.corpusIds || []);
+  const entries = {}, checked = {};
+  judgeAll(corpusIds, store, entries, checked);
+  const judged = Object.keys(entries).length + Object.keys(checked).length;
+  // Only songs without stored curves are fetched; new corpus IDs first.
   const shardOf = id => [...id].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % SHARDS;
-  const todo = corpus.filter(s => !entries[s.id] && !curveOf(store, s.id) && shardOf(s.id) === SHARD)
+  const todo = corpus.filter(s => !hasCurves(store, s.id) && shardOf(s.id) === SHARD)
     .sort((a,b) => Number(previousIds.has(a.id)) - Number(previousIds.has(b.id)))
     .slice(0, LIMIT);
-  console.log(`${reused} reused, ${carried} carried over from the earlier schema, ${derived} judged from stored curves, ${todo.length} to score${SHARDS > 1 ? ` (shard ${SHARD}/${SHARDS})` : ""}`);
-
-  const { chromium } = loadPlaywright();
-  const server = http.createServer(serve);
-  await new Promise(r => server.listen(0, "127.0.0.1", r));
-  const origin = `http://127.0.0.1:${server.address().port}`;
-  const browser = await chromium.launch({ args: ["--mute-audio"] });
+  console.log(`${judged} judged from stored curves, ${todo.length} to score${SHARDS > 1 ? ` (shard ${SHARD}/${SHARDS})` : ""}`);
 
   const failures = [];
-  let scored = 0, kept = 0, sinceWrite = 0;
-
-  const newPage = async () => {
-    const page = await browser.newPage();
-    await page.goto(origin + "/", { waitUntil: "load" });
-    await page.waitForFunction(() => window.__harnessReady === true, null, { timeout: 60000 });
-    await page.evaluate(() => window.__harnessInit());
-    return page;
-  };
-  /* Scores one song on `page`; returns a log line, or null after a failure
-     (the caller drops the page: a failed job may leave wasm state corrupted). */
-  async function score(page, s){
-    let r;
-    try { r = await page.evaluate(u => window.__scoreCurve(u), s.stream); }
-    catch (e){ r = { error: String(e && e.message || e).slice(0, 200), stage: "page" }; }
-    if (r.error){ failures.push({ ...s, error: r.error, stage: r.stage }); return null; }
-    addCurve(store, s.id, r);
-    const w = judge(s);
-    if (w) kept++;
-    return `${s.lang} ${w ? `maxVoice=${w.maxVoice.toFixed(3)} start=${w.startSec}s` : "no clean window"} patches=${r.curve.length} dur=${Math.round(r.dur)}s ${r.ms}ms  ${s.title.slice(0, 40)}`;
-  }
+  let done = 0, kept = 0, sinceWrite = 0, py = null;
   const progress = () => {
-    const n = writeSnips(entries, checked, corpusIds, { final: false });
+    publish(store, entries, checked, corpusIds, prev, { final: false, quiet: true });
     writeCurves(store);
-    console.log(`  ...progress written (${n} entries)`);
   };
+  async function ask(job){
+    if (!py){ py = startExtractor(); const r = await py.ready(); console.log(`extractor ready: ${r.separators.join(" + ")}, whisper ${r.whisper}`); }
+    let r;
+    try { r = await py.run(job); }
+    catch (e){ py.stop(); py = null; r = { error: e.message }; }
+    if (!r.error && r.id !== job.id) r = { error: `answer for ${r.id}` };
+    return r;
+  }
+  async function score(s){
+    const t = Date.now(), job = { id:s.id, url:s.stream, lang:s.lang };
+    if (!scored(store, s.id)){
+      const r = await ask({ op:"song", ...job });
+      if (r.error) return `FAIL ${s.title.slice(0, 40)} :: ${r.error.slice(0, 120)}`;
+      addSongCurves(store, s.id, r);
+    }
+    let checks = 0, c;
+    while (checks < GATE.CONFIRMS && !gate(store.songs[s.id]) && (c = nextCandidate(store.songs[s.id]))){
+      const r = await ask({ op:"confirm", ...job, ...confirmSpan(c) });
+      if (r.error){
+        // Retried from scratch next time rather than judged half-checked.
+        delete store.songs[s.id][CONFIRM_METHOD]; delete store.songs[s.id][CONFIRM_WORDS];
+        return `FAIL ${s.title.slice(0, 40)} (confirm) :: ${r.error.slice(0, 120)}`;
+      }
+      addConfirm(store, s.id, r);
+      checks++;
+    }
+    if (!store.songs[s.id][CONFIRM_METHOD]) addConfirm(store, s.id, null);
+    judgeAll([s.id], store, entries, checked);
+    const w = entries[s.id];
+    if (w) kept++;
+    return `${s.lang} ${w ? `vocal=${w.vocalDb}dB (limit ${w.limitDb}) start=${w.startSec}s` : "no clean window"} after ${checks} RoFormer checks, dur=${Math.round(store.songs[s.id][CURVE_METHOD].dur)}s ${Math.round((Date.now() - t) / 1000)}s  ${s.title.slice(0, 40)}`;
+  }
 
-  let next = 0;
-  async function worker(id){
-    let page = null, used = 0;
-    while (true){
-      const i = next++;
-      if (i >= todo.length) break;
-      const s = todo[i];
-      if (!page || used >= PAGE_RECYCLE){
-        if (page) await page.close().catch(() => {});
-        page = await newPage();
-        used = 0;
-      }
-      used++;
-      const line = await score(page, s);
-      scored++;
-      if (line) console.log(`${String(scored).padStart(3)}/${todo.length} [w${id}] ${line}`);
-      else {
-        const f = failures[failures.length - 1];
-        console.log(`${String(scored).padStart(3)}/${todo.length} [w${id}] FAIL(${f.stage}) ${s.title.slice(0, 40)} :: ${f.error.slice(0, 80)}`);
-        await page.close().catch(() => {});
-        page = null;
-      }
+  for (const [pass, list] of [["", todo], ["retry ", null]]){
+    const songs = list || failures.splice(0, failures.length);
+    if (!list && songs.length) console.log(`\nretrying ${songs.length} failed songs once...`);
+    for (const [i, s] of songs.entries()){
+      if (Date.now() - t0 > BUDGET_MS){ console.log(`time budget spent; ${songs.length - i} songs left for the next run`); break; }
+      const line = await score(s);
+      if (list) done++;
+      if (line.startsWith("FAIL")) failures.push(s);
+      console.log(`${pass}${String(i + 1).padStart(3)}/${songs.length} ${line}`);
       if (++sinceWrite >= PROGRESS_EVERY){ sinceWrite = 0; progress(); }
-      await sleep(250); // polite spacing between stream fetches
     }
-    if (page) await page.close().catch(() => {});
   }
+  if (py) py.stop();
 
-  await Promise.all(Array.from({ length: Math.min(WORKERS, todo.length) }, (_, i) => worker(i + 1)));
-
-  // one retry pass: transient network/decode hiccups should not cost a song
-  if (failures.length){
-    console.log(`\nretrying ${failures.length} failed songs once...`);
-    const retry = failures.splice(0, failures.length);
-    let page = null, used = 0;
-    for (const s of retry){
-      if (!page || used >= PAGE_RECYCLE){
-        if (page) await page.close().catch(() => {});
-        page = await newPage();
-        used = 0;
-      }
-      used++;
-      const line = await score(page, s);
-      if (line) console.log(`  retry ok: ${line}`);
-      else {
-        const f = failures[failures.length - 1];
-        console.log(`  still failing (${f.stage}): ${s.title.slice(0, 40)} :: ${f.error.slice(0, 80)}`);
-        await page.close().catch(() => {});
-        page = null;
-      }
-      await sleep(250);
-    }
-    if (page) await page.close().catch(() => {});
-  }
-
-  await browser.close();
-  server.close();
-
-  const n = writeSnips(entries, checked, corpusIds, { final: SHARDS === 1 });
+  console.log(`\n${kept} passed of ${done} scored in ${Math.round((Date.now() - t0) / 60000)}min`);
+  publish(store, entries, checked, corpusIds, prev, { final: SHARDS === 1 });
   writeCurves(store);
-  console.log(`\nwrote ${OUT}: ${n} entries (${kept} new from ${scored} scored) in ${Math.round((Date.now() - t0) / 60000)}min`);
-  console.log(`${Object.keys(store.songs).length} voice curves in ${CURVES}`);
-  console.log(`${failures.length} failed after retry (${scored ? Math.round(100 * failures.length / scored) : 0}%)`);
+  console.log(`${failures.length} failed after retry`);
   console.log(`${Object.keys(checked).length} source IDs rejected by ${CHECKED_METHOD}`);
-  for (const f of failures) console.log(`  FAILED ${f.lang} ${f.title.slice(0, 44)} (${f.stage}) ${f.error.slice(0, 90)}`);
   report(entries, checked);
+  calibration(store, corpusIds);
 })().catch(e => { console.error("build-snips failed:", e); process.exit(1); });

@@ -10,7 +10,7 @@
    Game sound effects are synthesised on the same AudioContext (sfx), so the
    engine stays the only thing in the app that makes a sound. */
 import { log, errMsg } from "./log.js";
-import { SNIP_WINDOW_SEC } from "./constants.js";
+import { SNIP_WINDOW_SEC, snipMethodOk } from "./constants.js";
 
 const STALL_MS = 12000; // a dead or stalled stream must not pin the game on "Cueing it up…"
 
@@ -67,7 +67,7 @@ export const engine = {
     this.stop();
     const s = this.session;
     const snip = track?.snip;
-    if (!snip || !track.sourceId || snip.sourceId !== track.sourceId ||
+    if (!snip || !track.sourceId || snip.sourceId !== track.sourceId || !snipMethodOk(snip.method) ||
         typeof snip.indexBuilt !== "string" || !snip.indexBuilt ||
         !Number.isFinite(snip.startSec) || !Number.isFinite(snip.endSec) ||
         snip.startSec < 0 || snip.endSec - snip.startSec !== SNIP_WINDOW_SEC ||
