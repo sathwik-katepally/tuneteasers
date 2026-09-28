@@ -89,7 +89,7 @@ New IDs in the weekly corpus are prioritized using the previous index's `corpusI
 The resolver tries both Saavn endpoints with short retries and fails with an endpoint summary after three empty corpus batches; the existing workflow failure alert remains active.
 It refuses to write fewer than 80 entries.
 An index of an earlier schema never authorizes anything as it is, but its verified windows at least `SNIP_WINDOW_SEC` long carry over as the first `SNIP_WINDOW_SEC` seconds of each (the same every-patch check, so any stretch of one is clean): automatically while the output file still holds the older schema, or from `SNIP_PRIOR=<old-index>`.
-The v4 rescore (12-second windows, September 2026) carried over the 142 songs with verified 20-second windows and raised the pass rate from 6% to PASS_RATE_TBD.
+The v4 rescore (12-second windows, September 2026) carried over the 142 songs with verified 20-second windows and raised verified songs from 142 of 2,418 (6%) to 527 (22%): Hindi easy/medium/hard 119/106/76 and Telugu 79/88/59, up from 34/32/17 and 17/22/20.
 The client fails closed with a clear Music-only shortage if the index is missing or inadequate.
 
 ## Monitoring
