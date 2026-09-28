@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Lightbulb, Play, Plus, RotateCcw } from "lucide-react";
 import { Equalizer } from "../components/Equalizer";
-import { CLIP_POINTS, CLIP_SEGMENTS, HINT_PENALTY, LAST_RUNG, SPEED_BONUS_MAX, pointsNow, rungStart } from "../lib/config";
+import { HINT_PENALTY, SPEED_BONUS_MAX, ladderFor, pointsNow } from "../lib/config";
 import type { Phase, Track, Turn } from "../types";
 import s from "./Playing.module.css";
 import sh from "./shared.module.css";
@@ -30,12 +30,13 @@ export function Playing({ name, track, plain, phase, turn, note, onPlay, onJudge
 
   const playing = phase === "playing";
   const cueing = phase === "cueing";
+  const ladder = ladderFor(plain);
   const { from, to } = turn.span;
   const left = Math.max(0, Math.ceil(to - from - (now - turn.clipStartedAt) / 1000));
-  const worth = pointsNow(turn.rung, turn.clipEndedAt, turn.hint, now);
-  const nextLen = turn.rung < LAST_RUNG ? CLIP_SEGMENTS[turn.rung + 1] : null;
+  const worth = pointsNow(ladder, turn.rung, turn.clipEndedAt, turn.hint, now);
+  const nextLen = turn.rung < ladder.last ? ladder.segments[turn.rung + 1] : null;
   const state = cueing ? "Loading" : playing ? `${left}s left` : phase === "blocked" ? "Paused" : "Guess, or hear more";
-  const inSpan = (i: number) => i <= turn.rung && rungStart(i) >= from;
+  const inSpan = (i: number) => i <= turn.rung && ladder.start(i) >= from;
 
   return (
     <div className={sh.stage}>
@@ -70,17 +71,17 @@ export function Playing({ name, track, plain, phase, turn, note, onPlay, onJudge
           <span className={s.ladderLabel}>Clip length</span>
           <span className={s.ladderState}>{state}</span>
         </div>
-        <div className={s.strip} style={{ gridTemplateColumns: CLIP_SEGMENTS.map(sec => `${sec}fr`).join(" ") }}>
-          {CLIP_SEGMENTS.map((sec, i) => {
+        <div className={s.strip} style={{ gridTemplateColumns: ladder.segments.map(sec => `${sec}fr`).join(" ") }}>
+          {ladder.segments.map((sec, i) => {
             const heard = i < turn.rung || (i === turn.rung && !cueing);
             const running = playing && inSpan(i);
             return (
               <div key={i} className={`${s.frame} ${heard && !running && !(cueing && inSpan(i)) ? s.frameDone : ""} ${i === turn.rung ? s.frameNow : ""} ${running ? s.frameLit : ""}`}>
                 {running && (
                   <div key={turn.playKey} className={`${s.frameFill} ${s.frameRun}`}
-                    style={{ animationDuration: `${sec}s`, animationDelay: `${rungStart(i) - from}s` }} />
+                    style={{ animationDuration: `${sec}s`, animationDelay: `${ladder.start(i) - from}s` }} />
                 )}
-                <span className={s.frameText}>{i ? "+" : ""}{sec}s · {CLIP_POINTS[i]}</span>
+                <span className={s.frameText}>{i ? "+" : ""}{sec}s · {ladder.points[i]}</span>
               </div>
             );
           })}

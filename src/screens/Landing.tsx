@@ -1,12 +1,13 @@
 import { useEffect } from "react";
 import { LazyMotion, MotionConfig, domAnimation } from "motion/react";
 import * as m from "motion/react-m";
-import { CLIP_POINTS, CLIP_SEGMENTS } from "../lib/config";
+import { ladderFor } from "../lib/config";
 import { markLandingSeen } from "../lib/save";
 import s from "./Landing.module.css";
 
 /* Easy's ladder: the first clip, then each "Hear more" step. */
-const LADDER = CLIP_SEGMENTS.map((secs, i) => ({ label: i === 0 ? `${secs}s` : `+${secs}s`, points: CLIP_POINTS[i] }));
+const EASY = ladderFor(true);
+const LADDER = EASY.segments.map((secs, i) => ({ label: i === 0 ? `${secs}s` : `+${secs}s`, points: EASY.points[i] }));
 
 const rise = (i: number) => ({
   initial: { y: 28, opacity: 0 },

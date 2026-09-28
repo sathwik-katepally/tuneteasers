@@ -6,21 +6,24 @@
    - joining by code (typed) and by the #room link,
    - a buzz race is answered in the order buzzes reached the room,
    - a wrong answer passes to the next buzzer, a right one scores the rung,
-   - nobody knowing carries the clip ladder on (manual and automatic),
+   - nobody knowing carries the clip ladder on (manual and automatic), on
+     the difficulty's own ladder (Music-only has one rung fewer),
    - the answer timer runs out, and everyone locked out reveals the song,
    - a phone that reloads mid-show keeps its seat and score,
    - the podium matches the room, and every phone's final place does too,
    - no phone ever receives the title before its reveal, or any stream URL.
-   node e2e/room.mjs [--host=phone] [--categories=item,mass] [--phone-engine=chromium] [--worker=https://...] [--shots=dir] */
+   node e2e/room.mjs [--host=phone] [--difficulty=easy|medium|hard] [--categories=item,mass] [--phone-engine=chromium] [--worker=https://...] [--shots=dir] */
 import fs from "node:fs";
 import path from "node:path";
 import { chromium, webkit, devices } from "playwright";
 import { serve, args, localWorker, silence, skipLanding, MUTE_ARGS } from "./harness.mjs";
 import { displayTitle } from "../src/lib/utils.js";
-import { CATEGORIES, CLIP_POINTS, ROOM_ANSWER_SECS } from "../src/lib/config.ts";
+import { CATEGORIES, DIFFICULTY, ROOM_ANSWER_SECS, ladderFor } from "../src/lib/config.ts";
 import { songKey } from "../src/lib/utils.js";
 
-const A = args({});
+const A = args({ difficulty: "easy" });
+const LADDER = ladderFor(DIFFICULTY[A.difficulty]?.sound === "full");
+const CLIP_POINTS = LADDER.points;
 const categories = A.categories ? A.categories.split(",") : [];
 const shotsDir = A.shots && A.shots !== "true" ? A.shots : null;
 if (shotsDir) fs.mkdirSync(shotsDir, { recursive: true });
@@ -312,7 +315,7 @@ try {
   await host.page.evaluate(() => localStorage.clear());
   await host.page.goto(url);
   await host.page.getByRole("radio", { name: "Buzz in" }).click();
-  await host.page.getByRole("radio", { name: "Easy", exact: true }).click();
+  await host.page.getByRole("radio", { name: DIFFICULTY[A.difficulty].label, exact: true }).click();
   await host.page.getByRole("radio", { name: "3", exact: true }).click();
   // --categories=item,mass: the room's crate must honour the home screen's song categories.
   for (const id of categories){
@@ -411,7 +414,8 @@ try {
   await shot(host, "host-07-reveal");
 
   // Song 2: nobody buzzes, the host asks for more; a wrong answer with nobody
-  // queued behind it carries the ladder on by itself; then a right one.
+  // queued behind it carries the ladder on by itself (on Music-only's last
+  // rung the cut clip replays from the top); then a right one.
   await nextSong(2);
   await live(2, 0);
   const more = host.page.getByRole("button", { name: /^Hear \d+s more$/ });
@@ -422,14 +426,15 @@ try {
   await buzz(meena);
   await until("meena answering", () => song().answering === idOf("Meena"));
   await answer(meena, await wrongTitle());
-  await until("song 2 missed", () => song().state === "missed" || song().rung === 2);
-  await live(2, 2);
+  const after = Math.min(2, LADDER.last);
+  await until("song 2 missed", () => song().state === "missed" || (after > 1 && song().rung === after));
+  await live(2, after);
   await shot(meena, "phone-10-out-next-rung");
   await buzz(asha);
   await answer(asha, (await currentTitle()).toLowerCase().replace(/aa/g, "a"), { pick: false });
   await revealed(2);
-  const ashaAfter2 = (first.label === "Asha" ? 0 : second.label === "Asha" ? CLIP_POINTS[0] : 0) + CLIP_POINTS[2];
-  if (scoreOf("Asha") !== ashaAfter2) fail(`Asha has ${scoreOf("Asha")}, expected ${ashaAfter2} (typed answer at rung 2)`);
+  const ashaAfter2 = (first.label === "Asha" ? 0 : second.label === "Asha" ? CLIP_POINTS[0] : 0) + CLIP_POINTS[after];
+  if (scoreOf("Asha") !== ashaAfter2) fail(`Asha has ${scoreOf("Asha")}, expected ${ashaAfter2} (typed answer at rung ${after})`);
 
   // Song 3: Ravi's phone reloads mid-show and gets its seat back, then the
   // answer clock runs out on Ravi and Meena answers.

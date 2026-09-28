@@ -33,7 +33,7 @@ Autocomplete offers every known title in the show's languages; if she is right s
 ## Flow of one song
 
 1. Countdown: the host sends `song`; buzzing is shut (`cue`).
-2. The clip starts playing: the host sends `clip { rung, points }`; buzzing opens (`live`) at that rung's points (`CLIP_POINTS`).
+2. The clip starts playing: the host sends `clip { rung, points }`; buzzing opens (`live`) at that rung's points (the show's ladder in `CLIP_LADDERS`: Easy has three rungs, Music-only two).
 3. First buzz: the room makes that player the answerer (`answering`) with `ROOM_ANSWER_SECS` on the clock; the host pauses the audio. Others can keep buzzing to queue.
 4. Answer:
    - right: the player scores the points of the rung they buzzed on, and the song is `revealed`;
@@ -96,6 +96,6 @@ So "Main Hu Na" matches "Main Hoon Na" and "kesaria" matches "Kesariya", while "
 ## Testing
 
 `npm run e2e:room` (`e2e/room.mjs`) starts a local `wrangler dev` and proxies the room WebSockets to it from Playwright, recording every frame.
-Desktop Chromium hosts (or a WebKit iPhone with `--host=phone`) and three WebKit iPhones in separate contexts play a full 12-song show: join by typed code and by link, a buzz race in arrival order, wrong answer to the next buzzer, right answer at the rung's points, "Hear more" and the automatic ladder after a miss, a typed misspelling, a reload and a leave-and-return keeping the seat, the answer clock running out, everyone locked out, the box office, the host reloading while a phone answers (the room scores it once and the host resumes on its reveal), the host reloading on the final reveal, podium totals against the room's results, each phone's final place, and "Same crowd again".
+Desktop Chromium hosts (or a WebKit iPhone with `--host=phone`; `--difficulty=medium` plays a Music-only show on the shorter ladder) and three WebKit iPhones in separate contexts play a full 12-song show: join by typed code and by link, a buzz race in arrival order, wrong answer to the next buzzer, right answer at the rung's points, "Hear more" and the automatic ladder after a miss, a typed misspelling, a reload and a leave-and-return keeping the seat, the answer clock running out, everyone locked out, the box office, the host reloading while a phone answers (the room scores it once and the host resumes on its reveal), the host reloading on the final reveal, podium totals against the room's results, each phone's final place, and "Same crowd again".
 It then probes the room directly: a foreign origin, an unclaimed code, a wrong host token, silent sockets up to the cap and their 4401 timeout (in a browser page with its own context: Node's WebSocket reports a close the server starts late or never, and the game contexts route the Worker's host through the script's Node proxy, which matters when `--worker` is production), frames before a hello, a host command from a phone, an oversized frame, a flood, and song numbers out of order.
 `--worker=<origin>` runs it against a deployed Worker (the preview one) instead, and `--categories=romantic,...` checks that every song in the show carries one of those tags.

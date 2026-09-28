@@ -41,16 +41,19 @@ jobs:
           node-version: 22
       - run: npm ci
       - run: npx playwright install --with-deps chromium
-      - run: mkdir -p shard && cp public/snips.json shard/snips.json
+      - run: mkdir -p shard && cp public/snips.json shard/snips.json && cp scripts/voice-curves.json shard/voice-curves.json
       - run: node scripts/build-snips.mjs
         env:
           SNIP_OUT: shard/snips.json
+          SNIP_CURVES: shard/voice-curves.json
           SNIP_SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
           SNIP_LIMIT: ${{ inputs.limit || '300' }}
       - uses: actions/upload-artifact@v7
         with:
           name: snips-shard-${{ matrix.shard }}
-          path: shard/snips.json
+          path: |
+            shard/snips.json
+            shard/voice-curves.json
           retention-days: 3
 
   # A shard that failed only leaves its songs unexamined for the next run.
@@ -74,13 +77,13 @@ jobs:
           SNIP_MERGE: shards
       - name: Commit if changed
         run: |
-          if git diff --quiet public/snips.json; then
+          if git diff --quiet public/snips.json scripts/voice-curves.json; then
             echo "Snips unchanged"
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add public/snips.json
+          git add public/snips.json scripts/voice-curves.json
           git commit -m "Refresh snips index"
           git push
 

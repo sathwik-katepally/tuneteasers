@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { isFirstVisit, loadSaved, save } from "./lib/save";
-import { DIFFICULTY, hookOffset, pointsNow, rungSpan } from "./lib/config";
+import { DIFFICULTY, hookOffset, ladderFor, pointsNow } from "./lib/config";
 import { playRung } from "./lib/ladder";
 import { markPlayed, loadBlocked, saveBlocked, normArtist, isBlocked } from "./lib/storage.js";
 import { buildCrate as buildCrateJs, refreshMusicQueue as refreshMusicQueueJs } from "./lib/crate.js";
@@ -28,7 +28,7 @@ type Crate = { error?: string; queue?: Track[]; source?: string };
 const buildCrate = buildCrateJs as (mix: string, eras: string[], sound: string, difficulty: Difficulty, minSongs: number, played?: Record<string, number>, categories?: Category[]) => Promise<Crate>;
 const refreshMusicQueue = refreshMusicQueueJs as (queue: Track[]) => Promise<Track[]>;
 
-const freshTurn = (): Turn => ({ rung: 0, span: rungSpan(0, false), clipEndedAt: null, clipStartedAt: 0, playKey: 0, hint: false });
+const freshTurn = (): Turn => ({ rung: 0, span: { from: 0, to: 0 }, clipEndedAt: null, clipStartedAt: 0, playKey: 0, hint: false });
 const primaryArtistOf = (t: Track | null) => (t ? String(t.artist || "").split(",")[0].trim() : "");
 
 export function App(){
@@ -138,7 +138,7 @@ export function App(){
   async function playClip(rung: number, replay = false){
     if (!track) return;
     engine.ac();
-    const span = rungSpan(rung, replay);
+    const span = ladderFor(plain).span(rung, replay);
     setNote("");
     setTurn(t => ({ ...t, rung, span, clipEndedAt: replay ? t.clipEndedAt : null }));
     const started = () => {
@@ -176,7 +176,7 @@ export function App(){
 
   function revealAndScore(result: "correct" | "wrong"){
     if (!g || !who || !track || verdict || phase === "reveal") return;
-    const points = result === "correct" ? pointsNow(turn.rung, turn.clipEndedAt, turn.hint) : 0;
+    const points = result === "correct" ? pointsNow(ladderFor(plain), turn.rung, turn.clipEndedAt, turn.hint) : 0;
     engine.stop();
     setNote("");
     engine.playElement(track.stream, hookOffset(track), 0, { onErr: () => setNote("Couldn't stream the full song.") });

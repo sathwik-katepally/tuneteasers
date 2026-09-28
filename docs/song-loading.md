@@ -86,7 +86,7 @@ If filters shrink the pool below 10 the crate returns `{ error: "thin" }` and th
 ## Snips annotation and Music-only eligibility
 
 Setup and crate builds share a valid `./snips.json` index for five minutes, while a resumed game fetches a fresh copy (no-cache).
-A pooled track gets an interval only when its Saavn ID matches both the index key and entry, the interval is exactly `SNIP_WINDOW_SEC` (20) seconds inside the track, and its maximum patch voice score is below `SNIP_CLEAN_MAX` (see docs/audio.md for the contract).
+A pooled track gets an interval only when its Saavn ID matches both the index key and entry, the interval is exactly `SNIP_WINDOW_SEC` (12) seconds inside the track, and its maximum patch voice score is below `SNIP_CLEAN_MAX` (see docs/audio.md for the contract).
 The crate log entry records `snips: "ok"|"none"` and `snipped: <count>`.
 In Music-only mode (`sound === "inst"`), the queue contains only annotated tracks and must cover the requested rounds and cast size.
 If fewer safe songs survive, the crate returns `safe` and setup explains the shortage.
