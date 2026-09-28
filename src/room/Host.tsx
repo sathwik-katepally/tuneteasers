@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { CLIP_POINTS, CLIP_STEPS, DIFFICULTY, MUSIC_CLIP_STEPS, ROOM_ANSWER_SECS, ROOM_DECOYS_PER_SONG, ROOM_GRACE_SECS,
-  ROOM_SONGS_PER_ROUND, ROOM_SPARE_SONGS, ROOM_WRONG_BEAT_MS, hookOffset } from "../lib/config";
+import { CLIP_POINTS, DIFFICULTY, LAST_RUNG, ROOM_ANSWER_SECS, ROOM_DECOYS_PER_SONG, ROOM_GRACE_SECS,
+  ROOM_SONGS_PER_ROUND, ROOM_SPARE_SONGS, ROOM_WRONG_BEAT_MS, hookOffset, rungSpan } from "../lib/config";
+import { playRung } from "../lib/ladder";
 import { buildCrate as buildCrateJs, decoyTitles as decoyTitlesJs } from "../lib/crate.js";
 import { engine, keepAwake } from "../lib/engine.js";
 import { markPlayed } from "../lib/storage.js";
@@ -23,10 +24,10 @@ const buildCrate = buildCrateJs as (mix: string, eras: string[], sound: string, 
 const decoyTitles = decoyTitlesJs as (mix: string, eras: string[], n: number, exclude: string[], categories: Category[]) => Promise<string[]>;
 
 type Phase = "opening" | "lobby" | "loading" | "countdown" | "song" | "reveal" | "board" | "done" | "failed";
-interface Clip { rung: number; startedAt: number; endedAt: number | null; key: number; cut: boolean }
+interface Clip { rung: number; span: { from: number; to: number }; startedAt: number; endedAt: number | null; key: number; cut: boolean }
 interface Revealed { track: Track; verdict: Verdict }
 
-const freshClip = (): Clip => ({ rung: 0, startedAt: 0, endedAt: null, key: 0, cut: false });
+const freshClip = (): Clip => ({ rung: 0, span: rungSpan(0, false), startedAt: 0, endedAt: null, key: 0, cut: false });
 
 /* The host screen of a buzz-in room: the only device that plays audio. It
    runs the show (songs, clip ladder, reveals, box office) and tells the room
@@ -48,7 +49,6 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
   const msLeft = useMsLeft(view);
   const track = show ? show.queue[show.idx] ?? null : null;
   const plain = show?.plain ?? DIFFICULTY[settings.difficulty].sound === "full";
-  const steps = plain ? CLIP_STEPS : MUSIC_CLIP_STEPS;
 
   // Timers and socket callbacks read the latest values through these.
   const live = useRef({ view, show, clip, phase, track, audio });
@@ -111,7 +111,9 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
     room.send({ t: "start", titles, total: show.total, perRound: show.perRound, answerSecs: ROOM_ANSWER_SECS });
     const next = { ...show, queue, idx: 0, songNo: 0, started: true };
     setShow(next);
-    engine.prime(queue[0], show.plain);
+    // No prime here: the crate took the tap's gesture with it, and a prime
+    // outside a gesture only races the first clip. A strict browser shows
+    // "Tap to play" for the first song instead.
     toCountdown();
   }
 
@@ -132,15 +134,17 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
     room.send({ t: "song", n: show.songNo + 1, title: track.title, film: track.album || "", year: track.year || 0, artist: track.artist || "" });
   }, [phase, room.link]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function playClip(rung: number, again = false){
+  /* A replay starts from the top of the clip window; otherwise the rung plays
+     only its new stretch, carrying on from where the last one stopped. */
+  async function playClip(rung: number, replay = false){
     const t = live.current.track;
     if (!t) return;
     engine.ac();
-    const secs = steps[rung];
+    const span = rungSpan(rung, replay);
     setNote("");
     setGraceUntil(null);
     setPhase("song");
-    setClip(c => ({ ...c, rung, endedAt: again ? c.endedAt : null, cut: false }));
+    setClip(c => ({ ...c, rung, span, endedAt: replay ? c.endedAt : null, cut: false }));
     const started = () => {
       setClip(c => ({ ...c, startedAt: Date.now(), key: c.key + 1 }));
       setAudio(a => (a === "blocked" ? a : "playing"));
@@ -155,19 +159,16 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
       setNote(plain ? "This song won't stream right now. Skip it to try another." : "This music-only clip isn't available. Skip it to try another.");
       setAudio("listened");
     };
-    const cb = { onStart: started, onEnd: ended, onErr: failed, onBlocked: () => setAudio("blocked") };
-    log("snippet", { rung, secs, sound: plain ? "full" : "inst", room: true });
+    log("snippet", { rung, from: span.from, to: span.to, sound: plain ? "full" : "inst", room: true });
     setAudio("cueing");
-    if (plain){ engine.playElement(t.stream, hookOffset(t), secs, cb); return; }
-    const r = await engine.playSnippet(t, 0, secs, cb);
-    if (r === "superseded") return;
-    if (r === "snip"){ started(); return; }
-    failed();
+    const r = await playRung(t, plain, rung, replay, { onStart: started, onEnd: ended, onErr: failed, onBlocked: () => setAudio("blocked") });
+    if (r === "failed") failed();
   }
 
-  /* Nobody has it yet: the next rung for everyone, the same rung again if a
-     buzz cut the last one short, or the reveal once the ladder is spent or
-     every player is locked out. */
+  /* Nobody has it yet: the next rung for everyone, or the reveal once the
+     ladder is spent or every player is locked out. A buzz that cut a clip
+     short means the room missed part of it, so the next play starts from the
+     top of the window (the last rung just replays). */
   function carryOn(){
     const { view: v, clip: c, phase: p } = live.current;
     if (p !== "song" || !v?.song) return;
@@ -175,7 +176,7 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
     if (s.state !== "live" && s.state !== "missed") return;
     const everyoneOut = v.players.length > 0 && v.players.every(pl => s.locked.includes(pl.id));
     if (everyoneOut) return giveUp();
-    if (c.rung < steps.length - 1) return void playClip(c.rung + 1);
+    if (c.rung < LAST_RUNG) return void playClip(c.rung + 1, c.cut);
     if (c.cut) return void playClip(c.rung, true);
     giveUp();
   }
@@ -333,7 +334,7 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
     default:
       key = `song-${show?.idx}`;
       screen = view && show && track && (
-        <HostPlaying view={view} song={view.song?.n === show.songNo + 1 ? view.song : null} songNo={show.songNo + 1} total={show.total} steps={steps} clip={clip} audio={audio}
+        <HostPlaying view={view} song={view.song?.n === show.songNo + 1 ? view.song : null} songNo={show.songNo + 1} total={show.total} clip={clip} audio={audio}
           graceUntil={graceUntil} msLeft={msLeft} note={note} wrong={wrong} link={room.link}
           onPlay={() => playClip(clip.rung, true)} onMore={carryOn} onReveal={giveUp} onSkip={skipSong} />
       );

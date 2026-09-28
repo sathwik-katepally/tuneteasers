@@ -11,11 +11,11 @@
    - a phone that reloads mid-show keeps its seat and score,
    - the podium matches the room, and every phone's final place does too,
    - no phone ever receives the title before its reveal, or any stream URL.
-   node e2e/room.mjs [--host=phone] [--categories=item,mass] [--worker=https://...] [--shots=dir] */
+   node e2e/room.mjs [--host=phone] [--categories=item,mass] [--phone-engine=chromium] [--worker=https://...] [--shots=dir] */
 import fs from "node:fs";
 import path from "node:path";
 import { chromium, webkit, devices } from "playwright";
-import { serve, args, localWorker, silenceAudio } from "./harness.mjs";
+import { serve, args, localWorker, silence, MUTE_ARGS } from "./harness.mjs";
 import { displayTitle } from "../src/lib/utils.js";
 import { CATEGORIES, CLIP_POINTS, ROOM_ANSWER_SECS } from "../src/lib/config.ts";
 import { songKey } from "../src/lib/utils.js";
@@ -73,13 +73,13 @@ const hostOnPhone = A.host === "phone";
 async function device(kind, label){
   const desk = kind === "host" && !hostOnPhone;
   const browser = desk
-    ? await chromium.launch({ args: ["--autoplay-policy=no-user-gesture-required", "--mute-audio"] })
-    : await webkit.launch();
+    ? await chromium.launch({ args: ["--autoplay-policy=no-user-gesture-required", ...MUTE_ARGS] })
+    : await (A["phone-engine"] === "chromium" ? chromium : webkit).launch();
   const context = await browser.newContext(desk
     ? { viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" }
     : { ...devices["iPhone 13"], reducedMotion: "reduce" });
   await wire(context, label);
-  if (!desk) await context.addInitScript(silenceAudio);
+  await context.addInitScript(silence);
   // Counts what actually reached the page, to tell a lost frame from an app bug.
   await context.addInitScript(() => {
     const W = window.WebSocket;
@@ -331,7 +331,7 @@ try {
   // queued behind it carries the ladder on by itself; then a right one.
   await nextSong(2);
   await live(2, 0);
-  const more = host.page.getByRole("button", { name: /^Hear \d+s$/ });
+  const more = host.page.getByRole("button", { name: /^Hear \d+s more$/ });
   await until("first clip over", () => host.page.getByText(/^Anyone\?/).isVisible());
   await shot(host, "host-08-grace");
   await more.click();

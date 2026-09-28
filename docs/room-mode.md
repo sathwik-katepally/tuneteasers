@@ -35,7 +35,7 @@ Autocomplete offers titles from the show plus decoys; if she is right she scores
 4. Answer:
    - right: the player scores the points of the rung they buzzed on, and the song is `revealed`;
    - wrong or out of time: that player is locked out for the song and the next in the queue answers;
-   - queue empty: `missed`. After a short beat (`ROOM_WRONG_BEAT_MS`) the host plays the next rung for everyone, replays the last rung if a buzz cut it short, or reveals once the ladder is spent. Buzzes are still accepted during the beat.
+   - queue empty: `missed`. After a short beat (`ROOM_WRONG_BEAT_MS`) the host plays the next rung for everyone (the ladder's "Hear more": only the new stretch, `playRung` in `src/lib/ladder.ts`), or reveals once the ladder is spent. If a buzz cut the clip short, the next play starts from the top of the window instead, and on the last rung it replays. Buzzes are still accepted during the beat.
 5. When a clip ends with nobody buzzing, buzzing stays open for `ROOM_GRACE_SECS`, then the next rung plays. The host can also tap "Hear more" or "Reveal it".
 6. If every player is locked out the song is revealed straight away.
 
