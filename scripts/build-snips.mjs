@@ -11,8 +11,8 @@
                      no playwright devDependency installed
      SNIP_WORKERS    parallel scoring pages (default 3)
      SNIP_OUT        output path override (default public/snips.json)
-     SNIP_HINTS      a v2 (10s) index whose starts seed the search; defaults to
-                     the output file while it still holds the v2 schema
+     SNIP_HINTS      an index of an earlier schema whose starts seed the search;
+                     defaults to the output file while it holds an older schema
      SNIP_LIMIT      score at most N songs (default 300 per scheduled run)
      SNIP_SHARD      "i/n": score only this runner's share of the songs and
                      write a partial index (no size floor) for a later merge
@@ -107,19 +107,19 @@ async function collectSongs(){
   return pool;
 }
 
-/* -- reuse only source-bound entries of the current schema; an index of the
-   previous schema (v2, 10s windows) only seeds candidate starts per ID -- */
-function v2Hints(j){
+/* -- reuse only source-bound entries of the current schema; an index of an
+   earlier schema (another window length) only seeds candidate starts per ID -- */
+function priorHints(j){
   const hints = {};
-  if (j && j.v === 2 && j.snips && typeof j.snips === "object")
+  if (j && Number.isInteger(j.v) && j.v < SNIP_INDEX_V && j.snips && typeof j.snips === "object")
     for (const [id, e] of Object.entries(j.snips)) if (e?.sourceId === id && Number.isFinite(e.startSec)) hints[id] = e.startSec;
   return hints;
 }
 function loadExisting(){
   let j = null;
   try { j = JSON.parse(fs.readFileSync(OUT, "utf8")); } catch (e){}
-  let hints = v2Hints(j);
-  if (process.env.SNIP_HINTS) hints = v2Hints(JSON.parse(fs.readFileSync(process.env.SNIP_HINTS, "utf8")));
+  let hints = priorHints(j);
+  if (process.env.SNIP_HINTS) hints = priorHints(JSON.parse(fs.readFileSync(process.env.SNIP_HINTS, "utf8")));
   const current = j && j.v === SNIP_INDEX_V && j.snips && typeof j.snips === "object";
   return { snips: current ? j.snips : {}, checked: current ? j.checked || {} : {}, corpusIds: Array.isArray(j?.corpusIds) ? j.corpusIds : [], hints };
 }
@@ -230,7 +230,7 @@ function merge(){
   const checked = Object.fromEntries(Object.entries(prev.checked).filter(([id, method]) =>
     corpusIds.has(id) && method === CHECKED_METHOD));
   const hintOf = s => (Number.isFinite(prev.hints[s.id]) ? prev.hints[s.id] : null);
-  // New corpus IDs first, then recordings that had a clean 10s window.
+  // New corpus IDs first, then recordings that had a clean window in an earlier schema.
   const shardOf = id => [...id].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % SHARDS;
   const todo = corpus.filter(s => !(s.id in entries) && checked[s.id] !== CHECKED_METHOD && shardOf(s.id) === SHARD)
     .sort((a,b) => Number(previousIds.has(a.id)) - Number(previousIds.has(b.id)) || Number(hintOf(a) === null) - Number(hintOf(b) === null))

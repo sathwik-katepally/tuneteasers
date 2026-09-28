@@ -64,11 +64,13 @@ export const EXCLUDE_RX = /(remix|mashup|lo-?fi|slowed|reverb|medley|unplugged|a
 
 /* The snips.json contract shared by the offline scorer and the client: every
    Music-only interval is exactly SNIP_WINDOW_SEC long, which must hold the
-   whole clip ladder (CLIP_SEGMENTS in src/lib/config.ts), and every patch
-   across it scores below SNIP_CLEAN_MAX. */
-export const SNIP_INDEX_V = 3;
-export const SNIP_METHOD = "continuous-v3";
-export const SNIP_WINDOW_SEC = 20;
+   whole Music-only clip ladder (CLIP_LADDER in src/lib/config.ts), and every
+   patch across it scores below SNIP_CLEAN_MAX. Changing the window length
+   means a new SNIP_INDEX_V and SNIP_METHOD, so an index or a saved game from
+   another length can never authorize playback, and a full rescore. */
+export const SNIP_INDEX_V = 4;
+export const SNIP_METHOD = "continuous-v4";
+export const SNIP_WINDOW_SEC = 12;
 export const SNIP_CLEAN_MAX = 0.25;
 export const SNIP_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 

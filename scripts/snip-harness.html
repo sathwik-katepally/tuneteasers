@@ -150,8 +150,7 @@ async function verify(extractor, model, pcm, startSec){
 
 /* Dense-scan a region, then verify whole-second starts inside each run of
    clean patches long enough to hold a window. The coarse grid alone misses
-   clean stretches that start between its points, which matters more for a
-   20s window than it did for 10s. */
+   clean stretches that start between its points. */
 async function searchRegion(extractor, model, pcm, fromSec, toSec){
   const patches = Math.floor((toSec - fromSec - PATCH_FRAMES * MEL_HOP / MODEL_SR) / STRIDE_SEC) + 1;
   if (patches < VERIFY_PATCHES) return null;
@@ -175,8 +174,8 @@ async function searchRegion(extractor, model, pcm, fromSec, toSec){
   return null;
 }
 
-/* hint: a previously clean start for this recording (the v2 index's 10s
-   interval), searched first. Returns { startSec, endSec, maxVoice, ... } or
+/* hint: a previously clean start for this recording (from an index of an
+   earlier schema), searched first. Returns { startSec, endSec, maxVoice, ... } or
    { maxVoice:1, ... } when nothing passes, or { error, stage }. */
 window.__scoreSong = async function(url, hint = null){
   const t0 = performance.now();
