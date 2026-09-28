@@ -18,7 +18,7 @@
    node e2e/room-norepeat.mjs [--worker=https://...] */
 import fs from "node:fs";
 import { chromium, webkit, devices } from "playwright";
-import { serve, args, localWorker, silence, skipLanding, wireWorker, MUTE_ARGS } from "./harness.mjs";
+import { serve, args, localWorker, silence, skipLanding, moreSettings, wireWorker, MUTE_ARGS } from "./harness.mjs";
 import { displayTitle, songKey, shuffle } from "../src/lib/utils.js";
 import { ROOM_HEARD } from "../src/lib/constants.js";
 
@@ -91,6 +91,7 @@ async function openRoom(h){
   await h.page.evaluate(() => localStorage.clear());
   await h.page.goto(url);
   await h.page.getByRole("radio", { name: "Buzz in" }).click();
+  await moreSettings(h.page);
   await h.page.getByRole("radio", { name: "Easy", exact: true }).click();
   await h.page.getByRole("radio", { name: "3", exact: true }).click();
   await h.page.getByRole("button", { name: "Open a room" }).click();
