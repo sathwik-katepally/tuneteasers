@@ -11,15 +11,16 @@
 - `src/lib/save.ts` - the saved game: `loadSaved` (sanitize, migrate v6) and `save`.
 - `src/lib/constants.js` - search queries, language/era tables, exclusion regex.
 - `src/lib/utils.js` - pure helpers (`songKey`, `displayTitle`, `shuffle`, `safeUrl`, ...).
-- `src/lib/storage.js` - track sanitization, the played-cooldown store and the blocked-artist store.
-- `src/lib/group.ts` - optional group sync: the group invite, the write outbox, the group cooldown fetch and past results (docs/group-sync.md).
+- `src/lib/storage.js` - track sanitization, the played and tired history stores, `cooldownOf`, and the blocked-artist store.
+- `src/lib/group.ts` - optional group sync: the group invite, the write outbox, the group history fetch, the group's tickets and past results (docs/group-sync.md).
+- `src/lib/me.ts` - optional personal ticket: the ticket and its outbox, preference sync, passkey registration and recovery, and the cooldown for the people present (docs/tickets.md).
 - `src/lib/crate.js` - song loading (`buildCrate`) across the 3 source tiers, and `answerTitles` (the public title list a room phone autocompletes from).
 - `src/lib/room.ts` - buzz-in room client: `createRoom`, the `#room=` link, `useRoom` (PartySocket), seat and host-show storage.
 - `src/lib/answer.js` - answer folding, matching and autocomplete, shared with the Worker.
 - `src/lib/engine.js` - the audio engine (songs and synthesised sound effects) and screen wake lock.
 - `src/lib/ladder.ts` - `playRung`, which plays a clip ladder rung through the engine.
 - `src/styles/tokens.css`, `src/styles/global.css` - design tokens (colors, fonts, hard shadows) and the few global classes (`.btn*`, `.display`, `.eyebrow`, `.grain`, `.link`, the debug overlay).
-- `src/components/` - the cinema pieces, each with a CSS Module: `Theatre` (marquee, curtains, seat backs, game menu), `Bulbs` (bulb rows and frames), `Ticket`, `Curtain`, `Stamp`, `SplitFlap`, `Seg` (segmented radio), `CategoryPicker` (the setup screen's song-category stubs), `Equalizer`, `Reel`, `GroupPanel` (the home-screen group card), `Qr`, `Stage` (the theatre plus the screen cross-fade, used by every state owner), and `DebugLog`.
+- `src/components/` - the cinema pieces, each with a CSS Module: `Theatre` (marquee, curtains, seat backs, game menu), `Bulbs` (bulb rows and frames), `Ticket`, `Curtain`, `Stamp`, `SplitFlap`, `Seg` (segmented radio), `CategoryPicker` (the setup screen's song-category stubs), `Equalizer`, `Reel`, `GroupPanel` (the home-screen group card), `TicketPanel` (the home-screen ticket card), `Qr`, `Stage` (the theatre plus the screen cross-fade, used by every state owner), and `DebugLog`.
 - `src/screens/` - one component and CSS Module per screen: `Landing`, `Setup`, `Loading`, `Handover`, `Countdown`, `Playing`, `Reveal`, `Scoreboard`, `Podium`, `PastGames`.
 - `tsconfig.json` - strict UI type checking; `src/lib/*.js` stays JavaScript with `allowJs` and `checkJs` off.
 
@@ -37,7 +38,7 @@ A `max-height: 760px` pass tightens spacing so every in-game screen fits a short
 ## State model
 
 `App` holds one persisted `state` object: `{ screen, settings, players, teams, game }`.
-`settings` is `{ mix, eras, difficulty, categories, mode, rounds }`; `categories` lists the chosen song categories (`[]` is "Any", which is also what saves from before categories load as, and unknown ids are dropped); `players` and `teams` are the setup rosters (`{ id, name, members }`, members only used by teams).
+`settings` is `{ mix, eras, difficulty, categories, mode, rounds }`; `categories` lists the chosen song categories (`[]` is "Any", which is also what saves from before categories load as, and unknown ids are dropped); `players` and `teams` are the setup rosters (`{ id, name, members, people? }`, members only used by teams, `people` the ticket ids playing as that entry).
 `game` is `{ id, queue, trackIdx, turn, round, totalRounds, totalSongs, source, mode, difficulty, mix, cast, history, finished }` or null; `id` makes the finished show's group result idempotent.
 `cast` is a snapshot of the roster with a `score` each, taken at game start, so editing the roster on the home screen never disturbs a saved game.
 `history` holds one `{ id, song, points, round }` entry per judged turn; the box office derives each round's gains from it.

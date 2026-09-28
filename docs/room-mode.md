@@ -3,7 +3,8 @@
 A second way to play, next to pass-the-phone.
 One screen (a laptop, a TV, or one phone) is the host: it plays every song and shows the room code.
 Everyone else joins on their own phone, which becomes a buzzer and an answer pad.
-It is the Kahoot or Jackbox model: no accounts, a four-letter code, and nothing kept after the party.
+It is the Kahoot or Jackbox model: a four-letter code, no sign-in, and nothing about the room kept after the party.
+A phone that holds a personal ticket (docs/tickets.md) brings it to its seat, so the host leaves out songs that person has heard and each song of the show lands in their history.
 
 Example: the host picks "Buzz in" on the home screen and taps "Open a room"; the big screen shows `KFHB` and a QR code.
 Asha scans it, types her name and sees "You're in".
@@ -12,7 +13,7 @@ Autocomplete offers every known title in the show's languages; if she is right s
 
 ## Who owns what
 
-- The host screen (`src/room/Host.tsx`) builds the crate (honouring the home screen's languages, eras, difficulty and song categories), plays audio through the engine, runs the clip ladder, the reveal, the box office and the podium, and tells the room what is playing.
+- The host screen (`src/room/Host.tsx`) builds the crate (honouring the home screen's languages, eras, difficulty and song categories, and leaving out what the seated tickets have heard), plays audio through the engine, runs the clip ladder, the reveal, the box office and the podium, and tells the room what is playing.
   It reuses the pass-the-phone screens: `Countdown`, `Reveal`, `Scoreboard`, `Podium`, `Loading`, plus `Lobby` and `HostPlaying` in `src/room/`.
 - The room (`worker/src/room.js`) is one Durable Object per room code, built on PartyServer with WebSocket hibernation.
   It is the referee: it orders buzzes as they arrive, runs the answer clock, judges answers and holds the scores.
@@ -59,7 +60,7 @@ The first message must be a hello; anything else is refused until then, and a co
 | host | `song { n, title, film, year, artist, near }` | Arms song `n` (buzzing shut). `n` must be one past the number of results and at most `total`, so a re-cue can restart an unfinished song but never replay a scored one |
 | host | `clip { rung, points }` | A clip is playing; buzzing open at these points |
 | host | `reveal` / `end` / `kick { id }` | Nobody got it / show over / remove a player (lobby only) |
-| phone | `join { key, name }` | Takes a seat, or gets its seat back when the key is known |
+| phone | `join { key, name, ticket? }` | Takes a seat, or gets its seat back when the key is known; a ticket is checked against D1 and its person id kept on the seat (docs/tickets.md) |
 | phone | `buzz` / `answer { text }` / `leave` | |
 | room | `welcome`, `state`, `error { code }`, `kicked` | `state` is the full view for that device, sent after every change |
 
@@ -76,7 +77,7 @@ Codes are four letters from `BCDFGHJKLMNPQRSTVWXZ` (no vowels, so no words).
 
 ## Limits and expiry
 
-- Nothing goes to D1. Room state lives in the Durable Object's own storage and is wiped by an alarm after 3 idle hours.
+- Room state lives in the Durable Object's own storage and is wiped by an alarm after 3 idle hours. The only thing that reaches D1 is the seated tickets' song history: the host reads it at Start and records each song after its reveal through `POST /api/rooms/<CODE>/history` and `/rounds` with its host secret (docs/tickets.md); the room's code, names, scores and buzzes never leave the object.
 - Origin must be the Pages origin or localhost, for both `POST /api/rooms` and the WebSocket.
 - Rate limits (Workers rate limiting, per IP): 10 new rooms a minute, 240 room connections a minute (a whole party shares one IP behind the Wi-Fi).
 - Per connection: every frame is charged to a bucket of 12 refilled at 6 a second, before anything else; 40 refused frames close the socket (4429), and any frame over the size limit, or binary, closes it at once (1009).

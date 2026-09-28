@@ -1,6 +1,6 @@
 # Song loading
 
-`buildCrate(mix, eras, sound, difficulty, minSongs, played, categories)` in `src/lib/crate.js` assembles the game queue; it returns `{ queue, source }` or `{ error: "load" | "thin" | "safe" }`.
+`buildCrate(mix, eras, sound, difficulty, minSongs, until, categories, heardBy)` in `src/lib/crate.js` assembles the game queue; it returns `{ queue, source }` or `{ error: "load" | "thin" | "safe" }`.
 `difficulty` is `"easy" | "medium" | "hard" | "mixed"` (default `"mixed"`, also `settings.difficulty`).
 It maps to corpus tiers through `DIFFICULTY_TIERS` in `src/lib/constants.js` (easy → easy; medium → easy + medium; hard → medium + hard; mixed → all); when the mapped tiers hold fewer than 10 songs for the chosen languages and eras the crate widens to all tiers before reporting `thin`.
 The uncurated fallback tiers carry no tier and ignore it.
@@ -79,7 +79,7 @@ Hook step, wedding, festival, sufi, patriotic and rain were measured and left ou
 - Year ≥ 2000, plus the user's era selection (`settings.eras`, decade buckets from `eraOf`); for corpus songs the year is the film's verified year.
 - `EXCLUDE_RX` drops remixes, covers, lofi, karaoke, instrumentals, background-score themes/OST/teasers, etc.
 - Saavn-search songs with a reported play count below `SAAVN_MIN_PLAYS` (1M) are dropped (mostly dubs and obscure album cuts); a missing count means unknown and is kept. The corpus applies its own floor (`minPlays` in the config) at build time.
-- Blocked artists are removed: a track is out if ANY of its comma-separated artists matches the device blocklist (`tt_blocked` in localStorage, managed in the reveal screen and setup screen).
+- Blocked artists are removed: a track is out if ANY of its comma-separated artists matches the device blocklist (`tt_blocked` in localStorage, managed in the reveal screen and setup screen; a ticket's list is mirrored there, docs/tickets.md).
 
 If filters shrink the pool below 10 the crate returns `{ error: "thin" }` and the UI tells the user to widen filters, distinct from the connection error.
 
@@ -92,10 +92,13 @@ In Music-only mode (`sound === "inst"`), the queue contains only annotated track
 If fewer safe songs survive, the crate returns `safe` and setup explains the shortage.
 On resume, the remaining queue is checked against the current index again; stale entries are removed, and an inadequate queue cannot resume.
 
-## Played-song cooldown (per device, or per group)
+## Played-song cooldown (per device, per group, per person)
 
-`tt_played` in localStorage maps normalized title → last-played timestamp; entries older than 30 days are pruned.
-In a group, `startGame` passes `buildCrate` the group's map merged with `tt_played` (latest wins), so songs any phone in the group played recently sit out too; see docs/group-sync.md.
-Songs played within the last 7 days (`PLAY_COOLDOWN`) are excluded from the crate when at least 15 fresh songs remain.
-When fresh songs run low, recently played songs are appended AFTER all fresh ones, ordered least-recently-played first, so repeats only appear when unavoidable.
+A history is `{ played: { songKey: ms }, tired: { songKey: ms } }`: songs heard to the reveal, and songs skipped as heard too often (`PlayKind`).
+This phone's own is `tt_played` and `tt_tired` in localStorage (`loadHistory`, `markPlayed(title, kind)`); entries older than 30 days are pruned.
+How long each kind sits out is `COOLDOWN_DAYS` in `src/lib/config.ts` (7 days played, 30 tired).
+`cooldownOf(...histories)` in `src/lib/storage.js` folds any number of histories into one map of song key → the time the song may come back (latest wins); that until-map is what `buildCrate` takes.
+`startGame` builds it from this phone's history, the group's (docs/group-sync.md) and every present ticket's (docs/tickets.md), so a song anyone present has heard recently sits out too; the room host does the same for its seated tickets.
+A song still sitting out is excluded from the crate when at least 15 fresh songs remain.
+When fresh songs run low, resting songs are appended AFTER all fresh ones, ordered by how many of the people present heard them (`heardBy`, fewest first) and then by how long ago they may come back, so repeats only appear when unavoidable and land on the fewest ears.
 Old installs stored `tt_played` as a plain array; `loadPlayed` migrates that format transparently.

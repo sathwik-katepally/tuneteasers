@@ -1,13 +1,15 @@
 # Group sync
 
 Phones that share a group share one song cooldown and one list of finished shows ("Past shows").
-There are no accounts: a group is an invite secret that one phone creates and shares by link, QR code or pasted code.
+A group is an invite secret that one phone creates and shares by link, QR code or pasted code; there is no sign-in.
+People with a personal ticket (docs/tickets.md) can join the group too, so any phone in it can record plays for them and offer them on its roster.
 Everything is optional; with no group, or with the Worker unreachable, the game runs on the phone's own history exactly as before.
 
 ## What syncs and what does not
 
 - Synced: every played or skipped song (as its `songKey`) with a server timestamp, and each finished show (date, mode, difficulty, language mix, rounds, songs played, each player or team's name, members and score).
-- Not synced: the game in progress (it stays on the phone it started on), blocked artists, presentation settings, rosters.
+- Through tickets: which tickets joined the group (`group_people`), and plays recorded for them by any phone in the group.
+- Not synced: the game in progress (it stays on the phone it started on), presentation settings, rosters. Blocked artists follow a ticket, not the group.
 - Never stored server-side: audio, stems, stream URLs or anything else from the song sources.
 
 ## Identity and security
@@ -31,8 +33,9 @@ Everything is optional; with no group, or with the Worker unreachable, the game 
 | --- | --- | --- |
 | `POST /api/groups` `{ name }` | none | Makes a group, returns `{ group, invite, owner }` |
 | `GET /api/group` | invite | `{ group: { id, name, createdAt }, role }` (used to preview and join) |
-| `GET /api/group/played` | invite | `{ played: { songKey: lastPlayedMs } }` within the played window |
-| `POST /api/group/rounds` `{ rounds: [{ id, key }] }` | invite | Records up to 50 plays |
+| `GET /api/group/played?people=` | invite | `{ played: { songKey: lastPlayedMs }, tired, people }` within the played window; `people` holds the histories of the named group members (docs/tickets.md) |
+| `GET /api/group/people` | invite | `{ people: [{ id, name }] }`, the tickets in the group |
+| `POST /api/group/rounds` `{ rounds: [{ id, key, kind?, people? }] }` | invite | Records up to 50 plays, also for the named tickets that are members |
 | `GET /api/group/results?before=&limit=` | invite | `{ results, more }`, newest first, 20 per page |
 | `POST /api/group/results` `{ id, finishedAt, mode, difficulty, mix, rounds, songs, cast }` | invite | Records a finished show once |
 | `POST /api/group/import` `{ played }` | invite | One-time import of a phone's own cooldown map |
@@ -46,7 +49,7 @@ The import is the one place client timestamps are accepted, clamped to the playe
 ## Data and retention
 
 Schema: `worker/migrations/` (D1 migrations, applied by CI).
-Tables: `groups`, `played` (group, song key, last played), `round_events` (idempotency log), `results`.
+Tables: `groups`, `played` (group, song key, last played), `round_events` (idempotency log), `results`; `group_people` (docs/tickets.md) joins tickets to groups.
 Windows are Worker vars: `PLAYED_TTL_DAYS` (30, for `played` and `round_events`), `RESULT_TTL_DAYS` (365), `GROUP_IDLE_TTL_DAYS` (365 without writes).
 Reads filter by these windows, and authentication refuses an idle-expired group, so an expired row is never served.
 Deletion runs from group writes, at most hourly per Worker isolate, because this account's five free cron triggers are all taken; a group nobody writes to is still hidden by the read filters and swept on the next write from any group.
@@ -54,14 +57,14 @@ Deletion runs from group writes, at most hourly per Worker isolate, because this
 ## Client
 
 `src/lib/group.ts` holds the group (`tt_group` in localStorage: name, invite, owner secret on the creating phone) and an outbox (`tt_group_outbox`).
-- `recordPlay` is called next to every `markPlayed`; `recordResult` runs once when a game becomes finished (keyed by `game.id`).
+- `recordPlay(title, kind, people)` is called next to every `markPlayed` (through `recordPlays` in `src/lib/me.ts`, which adds the tickets in the cast); `recordResult` runs once when a game becomes finished (keyed by `game.id`).
   Both write to the outbox first, then flush; a failed flush keeps the entries, and the next write, an `online` event or a page load sends them.
   The outbox holds only the current group's queue: an answer for a group the phone has since left never rewrites it, and the new group's queue is flushed once the old request settles.
   A 400/413 drops the entry so one bad entry cannot block the rest; 401/403 marks the group as revoked and the home card offers to leave.
-- Before building a crate, `groupPlayed` flushes, fetches the group's map (5 s timeout) and merges it with `tt_played` (latest wins); if the group is unreachable the crate uses `tt_played` alone.
+- Before building a crate, `groupHistory(people)` flushes, fetches the group's history and the named tickets' (5 s timeout); `cooldownOf` in `src/lib/storage.js` folds it with this phone's own into the until-map the crate takes (see docs/song-loading.md), and if the group is unreachable the crate uses the phone's history alone.
   Every crate asks again: only a failure of this call's own flush skips the read, never an "offline" left over from an earlier one.
   The `crate` log line reports how many songs were in the cooldown map as `played`.
-- `tt_played` stays the phone's own history; the group map is merged at crate time only.
+- `tt_played` and `tt_tired` stay the phone's own history; the group's and the tickets' are merged at crate time only.
 - UI: `src/components/GroupPanel.tsx` on the home screen (make, join, invite with QR, leave, owner delete) and `src/screens/PastGames.tsx` (`screen: "past"`).
   A `#join=` link shows the invite card at the top of the home screen.
 
