@@ -7,6 +7,40 @@ import os from "node:os";
 import net from "node:net";
 import { spawn, execFileSync } from "node:child_process";
 import { chromium, webkit, devices } from "playwright";
+import lockfile from "proper-lockfile";
+
+/* One heavy browser suite at a time per machine: parallel agent worktrees
+   running suites together overload the laptop until timing checks flake.
+   Every suite imports this module, so the lock is taken before anything
+   launches. It lives in the OS temp dir so all worktrees share it; a killed
+   suite stops refreshing it and it goes stale after STALE_MS (long enough
+   that a blocking execFileSync, like the D1 migrations, cannot fake a death).
+   CI runners have one suite per machine and skip it. */
+const LOCK = path.join(os.tmpdir(), "tuneteasers-e2e");
+const LOCK_OWNER = LOCK + ".owner";
+const STALE_MS = 60000;
+async function suiteLock(){
+  const me = `pid ${process.pid} in ${process.cwd()}: node ${path.relative(process.cwd(), process.argv[1] || "")} ${process.argv.slice(2).join(" ")}`.trim();
+  let waitingSince = 0;
+  for (;;){
+    try {
+      await lockfile.lock(LOCK, { realpath: false, stale: STALE_MS, onCompromised: e => console.warn(`E2E suite lock lost (${e.message}); another suite may start alongside this one.`) });
+      fs.writeFileSync(LOCK_OWNER, JSON.stringify({ owner: me, since: Date.now() }));
+      if (waitingSince) console.log(`E2E suite lock acquired after ${Math.round((Date.now() - waitingSince) / 1000)}s.`);
+      return;
+    } catch (e){
+      if (e.code !== "ELOCKED") throw e;
+      if (!waitingSince){
+        waitingSince = Date.now();
+        let holder = "another suite";
+        try { const o = JSON.parse(fs.readFileSync(LOCK_OWNER, "utf8")); holder = `${o.owner}, running ${Math.round((Date.now() - o.since) / 1000)}s`; } catch {}
+        console.log(`Waiting for another E2E suite to finish (${holder}). Lock: ${LOCK}.lock`);
+      }
+      await new Promise(r => setTimeout(r, 2000));
+    }
+  }
+}
+if (!process.env.CI) await suiteLock();
 
 const DIST = path.resolve(import.meta.dirname, "../dist");
 const MIME = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".json": "application/json", ".woff2": "font/woff2", ".woff": "font/woff", ".svg": "image/svg+xml", ".png": "image/png" };
