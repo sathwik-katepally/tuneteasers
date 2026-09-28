@@ -1,15 +1,20 @@
 name: Refresh snips index
 
+# Nightly: scores the corpus songs that still have no vocal-stem curves, in
+# as many resumable shards as that backlog needs (each stops taking songs
+# after 5 hours and keeps what it scored), then merges and commits. Once the
+# curves cover the corpus the merge publishes the v5 index by itself; until
+# then it refreshes the v4 one. Nights with nothing to score only refresh.
 on:
   schedule:
-    - cron: "30 4 * * 3"
+    - cron: "30 4 * * *"
   workflow_dispatch:
     inputs:
       shards:
-        description: "Parallel scoring runners (more for a full rescore after a schema change)"
-        default: "1"
+        description: "Scoring runners (default: one per 35 songs without curves, at most 40, 20 at a time)"
+        default: ""
       limit:
-        description: "Songs each runner scores at most (a runner must finish inside the 6h job limit)"
+        description: "Songs each runner scores at most (each also stops taking songs after 5 hours)"
         default: "300"
 
 concurrency:
@@ -22,16 +27,27 @@ jobs:
     outputs:
       shards: ${{ steps.plan.outputs.shards }}
     steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
       - id: plan
         env:
-          SHARDS: ${{ inputs.shards || '1' }}
-        run: echo "shards=$(node -e 'const n = Math.min(20, Math.max(1, parseInt(process.env.SHARDS) || 1)); console.log(JSON.stringify([...Array(n).keys()]))')" >> "$GITHUB_OUTPUT"
+          SHARDS: ${{ inputs.shards }}
+          SNIP_PLAN: "1"
+        run: |
+          todo=$(node scripts/build-snips.mjs | sed -n 's/^todo=//p')
+          echo "songs without curves: $todo"
+          echo "shards=$(node -e 'const todo = +process.argv[1] || 0; const n = parseInt(process.env.SHARDS) || (todo ? Math.min(40, Math.ceil(todo / 35)) : 0); console.log(JSON.stringify([...Array(Math.min(40, n)).keys()]))' "$todo")" >> "$GITHUB_OUTPUT"
 
   score:
     needs: [plan]
+    if: needs.plan.outputs.shards != '[]'
     runs-on: ubuntu-latest
+    timeout-minutes: 350
     strategy:
       fail-fast: false
+      max-parallel: 20
       matrix:
         shard: ${{ fromJson(needs.plan.outputs.shards) }}
     steps:
@@ -39,8 +55,19 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
-      - run: npm ci
-      - run: npx playwright install --with-deps chromium
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: scripts/requirements-snips.txt
+      - run: command -v ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)
+      - run: pip install -r scripts/requirements-snips.txt
+      # Separator and Whisper weights (~2 GB), downloaded once.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/tt-snips-models
+          key: snips-models-${{ hashFiles('scripts/vocal-curve.py', 'scripts/requirements-snips.txt') }}
+          restore-keys: snips-models-
       - run: mkdir -p shard && cp public/snips.json shard/snips.json && cp scripts/voice-curves.json shard/voice-curves.json
       - run: node scripts/build-snips.mjs
         env:
@@ -48,6 +75,7 @@ jobs:
           SNIP_CURVES: shard/voice-curves.json
           SNIP_SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
           SNIP_LIMIT: ${{ inputs.limit || '300' }}
+          SNIP_BUDGET_MIN: "300"
       - uses: actions/upload-artifact@v7
         with:
           name: snips-shard-${{ matrix.shard }}
@@ -58,20 +86,26 @@ jobs:
 
   # A shard that failed only leaves its songs unexamined for the next run.
   merge:
-    needs: [score]
-    if: ${{ !cancelled() }}
+    needs: [plan, score]
+    if: ${{ !cancelled() && needs.plan.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      # The branch tip, not the commit that started this hours-long run.
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.ref_name }}
       - uses: actions/setup-node@v7
         with:
           node-version: 22
+      # Nothing to download on a night with nothing to score.
       - uses: actions/download-artifact@v8
+        continue-on-error: true
         with:
           pattern: snips-shard-*
           path: shards
+      - run: mkdir -p shards
       - run: node scripts/build-snips.mjs
         env:
           SNIP_MERGE: shards
@@ -85,6 +119,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add public/snips.json scripts/voice-curves.json
           git commit -m "Refresh snips index"
+          git pull --rebase origin "$GITHUB_REF_NAME"
           git push
 
   # Phone alert on failure (ntfy, topic in the NTFY_TOPIC repo secret).
