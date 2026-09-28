@@ -389,6 +389,7 @@ try {
   if (publicTitles.some(t => songKey(t) === songKey(title1))){
     await second.page.getByLabel("Your answer").fill(title1.slice(0, Math.max(4, Math.ceil(title1.length * 0.6))));
     await second.page.getByRole("option", { name: title1, exact: true }).first().waitFor({ timeout: 5000 });
+    await shot(second, "phone-05b-suggestions");
   }
   await answer(second, title1);
   await revealed(1);
