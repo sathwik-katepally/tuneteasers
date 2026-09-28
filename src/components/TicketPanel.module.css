@@ -25,3 +25,8 @@
 .check { composes: check from "./GroupPanel.module.css"; }
 .moveBody { composes: inviteBody from "./GroupPanel.module.css"; }
 .qr { composes: qr from "./GroupPanel.module.css"; }
+
+.quiet {
+  align-self: center;
+  color: var(--cream-dim);
+}

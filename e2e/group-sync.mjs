@@ -148,7 +148,7 @@ try {
   if ((await phone.page.evaluate(() => location.hash)) !== "") fail("invite left in the address bar");
   await shot(phone, "phone-01-invited");
   await phone.page.getByRole("button", { name: "Join", exact: true }).click();
-  await phone.page.getByText("Your group").waitFor();
+  await phone.page.getByText("Your group", { exact: true }).waitFor();
   await phone.page.getByText("In sync").waitFor();
   await shot(phone, "phone-02-joined");
   await phone.page.getByRole("button", { name: "Invite", exact: true }).click();

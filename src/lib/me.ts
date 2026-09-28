@@ -11,7 +11,7 @@ import { useSyncExternalStore } from "react";
 import { songKey } from "./utils.js";
 import { cooldownOf, heardCount, loadBlocked, loadHistory, saveBlocked } from "./storage.js";
 import {
-  GroupError, call, currentGroup, groupHistory, localHistory, randomId, recordPlay as recordGroupPlay, type Group,
+  GroupError, call, currentGroup, fetchGroupPeople, groupHistory, localHistory, randomId, recordPlay as recordGroupPlay, type Group,
 } from "./group";
 import type { History, PlayKind, Settings } from "../types";
 
@@ -166,6 +166,7 @@ export async function linkCurrentGroup(group: Group | null = currentGroup()){
   try {
     await call("/me/groups", me.ticket, { body: { invite: group.invite } });
     if (snap.me?.id === me.id) store({ ...snap.me!, groups: [...snap.me!.groups, group.id] });
+    void fetchGroupPeople();
   } catch (e){
     if (snap.me?.id === me.id && revokedOr(e, "offline") === "revoked") emit({ sync: "revoked" });
   }

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { GroupError, localHistoryCount } from "../lib/group";
+import { GroupError, localHistoryCount, useGroup } from "../lib/group";
 import { loadBlocked } from "../lib/storage.js";
 import {
   BROKEN_TICKET, PasskeyError, addPasskey, adoptTicket, createTicket, deleteTicket, forgetTicket, passkeysSupported, previewTicket,
@@ -32,6 +32,9 @@ const message = (e: unknown) =>
    from this phone or delete it. With no ticket the game is unchanged. */
 export function TicketPanel({ moveTicket, clearMoveTicket, onPrefs }: Props){
   const { me, sync, pending } = useMe();
+  const { group } = useGroup();
+  const heard = useMemo(localHistoryCount, [group]);
+  const offer = !!group || heard > 0;
   const [view, setView] = useState<View>(moveTicket ? "arrive" : "summary");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -59,8 +62,8 @@ export function TicketPanel({ moveTicket, clearMoveTicket, onPrefs }: Props){
     try {
       await addPasskey();
     } catch (e){
-      setNote(e instanceof PasskeyError && e.kind === "cancelled" ? "No passkey yet. Add one below so a lost phone isn't a lost ticket."
-        : `The passkey didn't take (${message(e)}). You can add one below.`);
+      setNote(e instanceof PasskeyError && e.kind === "cancelled" ? "No passkey yet. Create one below so a lost phone isn't a lost ticket."
+        : `The passkey didn't take (${message(e)}). You can create one below.`);
     }
   }
 
@@ -85,6 +88,9 @@ export function TicketPanel({ moveTicket, clearMoveTicket, onPrefs }: Props){
     </section>
   );
 
+  // A phone that has never played and is in no group is not asked for a ticket
+  // yet; only the way back to one made elsewhere stays in view.
+  if (!me && !offer) return <button type="button" className={`link ${s.quiet}`} onClick={() => go("recover")}>Already have a ticket?</button>;
   if (!me) return (
     <section className={s.panel} aria-label="Ticket">
       <span className={s.eyebrow}>Your ticket</span>
@@ -148,7 +154,7 @@ export function TicketPanel({ moveTicket, clearMoveTicket, onPrefs }: Props){
             {me.passkeys > 0
               ? <button type="button" className="btn btn-teal" disabled>{me.passkeys === 1 ? "Passkey saved" : `${me.passkeys} passkeys`}</button>
               : <button type="button" className="btn btn-teal" disabled={busy || !passkeysSupported()}
-                  onClick={() => run(async () => { await addPasskey(); }, "summary")}>{busy ? "Adding" : "Add a passkey"}</button>}
+                  onClick={() => run(async () => { await addPasskey(); }, "summary")}>{busy ? "Creating" : "Create a passkey"}</button>}
           </div>
           {me.passkeys === 0 && <p className={s.text}>{passkeysSupported()
             ? "A passkey (Face ID, fingerprint or your phone's lock) gets the ticket back if you lose this phone."
@@ -187,7 +193,7 @@ function CreateForm({ busy, error, current, onCancel, onCreate }: {
       {error && <p className={s.error} role="alert">{error}</p>}
       <div className={s.row}>
         <button type="button" className="btn btn-ghost" onClick={onCancel} disabled={busy}>Cancel</button>
-        <button type="submit" className="btn btn-teal" disabled={busy || !clean}>{busy ? "Printing" : "Print it"}</button>
+        <button type="submit" className="btn btn-teal" disabled={busy || !clean}>{busy ? "Making it" : "Make my ticket"}</button>
       </div>
     </form>
   );

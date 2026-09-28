@@ -20,6 +20,7 @@
     "e2e:group": "node e2e/group-sync.mjs",
     "e2e:group-edge": "node e2e/group-edge.mjs",
     "e2e:room": "node e2e/room.mjs",
+    "e2e:tickets": "node e2e/tickets.mjs",
     "e2e:landing": "node e2e/landing.mjs"
   },
   "dependencies": {

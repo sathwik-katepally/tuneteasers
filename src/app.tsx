@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { isFirstVisit, loadSaved, save } from "./lib/save";
+import { DEFAULTS, isFirstVisit, loadSaved, save } from "./lib/save";
 import { DIFFICULTY, hookOffset, ladderFor, pointsNow } from "./lib/config";
 import { playRung } from "./lib/ladder";
 import { markPlayed, loadBlocked, saveBlocked, normArtist, isBlocked } from "./lib/storage.js";
@@ -7,7 +7,7 @@ import { buildCrate as buildCrateJs, refreshMusicQueue as refreshMusicQueueJs } 
 import { engine, keepAwake } from "./lib/engine.js";
 import { log } from "./lib/log.js";
 import { displayTitle } from "./lib/utils.js";
-import { randomId, recordResult, takeInviteFromUrl, useGroup } from "./lib/group";
+import { fetchGroupPeople, randomId, recordResult, takeInviteFromUrl, useGroup } from "./lib/group";
 import { presentCooldown, recordPlays, refreshMe, syncBlocked, syncFilters, takeTicketFromUrl, useMe, type Prefs } from "./lib/me";
 import { loadHostShow, roomFromUrl, saveHostShow } from "./lib/room";
 import { Stage } from "./components/Stage";
@@ -31,6 +31,7 @@ const refreshMusicQueue = refreshMusicQueueJs as (queue: Track[]) => Promise<Tra
 
 const freshTurn = (): Turn => ({ rung: 0, span: { from: 0, to: 0 }, clipEndedAt: null, clipStartedAt: 0, playKey: 0, hint: false });
 const primaryArtistOf = (t: Track | null) => (t ? String(t.artist || "").split(",")[0].trim() : "");
+const isDefaultRoster = (list: RosterEntry[]) => JSON.stringify(list) === JSON.stringify(DEFAULTS.players);
 /* Every ticket in a roster or cast: the people whose histories the show follows. */
 const peopleOf = (list: RosterEntry[]) => [...new Set(list.flatMap(r => r.people ?? []))];
 
@@ -106,6 +107,21 @@ export function App(){
     if (prefs.filters) setState(st => ({ ...st, settings: { ...st.settings, ...prefs.filters } }));
   };
   useEffect(() => { refreshMe().then(tookPrefs); }, [meSnap.me?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // A ticket holder takes Player 1's place while the roster is still the untouched default.
+  useEffect(() => {
+    const me = meSnap.me;
+    if (!me) return;
+    setState(st => (isDefaultRoster(st.players) ? { ...st, players: [{ ...st.players[0], name: me.name, people: [me.id] }, ...st.players.slice(1)] } : st));
+  }, [meSnap.me?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The group's tickets, for the roster chips, whenever the booking counter is on screen.
+  const onSetup = state.screen === "setup";
+  useEffect(() => {
+    if (!onSetup || !groupSnap.group) return;
+    void fetchGroupPeople();
+    const again = () => { if (document.visibilityState === "visible") void fetchGroupPeople(); };
+    document.addEventListener("visibilitychange", again);
+    return () => document.removeEventListener("visibilitychange", again);
+  }, [onSetup, groupSnap.group?.id]);
   const upSettings = (patch: Partial<Settings>) => setState(st => {
     const settings = { ...st.settings, ...patch };
     if ("mix" in patch || "eras" in patch || "difficulty" in patch || "categories" in patch) syncFilters(settings);
