@@ -13,6 +13,7 @@ export const CODE_ALPHABET = "BCDFGHJKLMNPQRSTVWXZ";
 export const CODE_RX = /^[BCDFGHJKLMNPQRSTVWXZ]{4}$/;
 const KEY_RX = /^[A-Za-z0-9_-]{16,64}$/;
 const TOKEN_RX = /^[A-Za-z0-9_-]{22}$/;
+const MIXES = ["bolly", "telugu", "both"];
 const CONTROL_RX = /[\u0000-\u001f\u007f]/g;
 
 const ROOM_TTL_MS = 3 * 3600e3;
@@ -23,7 +24,7 @@ const LIMITS = {
   name: 24,
   title: 120,
   guess: 80,
-  suggestions: 600,
+  near: 60,
   songs: 200,
   points: 1000,
   playerMsg: 1024,
@@ -32,7 +33,7 @@ const LIMITS = {
 };
 // Per connection: a burst of 12 messages, refilled at 6 a second. A phone
 // mashing the buzzer stays well inside this; a script does not.
-const BUCKET = { size: 12, perSec: 6, strikes: 200 };
+const BUCKET = { size: 12, perSec: 6, strikes: 40 };
 
 // A handler returns SAME when the message changed nothing (a late or repeated
 // buzz), so a mashed button does not rewrite storage or fan out a state.
@@ -61,14 +62,38 @@ export class Room extends Server {
     this.buckets = new Map();
   }
 
-  /* Called by the Worker's POST /api/rooms on a freshly drawn code. */
+  /* Admission happens at the upgrade, before any socket is accepted into the
+     room: a code nobody claimed, or a room already at its connection cap, gets
+     a socket that is closed at once with the reason, so a silent client can
+     neither linger nor crowd out real players. (A close sent from onConnect
+     never reaches the client, hence the separate throwaway socket.) */
+  async fetch(request){
+    if (request.headers.get("upgrade")?.toLowerCase() === "websocket"){
+      const room = this.room !== undefined ? this.room : (await this.ctx.storage.get("room")) || null;
+      const refuse = !room || room.touchedAt <= Date.now() - ROOM_TTL_MS ? [4404, "no such room"]
+        // A peer that never answers our close stays listed as closing; it holds no seat.
+        : this.ctx.getWebSockets().filter(ws => ws.readyState === WebSocket.OPEN).length >= LIMITS.connections ? [4429, "room is full"] : null;
+      if (refuse){
+        const pair = new WebSocketPair();
+        pair[1].accept();
+        pair[1].close(...refuse);
+        return new Response(null, { status: 101, webSocket: pair[0] });
+      }
+    }
+    return super.fetch(request);
+  }
+
+  /* Called by the Worker's POST /api/rooms on a freshly drawn code. Sockets
+     left from an expired room with the same code must not carry their roles
+     into the new one. */
   async claim(hostHash, code){
     if (this.room && this.room.touchedAt > Date.now() - ROOM_TTL_MS) return false;
+    for (const c of this.getConnections()) c.close(4410, "room closed");
     await this.ctx.storage.deleteAll();
     this.room = {
       code, hostHash, createdAt: Date.now(), touchedAt: Date.now(),
       phase: "lobby", players: [], rules: { answerSecs: 15 },
-      suggestions: [], total: 0, perRound: 1, song: null, results: [], seq: 0,
+      mix: "both", total: 0, perRound: 1, song: null, results: [], seq: 0,
     };
     await this.save();
     return true;
@@ -89,8 +114,6 @@ export class Room extends Server {
     await this.ctx.storage.setAlarm(Math.min(...at));
   }
 
-  // Refusals wait for the hello: a close sent from onConnect, before the
-  // handshake response, never reaches the client.
   onConnect(conn){
     conn.setState({ at: Date.now() });
     this.arm();
@@ -137,19 +160,18 @@ export class Room extends Server {
 
   async onMessage(conn, raw){
     if (!this.room){ conn.close(4404, "no such room"); return; }
-    if (typeof raw !== "string") return;
-    const role = conn.state?.role;
-    const max = role === "host" || (!role && raw.startsWith('{"t":"host"')) ? LIMITS.hostMsg : LIMITS.playerMsg;
-    if (raw.length > max) return this.fail(conn, "too-big");
+    // Every frame is charged before anything else looks at it.
     if (!this.allow(conn)) return;
+    const role = conn.state?.role;
+    const max = role === "host" || (!role && typeof raw === "string" && raw.startsWith('{"t":"host"')) ? LIMITS.hostMsg : LIMITS.playerMsg;
+    const size = typeof raw === "string" ? raw.length : raw.byteLength ?? 0;
+    // The app never sends a frame this big or a binary one, so the peer goes.
+    if (size > max || typeof raw !== "string") return conn.close(1009, "message too big");
     let m;
     try { m = JSON.parse(raw); } catch { return this.fail(conn, "bad-json"); }
     if (!m || typeof m !== "object" || typeof m.t !== "string") return this.fail(conn, "bad-message");
 
     if (!role){
-      let n = 0;
-      for (const _ of this.getConnections()) n++;
-      if (n > LIMITS.connections) return conn.close(4429, "room is full");
       if (m.t === "host") return this.helloHost(conn, m);
       if (m.t === "join") return this.helloPlayer(conn, m);
       return this.fail(conn, "hello-first");
@@ -191,7 +213,6 @@ export class Room extends Server {
     }
     conn.setState({ role: "player", seat: p.id });
     conn.send(JSON.stringify({ t: "welcome", role: "player", code: r.code, seat: p.id, name: p.name }));
-    if (r.phase !== "lobby") conn.send(JSON.stringify({ t: "titles", titles: r.suggestions }));
     this.broadcastState();
   }
 
@@ -210,6 +231,7 @@ export class Room extends Server {
       t: "state",
       phase: r.phase,
       code: r.code,
+      mix: r.mix,
       total: r.total,
       perRound: r.perRound,
       answerSecs: r.rules.answerSecs,
@@ -233,11 +255,6 @@ export class Room extends Server {
       if (role === "host") c.send(JSON.stringify(this.view(null)));
       else if (role === "player") c.send(JSON.stringify(this.view(c.state.seat)));
     }
-  }
-
-  broadcastTitles(){
-    const msg = JSON.stringify({ t: "titles", titles: this.room.suggestions });
-    for (const c of this.getConnections()) if (c.state?.role === "player") c.send(msg);
   }
 
   /* One answer from the player at the head of the queue: right ends the song,
@@ -289,13 +306,12 @@ const HOST = {
   start(conn, m){
     const r = this.room;
     if (r.phase === "show") return "already-started";
-    if (!Array.isArray(m.titles) || m.titles.length > LIMITS.suggestions) return "bad-titles";
-    const titles = [...new Set(m.titles.map(t => clean(t, LIMITS.title)).filter(Boolean))];
+    if (!MIXES.includes(m.mix)) return "bad-mix";
     if (!intIn(m.total, 1, LIMITS.songs) || !intIn(m.perRound, 1, LIMITS.songs)) return "bad-length";
     if (!intIn(m.answerSecs, ...LIMITS.answerSecs)) return "bad-rules";
     if (!r.players.length) return "no-players";
     r.phase = "show";
-    r.suggestions = titles;
+    r.mix = m.mix;
     r.total = m.total;
     r.perRound = m.perRound;
     r.rules = { answerSecs: m.answerSecs };
@@ -303,17 +319,22 @@ const HOST = {
     r.results = [];
     for (const p of r.players) p.score = 0;
     r.seq++;
-    this.broadcastTitles();
   },
   song(conn, m){
     const r = this.room;
     if (r.phase !== "show") return "not-started";
     const title = clean(m.title, LIMITS.title);
     if (!title || !intIn(m.n, 1, LIMITS.songs)) return "bad-song";
+    // Song n can only follow n-1's result and never passes the show's length,
+    // so a host that re-cues (a resume, a skip) can't replay a scored song.
+    if (m.n !== r.results.length + 1 || m.n > r.total) return "bad-song-number";
+    if (!Array.isArray(m.near) || m.near.length > LIMITS.near) return "bad-song";
     r.song = {
       n: m.n, rung: -1, points: 0, state: "cue",
       answer: { title, film: clean(m.film, LIMITS.title), year: intIn(m.year, 0, 3000) ? m.year : 0, artist: clean(m.artist, LIMITS.title) },
       queue: [], locked: [], answering: null, deadline: null, guesses: [], winner: null, won: 0,
+      // Other titles that fold close to this one: judging only, never in a view.
+      near: m.near.map(t => clean(t, LIMITS.title)).filter(Boolean),
     };
   },
   /* A clip (rung) has started playing: buzzing opens at its points. */
@@ -362,7 +383,9 @@ const PLAYER = {
     if (!s || s.state !== "answering" || s.answering !== me) return "not-your-turn";
     const text = clean(m.text, LIMITS.guess);
     if (!text) return "empty";
-    this.judge(me, text, isCorrect(text, s.answer.title, r.suggestions));
+    // The alarm is at-least-once and may run late; the clock is the rule.
+    if (s.deadline && Date.now() > s.deadline) return void this.judge(me, "", false);
+    this.judge(me, text, isCorrect(text, s.answer.title, s.near));
   },
   leave(conn){
     const r = this.room, me = conn.state.seat;

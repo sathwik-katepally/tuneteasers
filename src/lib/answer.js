@@ -48,17 +48,35 @@ export function isCorrect(guess, title, others = []){
   return distance(g, t) <= slack(t.length);
 }
 
-/* Autocomplete: titles whose words start with what was typed, best first. */
-export function suggest(query, titles, limit = 6){
+/* Titles whose folded form sits within the same typo allowance of `title`.
+   The host sends these to the room with each song, so a guess that is exactly
+   one of them is judged wrong even though it is a typo away. */
+export function nearTitles(title, titles, max = 60){
+  const t = squash(title), room = slack(t.length);
+  const out = [];
+  for (const o of titles){
+    const k = squash(o);
+    if (!k || k === t || Math.abs(k.length - t.length) > room) continue;
+    if (distance(k, t) <= room) out.push(o);
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
+/* Autocomplete over a large public list: fold every title once up front. */
+export const prepareTitles = titles => titles.map(title => ({ title, f: fold(title) }));
+
+/* Titles whose words start with what was typed, best first. */
+export function suggest(query, prepared, limit = 6){
   const q = fold(query);
   if (!q) return [];
   const words = q.split(" ");
+  const flat = q.replace(/ /g, "");
   const scored = [];
-  for (const title of titles){
-    const f = fold(title);
+  for (const { title, f } of prepared){
     const fw = f.split(" ");
     const hit = words.every(w => fw.some(x => x.startsWith(w)));
-    if (!hit && !f.replace(/ /g, "").includes(q.replace(/ /g, ""))) continue;
+    if (!hit && !f.replace(/ /g, "").includes(flat)) continue;
     scored.push({ title, rank: f.startsWith(q) ? 0 : hit ? 1 : 2, len: f.length });
   }
   return scored.sort((a, b) => a.rank - b.rank || a.len - b.len).slice(0, limit).map(x => x.title);

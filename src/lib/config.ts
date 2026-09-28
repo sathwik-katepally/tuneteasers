@@ -38,9 +38,7 @@ export const ROOM_ANSWER_SECS = 15;
 export const ROOM_GRACE_SECS = 6;
 // How long a wrong answer shows on the big screen before the show moves on.
 export const ROOM_WRONG_BEAT_MS = 1800;
-// Queued songs past the show length, in case some will not stream.
-export const ROOM_SPARE_SONGS = 6;
-export const ROOM_DECOYS_PER_SONG = 3;
+
 export const MAX_MEMBERS = 6;
 export const NAME_MAX = 24;
 

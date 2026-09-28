@@ -8,7 +8,7 @@ It is the Kahoot or Jackbox model: no accounts, a four-letter code, and nothing 
 Example: the host picks "Buzz in" on the home screen and taps "Open a room"; the big screen shows `KFHB` and a QR code.
 Asha scans it, types her name and sees "You're in".
 When the clip starts her phone lights up BUZZ; she taps it, the song pauses on the big screen, and she has 15 seconds to type the title.
-Autocomplete offers titles from the show plus decoys; if she is right she scores the rung's points, if not the next person who buzzed gets a turn.
+Autocomplete offers every known title in the show's languages; if she is right she scores the rung's points, if not the next person who buzzed gets a turn.
 
 ## Who owns what
 
@@ -24,8 +24,11 @@ Autocomplete offers titles from the show plus decoys; if she is right she scores
 
 - The host sends each song's title, film, year and singers to the room when its countdown starts; stream URLs never leave the host.
 - A phone's view carries the answer only once the song is revealed (`song.answer` is null before that), and the results list only holds revealed songs.
-- The autocomplete list is sent once per show: every title in the show (plus spares) shuffled with about three corpus decoys per song (`ROOM_DECOYS_PER_SONG`) from the same languages, eras and categories, so it cannot be read as the song list or the order.
-- `e2e/room.mjs` records every frame each phone receives and fails if any contains a URL, a stream, or the current title before its reveal.
+- No title of the show reaches a phone before that song's reveal, in any frame, autocomplete included.
+  A phone builds its autocomplete itself from the site's public `corpus.json` and `catalog.json` for the show's languages (`answerTitles` in `src/lib/crate.js`; the room tells phones only the language mix).
+  The list is the same for every show in those languages, so it says nothing about which songs are coming. Songs from the live-search tiers may be missing from it; those are typed in full.
+- Judging needs the titles that fold close to the answer (so a guess that is exactly another song is wrong even when it is a typo away). The host picks them from the same public list (`nearTitles`) and sends them with each `song`; the room keeps them for judging and never puts them in a view.
+- `e2e/room.mjs` records every frame each phone receives, including welcomes, errors and the snapshots after a reload, and fails on any title list, any URL or stream, or any title of the show before its reveal.
 
 ## Flow of one song
 
@@ -46,18 +49,19 @@ All of these numbers live in `src/lib/config.ts`; the host passes the answer tim
 ## Protocol
 
 JSON over one WebSocket per device at `/parties/room/<CODE>`.
-The first message must be a hello; anything else is refused until then, and a connection that says nothing for 10 seconds is closed.
+Admission happens at the upgrade, before a socket joins the room: an unclaimed code gets a socket closed with 4404, and a room with 48 open sockets closes new ones with 4429.
+The first message must be a hello; anything else is refused until then, and a connection that says nothing for 10 seconds is closed with 4401 (an alarm, so it works while the room hibernates).
 
 | From | Message | Does |
 | --- | --- | --- |
 | host | `host { token }` | Authenticates with the host secret from `POST /api/rooms` |
-| host | `start { titles, total, perRound, answerSecs }` | Lobby (or a finished show) to a new show; scores reset |
-| host | `song { n, title, film, year, artist }` | Arms song `n` (buzzing shut) |
+| host | `start { mix, total, perRound, answerSecs }` | Lobby (or a finished show) to a new show; scores reset |
+| host | `song { n, title, film, year, artist, near }` | Arms song `n` (buzzing shut). `n` must be one past the number of results and at most `total`, so a re-cue can restart an unfinished song but never replay a scored one |
 | host | `clip { rung, points }` | A clip is playing; buzzing open at these points |
 | host | `reveal` / `end` / `kick { id }` | Nobody got it / show over / remove a player (lobby only) |
 | phone | `join { key, name }` | Takes a seat, or gets its seat back when the key is known |
 | phone | `buzz` / `answer { text }` / `leave` | |
-| room | `welcome`, `state`, `titles`, `error { code }`, `kicked` | `state` is the full view for that device, sent after every change |
+| room | `welcome`, `state`, `error { code }`, `kicked` | `state` is the full view for that device, sent after every change |
 
 `POST /api/rooms` (no body, so no CORS preflight) draws a free code and returns `{ code, host }`; only the SHA-256 of the host secret is stored.
 Codes are four letters from `BCDFGHJKLMNPQRSTVWXZ` (no vowels, so no words).
@@ -67,7 +71,7 @@ Codes are four letters from `BCDFGHJKLMNPQRSTVWXZ` (no vowels, so no words).
 - A phone makes a random seat key per room and keeps it in `localStorage` (`tt_room_seat`); the room stores only its hash.
   Every reconnect (PartySocket retries on its own) says hello with the key, so a dropped, reloaded or reopened phone keeps its seat and score.
 - The room link `#room=CODE` stays in the address bar while a phone is in the room, so a reload goes straight back in.
-- The host keeps its show (code, host secret, queue and position) in `tt_room_host`. After a reload the home screen offers "Resume"; the interrupted song starts over and the room keeps the scores.
+- The host keeps its show (code, host secret, queue and position) in `tt_room_host`. After a reload the home screen offers "Resume", and the host reconciles with the room rather than its saved counters: a song the room finished while the host was away (someone answered during the reload) counts as played and comes back on its reveal, a reload on the final reveal returns to that reveal and the end of the show, and only an unfinished song starts over.
 - Close codes 4404 (no such room), 4403 (not the host, or removed) and 4410 (room expired) stop the retries and send the device home with a message.
 
 ## Limits and expiry
@@ -75,19 +79,23 @@ Codes are four letters from `BCDFGHJKLMNPQRSTVWXZ` (no vowels, so no words).
 - Nothing goes to D1. Room state lives in the Durable Object's own storage and is wiped by an alarm after 3 idle hours.
 - Origin must be the Pages origin or localhost, for both `POST /api/rooms` and the WebSocket.
 - Rate limits (Workers rate limiting, per IP): 10 new rooms a minute, 240 room connections a minute (a whole party shares one IP behind the Wi-Fi).
-- Per connection: a burst of 12 messages refilled at 6 a second; a connection that keeps flooding is closed.
+- Per connection: every frame is charged to a bucket of 12 refilled at 6 a second, before anything else; 40 refused frames close the socket (4429), and any frame over the size limit, or binary, closes it at once (1009).
+  The bucket lives in memory, so it restarts when the room wakes from hibernation.
   Buzzes that change nothing (repeated, late, locked out) do not write storage or broadcast.
-- Validation: 16 players, 48 connections, names 24 characters, guesses 80, titles 120, 600 autocomplete titles, 200 songs, 64 KB host messages and 1 KB player messages, answer time 5 to 60 seconds.
+- An answer after the answer clock has run out counts as a timeout even if the alarm has not fired yet.
+- Claiming a code closes any socket left from an expired room with the same code.
+- Validation: 16 players, 48 connections, names 24 characters, guesses 80, titles 120, 60 near titles per song, 200 songs, 64 KB host messages and 1 KB player messages, answer time 5 to 60 seconds.
 - Free tier: WebSocket messages count 20:1 against Durable Object requests, and a hibernating room with idle sockets costs nothing.
 
 ## Answer matching
 
 `fold()` lowercases, strips the `(From "…")` qualifiers and punctuation, removes accents, and folds romanised spelling variants: aspirated consonants (`dh` to `d`), `w`/`v`, `z`/`j`, `q`/`k`, long vowels (`aa`, `ee`, `oo`), `ai`/`ei` to `e`, and doubled letters.
-A guess is right when its folded form equals the title's, or is within a small edit distance of it (0 for four letters or fewer, then 1, 2, 3 as the title grows), unless it is exactly another title on the show's list.
+A guess is right when its folded form equals the title's, or is within a small edit distance of it (0 for four letters or fewer, then 1, 2, 3 as the title grows), unless it is exactly one of the near titles the host sent with the song.
 So "Main Hu Na" matches "Main Hoon Na" and "kesaria" matches "Kesariya", while "Kesari" does not.
 
 ## Testing
 
 `npm run e2e:room` (`e2e/room.mjs`) starts a local `wrangler dev` and proxies the room WebSockets to it from Playwright, recording every frame.
-Desktop Chromium hosts (or a WebKit iPhone with `--host=phone`) and three WebKit iPhones in separate contexts play a full 12-song show: join by typed code and by link, a buzz race in arrival order, wrong answer to the next buzzer, right answer at the rung's points, "Hear more" and the automatic ladder after a miss, a typed misspelling, a reload and a leave-and-return keeping the seat, the answer clock running out, everyone locked out, the box office, podium totals against the room's results, each phone's final place, and "Same crowd again".
+Desktop Chromium hosts (or a WebKit iPhone with `--host=phone`) and three WebKit iPhones in separate contexts play a full 12-song show: join by typed code and by link, a buzz race in arrival order, wrong answer to the next buzzer, right answer at the rung's points, "Hear more" and the automatic ladder after a miss, a typed misspelling, a reload and a leave-and-return keeping the seat, the answer clock running out, everyone locked out, the box office, the host reloading while a phone answers (the room scores it once and the host resumes on its reveal), the host reloading on the final reveal, podium totals against the room's results, each phone's final place, and "Same crowd again".
+It then probes the room directly: a foreign origin, an unclaimed code, a wrong host token, silent sockets up to the cap and their 4401 timeout (in a browser: Node's WebSocket never completes a close the server starts), frames before a hello, a host command from a phone, an oversized frame, a flood, and song numbers out of order.
 `--worker=<origin>` runs it against a deployed Worker (the preview one) instead, and `--categories=romantic,...` checks that every song in the show carries one of those tags.

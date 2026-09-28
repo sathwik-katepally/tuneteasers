@@ -5,7 +5,7 @@
    Fallback 2: catalog.json baked into the site (rebuilt weekly by CI, 30s hook clips).
    Fallback 3: live iTunes search, throttled to stay under Apple's rate limit. */
 import { SAAVN_BASES, SAAVN_QUERIES, SAAVN_PAGES, SAAVN_MIN_PLAYS, CORPUS_DRAW, CORPUS_BATCH, DIFFICULTY_TIERS, ITUNES_TERMS, ITUNES_LANG_OK, EXCLUDE_RX, ERAS, eraOf, SNIP_CLEAN_MAX, SNIP_INDEX_V, SNIP_METHOD, SNIP_WINDOW_SEC, SNIP_MAX_AGE_MS } from "./constants.js";
-import { de, songKey, shuffle, safeUrl } from "./utils.js";
+import { de, songKey, shuffle, safeUrl, displayTitle } from "./utils.js";
 import { sanitizeTrack, loadPlayed, loadBlocked, normArtist, isBlocked, PLAY_COOLDOWN } from "./storage.js";
 import { log, ms } from "./log.js";
 
@@ -360,25 +360,18 @@ export async function categoryCounts(mix, eras, sound, difficulty, minSongs, cat
   return Object.fromEntries([...categories.map(c => [c, count([c])]), ["any", count([])]]);
 }
 
-/* Titles for a buzz-in room's autocomplete that are not in the show, drawn
-   from the corpus in the same languages and eras, so the list cannot be
-   read as "these are the songs". Empty when the corpus is unavailable. */
-export async function decoyTitles(mix, eras, n, exclude, categories = []){
-  const corpus = await loadCorpus();
-  if (!corpus) return [];
+/* Every title a buzz-in phone can pick from: the public corpus and the
+   baked catalog for the show's languages. It never depends on the show, so
+   the list says nothing about which songs are coming. */
+export async function answerTitles(mix){
   const langs = langsOf(mix);
-  const eraSet = Array.isArray(eras) && eras.length && eras.length < ERAS.length ? new Set(eras) : null;
-  const skip = new Set(exclude.map(songKey));
-  const seen = new Set();
-  const pool = [];
-  for (const s of corpus){
-    if (!langs.includes(CORPUS_LANG[s.language])) continue;
-    if (eraSet && !eraSet.has(eraOf(s.year))) continue;
-    if (!inCategories(s, categories)) continue;
-    const k = songKey(s.title);
-    if (!k || skip.has(k) || seen.has(k)) continue;
-    seen.add(k);
-    pool.push(s.title);
-  }
-  return shuffle(pool).slice(0, n);
+  const [corpus, catalog] = await Promise.all([loadCorpus(), loadCatalog(langs)]);
+  const seen = new Set(), out = [];
+  const add = title => {
+    const d = displayTitle(title), k = songKey(d);
+    if (k && !seen.has(k)){ seen.add(k); out.push(d); }
+  };
+  for (const s of corpus || []) if (langs.includes(CORPUS_LANG[s.language])) add(s.title);
+  for (const t of catalog) add(t.title);
+  return out;
 }

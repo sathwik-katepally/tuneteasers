@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { CLIP_POINTS, DIFFICULTY, LAST_RUNG, ROOM_ANSWER_SECS, ROOM_DECOYS_PER_SONG, ROOM_GRACE_SECS,
-  ROOM_SONGS_PER_ROUND, ROOM_SPARE_SONGS, ROOM_WRONG_BEAT_MS, hookOffset, rungSpan } from "../lib/config";
+import { CLIP_POINTS, DIFFICULTY, LAST_RUNG, ROOM_ANSWER_SECS, ROOM_GRACE_SECS,
+  ROOM_SONGS_PER_ROUND, ROOM_WRONG_BEAT_MS, hookOffset, rungSpan } from "../lib/config";
+import { nearTitles } from "../lib/answer.js";
 import { playRung } from "../lib/ladder";
-import { buildCrate as buildCrateJs, decoyTitles as decoyTitlesJs } from "../lib/crate.js";
+import { answerTitles as answerTitlesJs, buildCrate as buildCrateJs } from "../lib/crate.js";
 import { engine, keepAwake } from "../lib/engine.js";
 import { markPlayed } from "../lib/storage.js";
-import { displayTitle, shuffle } from "../lib/utils.js";
+import { displayTitle } from "../lib/utils.js";
 import { log } from "../lib/log.js";
 import { groupPlayed, recordPlay } from "../lib/group";
 import { createRoom, loadHostShow, playerName, saveHostShow, useMsLeft, useRoom, type HostShow, type RoomView } from "../lib/room";
@@ -21,7 +22,7 @@ import type { Category, Difficulty, GameState, Settings, Track, Verdict } from "
 
 type Crate = { error?: string; queue?: Track[] };
 const buildCrate = buildCrateJs as (mix: string, eras: string[], sound: string, difficulty: Difficulty, minSongs: number, played: Record<string, number> | undefined, categories: Category[]) => Promise<Crate>;
-const decoyTitles = decoyTitlesJs as (mix: string, eras: string[], n: number, exclude: string[], categories: Category[]) => Promise<string[]>;
+const answerTitles = answerTitlesJs as (mix: string) => Promise<string[]>;
 
 type Phase = "opening" | "lobby" | "loading" | "countdown" | "song" | "reveal" | "board" | "done" | "failed";
 interface Clip { rung: number; span: { from: number; to: number }; startedAt: number; endedAt: number | null; key: number; cut: boolean }
@@ -73,15 +74,37 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
     return () => { document.removeEventListener("visibilitychange", vis); keepAwake(false); engine.stop(); };
   }, []);
 
-  // A resumed show picks up where the room is: still in the lobby, mid-show
-  // (the interrupted song starts over), or finished.
+  /* A resumed show trusts the room, not this screen's saved counters: songs
+     the room finished while the screen was away (someone answered during a
+     reload) count as played, a finished song comes back on its reveal so the
+     show carries on from there, and a show that has used up its songs goes to
+     the box office. Only an unfinished song starts over. */
   const resumed = useRef(!resume);
   useEffect(() => {
     if (resumed.current || !view || !show) return;
     resumed.current = true;
-    if (view.phase === "over") setPhase("done");
-    else if (view.phase === "show" && show.started) setPhase(show.idx >= show.queue.length ? "done" : "countdown");
-  }, [view, show]);
+    if (view.phase === "over"){ setPhase("done"); return; }
+    if (view.phase !== "show" || !show.started) return;
+    const done = view.results.length;
+    const s = { ...show, songNo: done, idx: Math.max(0, show.idx + done - show.songNo) };
+    setShow(s);
+    const last = view.song;
+    const lastTrack = s.queue[s.idx - 1];
+    if (done > 0 && last?.n === done && last.state === "revealed" && lastTrack){
+      if (done > show.songNo){ markPlayed(lastTrack.title); recordPlay(lastTrack.title); }
+      showReveal(view, lastTrack, s);
+      return;
+    }
+    if (done >= s.total || s.idx >= s.queue.length){ room.send({ t: "end" }); setPhase("board"); return; }
+    setPhase("countdown");
+  }, [view, show]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The public title list, for the near-miss titles sent with each song.
+  const pool = useRef<{ mix: string; titles: Promise<string[]> } | null>(null);
+  const titlePool = (mix: string) => {
+    if (pool.current?.mix !== mix) pool.current = { mix, titles: answerTitles(mix).catch(() => []) };
+    return pool.current.titles;
+  };
 
   useEffect(() => { if (room.gone) setPhase(p => (p === "done" ? p : "failed")); }, [room.gone]);
 
@@ -105,10 +128,9 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
       return;
     }
     const queue = crate.queue;
-    const inShow = queue.slice(0, show.total + ROOM_SPARE_SONGS).map(t => displayTitle(t.title));
-    const decoys = await decoyTitles(show.mix, show.eras, show.total * ROOM_DECOYS_PER_SONG, queue.map(t => t.title), show.categories);
-    const titles = shuffle([...new Set([...inShow, ...decoys])]);
-    room.send({ t: "start", titles, total: show.total, perRound: show.perRound, answerSecs: ROOM_ANSWER_SECS });
+    await titlePool(show.mix);
+    // No titles go to the room here: phones load the public list themselves.
+    room.send({ t: "start", mix: show.mix, total: show.total, perRound: show.perRound, answerSecs: ROOM_ANSWER_SECS });
     const next = { ...show, queue, idx: 0, songNo: 0, started: true };
     setShow(next);
     // No prime here: the crate took the tap's gesture with it, and a prime
@@ -131,7 +153,12 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
   // shut until the first clip is actually playing.
   useEffect(() => {
     if (phase !== "countdown" || !show || !track) return;
-    room.send({ t: "song", n: show.songNo + 1, title: track.title, film: track.album || "", year: track.year || 0, artist: track.artist || "" });
+    const n = show.songNo + 1;
+    titlePool(show.mix).then(titles => {
+      if (live.current.track !== track) return;
+      room.send({ t: "song", n, title: track.title, film: track.album || "", year: track.year || 0, artist: track.artist || "",
+        near: nearTitles(track.title, titles) });
+    });
   }, [phase, room.link]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* A replay starts from the top of the clip window; otherwise the rung plays
@@ -229,24 +256,28 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
   }, [phase, graceUntil, view?.song?.state]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function toReveal(v: RoomView){
-    const s = v.song!;
     const t = live.current.track;
     if (!show || !t) return;
-    engine.stop();
-    engine.playElement(t.stream, hookOffset(t), 0, { onErr: () => setNote("Couldn't stream the full song.") });
     markPlayed(t.title);
     recordPlay(t.title);
-    const songNo = show.songNo + 1;
-    const idx = show.idx + 1;
-    const finished = songNo >= show.total || idx >= show.queue.length;
-    const winner = v.players.find(p => p.id === s.winner);
+    const next = { ...show, idx: show.idx + 1, songNo: show.songNo + 1 };
+    setShow(next);
+    showReveal(v, t, next);
+  }
+
+  /* The reveal of the room's latest song; `s` already counts it as played. */
+  function showReveal(v: RoomView, t: Track, s: HostShow){
+    const song = v.song!;
+    engine.stop();
+    engine.playElement(t.stream, hookOffset(t), 0, { onErr: () => setNote("Couldn't stream the full song.") });
+    const finished = s.songNo >= s.total || s.idx >= s.queue.length;
+    const winner = v.players.find(p => p.id === song.winner);
     setRevealed({ track: t, verdict: {
-      name: winner ? winner.name : "anyone", result: winner ? "correct" : "wrong", points: s.won, total: winner?.score ?? 0,
-      roundOver: finished || songNo % show.perRound === 0, finished, completedRound: Math.ceil(songNo / show.perRound),
+      name: winner ? winner.name : "anyone", result: winner ? "correct" : "wrong", points: song.won, total: winner?.score ?? 0,
+      roundOver: finished || s.songNo % s.perRound === 0, finished, completedRound: Math.ceil(s.songNo / s.perRound),
     } });
     if (winner) setTimeout(() => engine.sfx("stamp"), 90);
     else engine.sfx("projector");
-    setShow({ ...show, idx, songNo });
     setPhase("reveal");
   }
 

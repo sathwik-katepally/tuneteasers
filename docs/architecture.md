@@ -13,7 +13,7 @@
 - `src/lib/utils.js` - pure helpers (`songKey`, `displayTitle`, `shuffle`, `safeUrl`, ...).
 - `src/lib/storage.js` - track sanitization, the played-cooldown store and the blocked-artist store.
 - `src/lib/group.ts` - optional group sync: the group invite, the write outbox, the group cooldown fetch and past results (docs/group-sync.md).
-- `src/lib/crate.js` - song loading (`buildCrate`) across the 3 source tiers, and `decoyTitles` for a room's autocomplete.
+- `src/lib/crate.js` - song loading (`buildCrate`) across the 3 source tiers, and `answerTitles` (the public title list a room phone autocompletes from).
 - `src/lib/room.ts` - buzz-in room client: `createRoom`, the `#room=` link, `useRoom` (PartySocket), seat and host-show storage.
 - `src/lib/answer.js` - answer folding, matching and autocomplete, shared with the Worker.
 - `src/lib/engine.js` - the audio engine (songs and synthesised sound effects) and screen wake lock.

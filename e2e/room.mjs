@@ -129,10 +129,18 @@ async function currentTitle(){
   const s = await hostShow();
   return s.queue[s.idx].title;
 }
+// A wrong guess comes from the public list and is never a song in this show:
+// a guess is echoed to every phone, and the secrecy check must only catch the
+// room leaking titles, not a player saying one.
+const publicTitles = (() => {
+  const corpus = JSON.parse(fs.readFileSync(new URL("../dist/corpus.json", import.meta.url), "utf8"));
+  const iTitle = corpus.cols.indexOf("title");
+  return corpus.songs.map(r => displayTitle(r[iTitle]));
+})();
 async function wrongTitle(){
-  const right = displayTitle(await currentTitle());
   const s = await hostShow();
-  return displayTitle(s.queue.find((t, i) => i !== s.idx && displayTitle(t.title) !== right).title);
+  const inShow = new Set(s.queue.map(t => songKey(t.title)));
+  return publicTitles.find(t => !inShow.has(songKey(t)) && t.length > 6);
 }
 
 const buzzBtn = p => p.page.locator('button[aria-label="Buzz"]');
@@ -189,46 +197,98 @@ async function revealed(n){
 }
 
 /* The room refuses what the app never sends: foreign origins, unknown rooms,
-   a phone playing host, oversized frames, frames before a hello, and floods. */
-async function guards(code){
+   silent sockets, a phone playing host, oversized frames, frames before a
+   hello, floods, and song numbers out of order. Runs while the second show's
+   first song is live. */
+async function guards(code, hostToken, total){
   const wsBase = worker.origin.replace(/^http/, "ws") + "/parties/room/";
   const connect = (c, o = origin) => new Promise(res => {
     const ws = new WebSocket(wsBase + c, { headers: { origin: o } });
     const got = [];
+    const conn = { ws, got, open: false, code: 0 };
     ws.onmessage = e => got.push(JSON.parse(String(e.data)));
-    ws.onopen = () => res({ ws, got, open: true });
-    ws.onerror = () => res({ ws, got, open: false });
-    ws.closed = new Promise(r => { ws.onclose = e => r(e.code); });
+    conn.closed = new Promise(r => { ws.onclose = e => { conn.code = e.code; r(e.code); }; });
+    ws.onopen = () => { conn.open = true; res(conn); };
+    ws.onerror = () => res(conn);
   });
+  const closedWith = (c, ms = 3000) => Promise.race([c.closed, sleep(ms).then(() => 0)]);
+
   const bad = await connect(code, "https://evil.example");
   if (bad.open) fail("a foreign origin opened a room socket");
   const post = await fetch(worker.origin + "/api/rooms", { method: "POST", headers: { origin: "https://evil.example" } });
   if (post.status !== 403) fail(`a foreign origin made a room (${post.status})`);
+
+  // An unclaimed code is refused at the upgrade, even from a socket that never speaks.
   const none = await connect(code === "BBBB" ? "CCCC" : "BBBB");
-  none.ws.send(JSON.stringify({ t: "join", key: "n".repeat(24), name: "Nobody" }));
-  if ((await Promise.race([none.ws.closed, sleep(3000).then(() => 0)])) !== 4404) fail("an unknown room code was not closed with 4404");
+  if ((await closedWith(none)) !== 4404) fail(`an unknown room code was not closed with 4404 (${none.code})`);
+
   const fake = await connect(code);
   fake.ws.send(JSON.stringify({ t: "host", token: "A".repeat(22) }));
-  if ((await Promise.race([fake.ws.closed, sleep(3000).then(() => 0)])) !== 4403) fail("a wrong host token was not refused");
+  if ((await closedWith(fake)) !== 4403) fail("a wrong host token was not refused");
+
+  // Silent sockets fill the room only up to its cap, and the hello timeout
+  // clears them. This runs in a real browser: Node's WebSocket never finishes
+  // a close the server starts, so it would never report the 4401.
+  const probe = await host.context.newPage();
+  await probe.goto(url + "seed.html");
+  const silent = await probe.evaluate(async ({ url, max }) => {
+    const socks = [];
+    const open = () => new Promise(res => {
+      const ws = new WebSocket(url);
+      const s = { ws, code: 0, open: false };
+      s.closed = new Promise(r => ws.addEventListener("close", e => { s.code = e.code; r(e.code); }));
+      ws.addEventListener("open", () => { s.open = true; res(s); });
+      ws.addEventListener("error", () => res(s));
+    });
+    let refused = 0;
+    for (let i = 0; i < max; i++){
+      const s = await open();
+      await Promise.race([s.closed, new Promise(r => setTimeout(r, 150))]);
+      if (s.code === 4429){ refused++; break; }
+      if (!s.open || s.code) return { error: `socket ${i} failed (${s.code})` };
+      socks.push(s);
+    }
+    const t0 = Date.now();
+    const codes = await Promise.all(socks.map(s => Promise.race([s.closed, new Promise(r => setTimeout(() => r(0), 16000))])));
+    return { admitted: socks.length, refused, codes: [...new Set(codes)], secs: (Date.now() - t0) / 1000 };
+  }, { url: wsBase + code, max: 60 });
+  await probe.close();
+  if (silent.error) fail(silent.error);
+  if (!silent.refused || silent.admitted < 40 || silent.admitted >= 60) fail(`the connection cap let ${silent.admitted} silent sockets in`);
+  if (silent.codes.join() !== "4401") fail(`silent sockets were not timed out: ${silent.codes}`);
+
   const early = await connect(code);
   early.ws.send(JSON.stringify({ t: "buzz" }));
   await sleep(300);
   if (!early.got.some(m => m.code === "hello-first")) fail("a buzz before hello was not refused");
   early.ws.send(JSON.stringify({ t: "join", key: "g".repeat(24), name: "Guard" }));
   await sleep(300);
-  early.ws.send(JSON.stringify({ t: "answer", text: "x".repeat(2000) }));
   early.ws.send(JSON.stringify({ t: "end" }));
   await sleep(300);
-  if (!early.got.some(m => m.code === "too-big")) fail("an oversized frame was not refused");
   if (!early.got.some(m => m.code === "unknown")) fail("a phone could send a host command");
   if (hostState().phase === "over") fail("a phone ended the show");
-  let refused = 0;
-  const before = early.got.length;
-  for (let i = 0; i < 60; i++) early.ws.send(JSON.stringify({ t: "answer", text: "flood" }));
-  await sleep(500);
-  refused = 60 - early.got.slice(before).filter(m => m.code === "not-your-turn").length;
-  if (refused < 30) fail(`a flood of 60 frames was mostly handled (${60 - refused} answered)`);
-  for (const c of [bad, none, fake, early]) try { c.ws.close(); } catch {}
+  early.ws.send(JSON.stringify({ t: "answer", text: "x".repeat(2000) }));
+  if ((await closedWith(early)) !== 1009) fail(`an oversized frame did not close the socket (${early.code})`);
+
+  const flood = await connect(code);
+  flood.ws.send(JSON.stringify({ t: "join", key: "f".repeat(24), name: "Flood" }));
+  await sleep(300);
+  for (let i = 0; i < 80 && flood.ws.readyState === 1; i++) flood.ws.send(JSON.stringify({ t: "buzz" }));
+  if ((await closedWith(flood)) !== 4429) fail(`a flood did not close the socket (${flood.code})`);
+
+  // Song numbers only move forward one at a time and stop at the show's length.
+  const h = await connect(code);
+  h.ws.send(JSON.stringify({ t: "host", token: hostToken }));
+  await sleep(300);
+  const n = hostState().results.length + 1;
+  for (const bad of [n + 1, total + 1]){
+    h.got.length = 0;
+    h.ws.send(JSON.stringify({ t: "song", n: bad, title: "Probe", near: [] }));
+    await sleep(300);
+    if (!h.got.some(m => m.code === "bad-song-number")) fail(`song ${bad} was accepted with ${n - 1} results`);
+  }
+  if (song().n !== n || song().answer) fail("a refused song number changed the room");
+  for (const c of [bad, none, fake, h]) try { c.ws.close(); } catch {}
 }
 
 const host = await device("host", "host");
@@ -287,10 +347,7 @@ try {
   await shot(meena, "phone-03-waiting");
 
   await host.page.getByRole("button", { name: "Start the show" }).click();
-  const titles = await until("titles on the phones", () => traffic.Asha.find(f => f.data.includes('"t":"titles"')));
-  const titleList = JSON.parse(titles.data).titles;
   const show = await until("host queue", async () => { const s = await hostShow(); return s?.started && s.queue.length ? s : null; });
-  if (!show.queue.slice(0, show.total).every(t => titleList.includes(displayTitle(t.title)))) fail("a show title is missing from the autocomplete list");
   if (categories.length){
     const corpus = JSON.parse(fs.readFileSync(new URL("../dist/corpus.json", import.meta.url), "utf8"));
     const lang = { hindi: "bolly", telugu: "telugu" };
@@ -301,7 +358,6 @@ try {
       if (!tt?.some(x => categories.includes(x))) fail(`"${t.title}" is not tagged ${categories}`);
     }
   }
-  if (titleList.length < show.total * 2) fail(`autocomplete list has no decoys (${titleList.length} titles for ${show.total} songs)`);
 
   // Song 1: a buzz race. Ravi, then Asha, then Meena; Ravi answers wrong,
   // Asha right at the rung she buzzed on.
@@ -329,6 +385,11 @@ try {
   await shot(first, "phone-07-locked-out");
   await shot(host, "host-06-wrong");
   const title1 = displayTitle(await currentTitle());
+  // The phone's suggestions come from the public list it loaded itself.
+  if (publicTitles.some(t => songKey(t) === songKey(title1))){
+    await second.page.getByLabel("Your answer").fill(title1.slice(0, Math.max(4, Math.ceil(title1.length * 0.6))));
+    await second.page.getByRole("option", { name: title1, exact: true }).first().waitFor({ timeout: 5000 });
+  }
   await answer(second, title1);
   await revealed(1);
   if (scoreOf(second.label) !== CLIP_POINTS[0]) fail(`right answer on rung 0 scored ${scoreOf(second.label)}, not ${CLIP_POINTS[0]}`);
@@ -403,25 +464,45 @@ try {
   await shot(host, "host-09-board");
 
   // The rest of the show: one quick right answer per song, alternating.
+  const reloadHost = async () => {
+    await host.page.reload();
+    await host.page.getByText("Buzz-in show in progress").waitFor();
+  };
   for (let n = 5; n <= show.total; n++){
     await nextSong(n);
     await live(n, 0);
     const p = phones[n % 3];
     await buzz(p);
-    await answer(p, displayTitle(await currentTitle()));
-    await revealed(n);
-    if (n === 6){
-      // The host screen reloads mid-show: home offers the show back, and the
-      // room kept everyone's scores.
-      const scores = hostState().players.map(pl => pl.score).join();
-      await host.page.reload();
-      await host.page.getByText("Buzz-in show in progress").waitFor();
+    if (n === 7){
+      // The host screen reloads while a phone is answering, and the phone gets
+      // it right while the host is away. Resume must pick up the room's
+      // result (the reveal), not replay the song and score it twice.
+      await until(`${p.label} answering`, () => song().answering === idOf(p.label));
+      const title = displayTitle(await currentTitle());
+      const before = scoreOf(p.label);
+      await reloadHost();
+      await answer(p, title);
+      // The host's socket is gone, so this reads what the phone was told.
+      await until("song 7 scored while the host was away", () => latest[p.label]?.song?.n === 7 && latest[p.label].song.state === "revealed");
       await shot(host, "host-11-resume-setup");
       await host.page.getByRole("button", { name: "Resume" }).click();
-      await until("host back in the room", () => song()?.n === 7);
-      if (hostState().players.map(pl => pl.score).join() !== scores) fail("scores changed across a host reload");
+      await host.page.getByRole("button", { name: "Next song" }).waitFor({ timeout: 20000 });
+      await host.page.getByText(new RegExp(`^\\+${CLIP_POINTS[0]} for ${p.label}`, "i")).waitFor();
+      if (scoreOf(p.label) !== before + CLIP_POINTS[0]) fail(`song 7 scored ${scoreOf(p.label) - before}, not ${CLIP_POINTS[0]} once`);
+      if (hostState().results.filter(r => r.n === 7).length !== 1) fail("song 7 has more than one result");
+      continue;
     }
+    await answer(p, displayTitle(await currentTitle()));
+    await revealed(n);
   }
+  // The host reloads on the final reveal: it comes back to that reveal and the
+  // end of the show, not a 13th song.
+  const finalScores = hostState().players.map(pl => pl.score).join();
+  await reloadHost();
+  await host.page.getByRole("button", { name: "Resume" }).click();
+  await host.page.getByRole("button", { name: "Final box office" }).waitFor({ timeout: 20000 });
+  if (song().n !== show.total || hostState().results.length !== show.total) fail("resume on the final reveal moved the room on");
+  if (hostState().players.map(pl => pl.score).join() !== finalScores) fail("scores changed across a host reload");
   await host.page.getByRole("button", { name: "Final box office" }).click();
   await host.page.getByText("Final count").waitFor();
   await host.page.getByRole("button", { name: "Roll the credits" }).click();
@@ -445,25 +526,33 @@ try {
   }
   await shot(asha, "phone-11-final");
 
-  // No phone saw a title before its reveal, or anything that looks like a stream.
-  const answers = new Map(show.queue.map((t, i) => [i, displayTitle(t.title)]));
-  const byN = new Map();
-  for (const r of hostState().results) byN.set(r.n, displayTitle(r.title));
+  // No phone received any title of this show before that song's reveal, in
+  // any kind of frame (welcome, state, error, reconnect snapshots), a title
+  // list of any kind, or anything that looks like a stream.
+  const quoted = t => [JSON.stringify(t), JSON.stringify(displayTitle(t))];
   let frames = 0;
-  for (const p of phones) for (const f of traffic[p.label] || []){
-    if (f.dir !== "in") continue;
-    frames++;
-    if (/saavncdn|https?:|\.mp4|\.m4a|stream/i.test(f.data)) fail(`${p.label} received a URL or stream: ${f.data.slice(0, 160)}`);
-    const m = JSON.parse(f.data);
-    if (m.t !== "state" || !m.song) continue;
-    if (m.song.state !== "revealed"){
-      if (m.song.answer) fail(`${p.label} got the answer to song ${m.song.n} before the reveal`);
-      const t = byN.get(m.song.n);
-      if (t && JSON.stringify({ ...m, results: [] }).includes(t)) fail(`${p.label} saw "${t}" during song ${m.song.n}`);
+  for (const p of phones){
+    const shown = new Set();
+    for (const f of traffic[p.label] || []){
+      if (f.dir !== "in") continue;
+      frames++;
+      if (/saavncdn|https?:|\.mp4|\.m4a|stream/i.test(f.data)) fail(`${p.label} received a URL or stream: ${f.data.slice(0, 160)}`);
+      const m = JSON.parse(f.data);
+      if (m.t === "titles" || Array.isArray(m.titles)) fail(`${p.label} received a title list`);
+      if (m.t === "state"){
+        for (const r of m.results || []) shown.add(songKey(r.title));
+        if (m.song?.answer){
+          if (m.song.state !== "revealed") fail(`${p.label} got the answer to song ${m.song.n} before the reveal`);
+          shown.add(songKey(m.song.answer.title));
+        }
+      }
+      for (const t of show.queue){
+        if (shown.has(songKey(t.title))) continue;
+        if (quoted(t.title).some(q => f.data.includes(q))) fail(`${p.label} saw "${t.title}" before its reveal: ${f.data.slice(0, 160)}`);
+      }
     }
   }
   if (!frames) fail("recorded no phone traffic");
-  void answers;
 
   // Same crowd again restarts the room with scores at zero.
   await host.page.getByRole("button", { name: "Same crowd again" }).click();
@@ -472,7 +561,7 @@ try {
   await asha.page.locator('button[aria-label="Buzz"]').waitFor({ timeout: 15000 });
 
   if (overflow.length) fail("screens scroll at this size: " + overflow.join(", "));
-  await guards(code);
+  await guards(code, (await hostShow()).host, show.total);
   const errors = all.flatMap(d => d.errors);
   if (errors.length) fail("page errors:\n" + errors.join("\n"));
   console.log(`room: PASS (room ${code}, ${show.total} songs, ${frames} phone frames checked, deadStreams=${deadStreams})`);

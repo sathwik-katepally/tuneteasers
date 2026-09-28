@@ -37,6 +37,7 @@ export interface RoomResult { n: number; title: string; winner: string | null; p
 export interface RoomView {
   phase: "lobby" | "show" | "over";
   code: string;
+  mix: Mix;
   total: number;
   perRound: number;
   answerSecs: number;
@@ -128,7 +129,6 @@ const FINAL = new Set([4404, 4403, 4410]);
    is how a dropped phone gets its seat back. */
 export function useRoom(code: string, hello: object | null){
   const [view, setView] = useState<RoomView | null>(null);
-  const [titles, setTitles] = useState<string[]>([]);
   const [link, setLink] = useState<Link>("connecting");
   const [error, setError] = useState<{ code: string; at: number } | null>(null);
   const [gone, setGone] = useState<{ code: number; kicked: boolean } | null>(null);
@@ -153,7 +153,6 @@ export function useRoom(code: string, hello: object | null){
       let m: any;
       try { m = JSON.parse(String(e.data)); } catch { return; }
       if (m.t === "state") setView({ ...m, at: Date.now() });
-      else if (m.t === "titles" && Array.isArray(m.titles)) setTitles(m.titles.filter((x: unknown) => typeof x === "string"));
       else if (m.t === "error") setError({ code: String(m.code), at: Date.now() });
       else if (m.t === "kicked") kicked.current = true;
     },
@@ -165,7 +164,7 @@ export function useRoom(code: string, hello: object | null){
     },
   });
 
-  useEffect(() => { setView(null); setTitles([]); setGone(null); setError(null); setLink("connecting"); kicked.current = false; }, [code]);
+  useEffect(() => { setView(null); setGone(null); setError(null); setLink("connecting"); kicked.current = false; }, [code]);
 
   const send = (m: object) => {
     if (socket.readyState !== WebSocket.OPEN) return false;
@@ -173,7 +172,7 @@ export function useRoom(code: string, hello: object | null){
     return true;
   };
   const leave = () => socket.close();
-  return { view, titles, link, error, gone, send, leave };
+  return { view, link, error, gone, send, leave };
 }
 
 /* Milliseconds left on the answer clock, ticking locally from the last view. */

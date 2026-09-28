@@ -5,7 +5,8 @@ import { Stamp } from "../components/Stamp";
 import { Stage } from "../components/Stage";
 import { Ticket } from "../components/Ticket";
 import { NAME_MAX } from "../lib/config";
-import { suggest } from "../lib/answer.js";
+import { prepareTitles, suggest } from "../lib/answer.js";
+import { answerTitles } from "../lib/crate.js";
 import { displayTitle } from "../lib/utils.js";
 import { cleanCode, dropSeat, isCode, lastName, loadSeat, newSeat, playerName, rememberName, setRoomUrl, useMsLeft, useRoom,
   type RoomView, type Seat } from "../lib/room";
@@ -95,7 +96,7 @@ export function Phone({ code: initial, onExit }: { code: string; onExit: () => v
     screen = <Final view={view} onLeave={leave} />;
   } else {
     key = "show";
-    screen = <Buzzer view={view} titles={room.titles} send={room.send} online={room.link === "open"} error={room.error} />;
+    screen = <Buzzer view={view} send={room.send} online={room.link === "open"} error={room.error} />;
   }
 
   return (
@@ -157,8 +158,8 @@ function Waiting({ view, onLeave }: { view: RoomView; onLeave: () => void }){
   );
 }
 
-function Buzzer({ view, titles, send, online, error }: {
-  view: RoomView; titles: string[]; send: (m: object) => boolean; online: boolean; error: { code: string; at: number } | null;
+function Buzzer({ view, send, online, error }: {
+  view: RoomView; send: (m: object) => boolean; online: boolean; error: { code: string; at: number } | null;
 }){
   const song = view.song;
   const me = view.me!;
@@ -175,6 +176,7 @@ function Buzzer({ view, titles, send, online, error }: {
   const out = !!song?.locked.includes(me);
   const place = song ? song.queue.indexOf(me) : -1;
   const open = (state === "live" || state === "answering" || state === "missed") && !out && !queued && online;
+  const titles = useAnswerTitles(view.mix);
   const hints = useMemo(() => suggest(text, titles, 5), [text, titles]);
 
   // A new song, or my turn ending, clears the pad.
@@ -266,6 +268,18 @@ function Buzzer({ view, titles, send, online, error }: {
       )}
     </div>
   );
+}
+
+/* The phone loads the public title list itself: the room never sends one,
+   so nothing a phone receives hints at the show's songs. */
+function useAnswerTitles(mix: RoomView["mix"]){
+  const [list, setList] = useState<{ title: string; f: string }[]>([]);
+  useEffect(() => {
+    let live = true;
+    (answerTitles as (m: string) => Promise<string[]>)(mix).then(t => { if (live) setList(prepareTitles(t)); }, () => {});
+    return () => { live = false; };
+  }, [mix]);
+  return list;
 }
 
 function Final({ view, onLeave }: { view: RoomView; onLeave: () => void }){
