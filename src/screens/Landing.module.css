@@ -1,15 +1,13 @@
 .root {
-  position: fixed;
-  inset: 0;
-  z-index: 50;
-  overflow-y: auto;
-  overflow-x: hidden;
+  position: relative;
+  min-height: 100dvh;
+  overflow: hidden;
   display: flex;
   background: var(--maroon);
 }
 
 .rays {
-  position: fixed;
+  position: absolute;
   top: -40vmax;
   right: -40vmax;
   width: 120vmax;
@@ -26,7 +24,7 @@
   margin: auto;
   width: 100%;
   max-width: 480px;
-  padding: 22px 20px calc(20px + var(--safe-b));
+  padding: 24px 20px calc(16px + var(--safe-b));
   display: flex;
   flex-direction: column;
   gap: 22px;
@@ -152,25 +150,8 @@
 .actions {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-}
-
-.under {
-  display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  font-size: 14px;
-  color: var(--cream-dim);
-}
-
-.under :global(.link) {
-  padding-right: 0;
-}
-
-.sound {
-  font-size: 13px;
-  color: var(--cream-shade);
+  gap: 6px;
 }
 
 @media (min-width: 900px) {
@@ -217,5 +198,37 @@
   }
   .side {
     gap: 14px;
+  }
+}
+
+@media (max-height: 620px) and (max-width: 899px) {
+  .grid {
+    gap: 12px;
+    padding-top: 12px;
+  }
+  .hero {
+    gap: 8px;
+  }
+  .brand {
+    font-size: 19px;
+  }
+  .head {
+    font-size: clamp(34px, 11vw, 44px);
+  }
+  .lede {
+    font-size: 15px;
+  }
+  .side {
+    gap: 12px;
+  }
+  .rung {
+    padding: 6px 8px 5px;
+  }
+  .secs {
+    font-size: 24px;
+  }
+  .modes dt,
+  .modes dd {
+    font-size: 14px;
   }
 }

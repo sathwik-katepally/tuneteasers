@@ -65,7 +65,7 @@ export interface GameState {
 }
 
 export interface AppState {
-  screen: "setup" | "game" | "done" | "past" | "host" | "buzzer";
+  screen: "landing" | "setup" | "game" | "done" | "past" | "host" | "buzzer";
   settings: Settings;
   players: RosterEntry[];
   teams: RosterEntry[];
