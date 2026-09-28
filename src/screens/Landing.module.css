@@ -201,6 +201,21 @@
   .secs {
     font-size: 36px;
   }
+  .actions {
+    gap: 16px;
+  }
+  .mode {
+    padding: 16px 20px 15px;
+  }
+  .modeTitle {
+    font-size: 21px;
+  }
+  .modeSub {
+    font-size: 17px;
+  }
+  .join {
+    font-size: 15px;
+  }
 }
 
 @media (max-height: 700px) and (max-width: 899px) {

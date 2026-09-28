@@ -7,7 +7,7 @@
    node e2e/categories.mjs [--profile=phone|desktop] [--shots=dir] */
 import fs from "node:fs";
 import path from "node:path";
-import { serve, open, args, saved } from "./harness.mjs";
+import { serve, open, args, saved, moreSettings } from "./harness.mjs";
 
 const A = args({ profile: "phone" });
 const shotsDir = A.shots && A.shots !== "true" ? A.shots : null;
@@ -33,6 +33,7 @@ async function seed(state){
   await page.evaluate(v => { localStorage.clear(); if (v) localStorage.setItem("tuneteasers_v7", JSON.stringify(v)); }, state);
   await page.goto(server.url);
   await page.getByRole("button", { name: /Start the show/ }).waitFor();
+  await moreSettings(page);
 }
 
 let exit = 0;
@@ -54,6 +55,7 @@ try {
   await chip("Item songs").click();
 
   await page.reload();
+  await moreSettings(page);
   await counted("Item songs");
   await expectPressed(["Item songs"], "after reload");
 

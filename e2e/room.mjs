@@ -19,7 +19,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { chromium, webkit, devices } from "playwright";
-import { serve, args, localWorker, silence, skipLanding, MUTE_ARGS } from "./harness.mjs";
+import { serve, args, localWorker, silence, skipLanding, moreSettings, MUTE_ARGS } from "./harness.mjs";
 import { displayTitle } from "../src/lib/utils.js";
 import { CATEGORIES, DIFFICULTY, ROOM_ANSWER_SECS, ladderFor } from "../src/lib/config.ts";
 import { songKey } from "../src/lib/utils.js";
@@ -323,6 +323,7 @@ try {
   await host.page.evaluate(() => localStorage.clear());
   await host.page.goto(url);
   await host.page.getByRole("radio", { name: "Buzz in" }).click();
+  await moreSettings(host.page);
   await host.page.getByRole("radio", { name: DIFFICULTY[A.difficulty].label, exact: true }).click();
   await host.page.getByRole("radio", { name: "3", exact: true }).click();
   // --categories=item,mass: the room's crate must honour the home screen's song categories.
@@ -340,7 +341,7 @@ try {
 
   // Asha types the code on the home screen; Ravi and Meena open the link.
   await asha.page.goto(url);
-  await asha.page.getByRole("button", { name: "Join with a code" }).click();
+  await asha.page.getByRole("button", { name: "Got a code? Join a show" }).click();
   await shot(asha, "phone-01-join-empty");
   await asha.page.getByLabel("Room code").fill(code.toLowerCase());
   await asha.page.getByLabel("Your name").fill("Asha");

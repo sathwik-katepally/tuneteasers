@@ -102,3 +102,10 @@ export function args(defaults){
 }
 
 export const saved = page => page.evaluate(() => JSON.parse(localStorage.getItem("tuneteasers_v7") || "null"));
+
+/* Setup keeps era, difficulty, song kinds and rounds behind its summary line; open it. */
+export async function moreSettings(page){
+  const summary = page.getByRole("button", { name: /Change$/ });
+  if (await summary.count()) await summary.click();
+  await page.getByRole("radiogroup", { name: "Difficulty" }).waitFor();
+}
