@@ -161,7 +161,18 @@ async function answer(p, text, { pick = true } = {}){
 }
 
 /* Waits for the host to have a live clip at `rung` for song `n`. */
-const live = (n, rung) => until(`song ${n} live at rung ${rung}`, () => song()?.n === n && song().state === "live" && song().rung === rung);
+// A stream that won't start gets skipped the way a host would; the room
+// keeps the song number and takes the next title.
+let deadStreams = 0;
+const live = (n, rung) => until(`song ${n} live at rung ${rung}`, async () => {
+  if (song()?.n === n && song().state === "live" && song().rung === rung) return true;
+  const skip = host.page.getByRole("button", { name: "Skip this song" });
+  if (rung === 0 && await skip.isVisible().catch(() => false)){
+    if (++deadStreams > 2) fail("three dead streams");
+    await skip.click({ timeout: 1500 }).catch(() => {});
+  }
+  return false;
+}, 45000);
 
 async function nextSong(n){
   const next = host.page.getByRole("button", { name: /Next song|box office|On to round/ });
@@ -464,7 +475,7 @@ try {
   await guards(code);
   const errors = all.flatMap(d => d.errors);
   if (errors.length) fail("page errors:\n" + errors.join("\n"));
-  console.log(`room: PASS (room ${code}, ${show.total} songs, ${frames} phone frames checked)`);
+  console.log(`room: PASS (room ${code}, ${show.total} songs, ${frames} phone frames checked, deadStreams=${deadStreams})`);
 } catch (e){
   console.error("room: FAIL", e.message);
   console.error("host view:", JSON.stringify({ ...latest.host, results: undefined }).slice(0, 600));
