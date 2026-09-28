@@ -43,8 +43,13 @@ const instrument = () => {
       if (!el.paused && !el.muted && !el.seeking && el.readyState >= 3 && gate > 0) on = el;
     }
     if (ending && (ending.el.paused || on || now() - ending.at > 100)) close();
+    // A network stall mid-clip (still playing, not seeking, data run dry)
+    // is the same stretch resuming, not a new clip.
+    const stalled = cur && !on && !cur.el.paused && !cur.el.seeking && cur.el.readyState < 3;
+    if (stalled && !cur.stall){ cur.stall = true; ev("stall", { at: cur.el.currentTime }); }
+    if (on && cur) cur.stall = false;
     if (on && !cur){ cur = { el: on, from: on.currentTime, t: now() }; ev("audible", { from: cur.from }); }
-    else if (!on && cur){ ending = { ...cur, at: now() }; cur = null; }
+    else if (!on && cur && !stalled){ ending = { ...cur, at: now() }; cur = null; }
   }, 10);
   const seen = {};
   const flip = (k, v) => { if (!!seen[k] !== v){ seen[k] = v; if (v) ev(k); } };
