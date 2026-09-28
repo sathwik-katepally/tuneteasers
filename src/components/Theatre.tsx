@@ -67,7 +67,7 @@ function HomeMenu({ items }: { items: MenuItem[] }){
   const { open, setOpen, ref } = useDropdown();
   return (
     <div className={s.menuWrap} ref={ref}>
-      <button type="button" className={s.menuBtn} aria-label={open ? "Close menu" : "Menu"} aria-expanded={open} onClick={() => setOpen(o => !o)}>
+      <button type="button" className={`${s.menuBtn} ${s.homeMenuBtn}`} aria-label={open ? "Close menu" : "Menu"} aria-expanded={open} onClick={() => setOpen(o => !o)}>
         {open ? <X size={18} strokeWidth={2.5} /> : <Menu size={18} strokeWidth={2.5} />}
       </button>
       {open && (

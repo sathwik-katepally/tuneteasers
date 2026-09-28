@@ -336,9 +336,14 @@
   }
 }
 
-/* Next to the About button a narrow marquee only has room for the title. */
+.homeMenuBtn {
+  position: relative;
+}
+
+/* Next to the About button or the home menu a narrow marquee only has room for the title. */
 @media (max-width: 419px) {
-  .marqueeInner:has(.aboutBtn) .marqueeMeta {
+  .marqueeInner:has(.aboutBtn) .marqueeMeta,
+  .marqueeInner:has(.homeMenuBtn) .marqueeMeta {
     visibility: hidden;
   }
 }

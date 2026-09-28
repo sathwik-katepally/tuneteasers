@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { ChevronDown, Plus, X } from "lucide-react";
 import { ERAS } from "../lib/constants.js";
 import { CATEGORIES, DIFFICULTY, MAX_CAST, MAX_MEMBERS, NAME_MAX, ROOM_SONGS_PER_ROUND, ROUND_OPTIONS } from "../lib/config";
@@ -85,7 +85,7 @@ export function Setup(p: Props){
           {!room && (
             <div className={s.group}>
               <div className={s.label}>
-                <span className={s.labelText}>{mode === "teams" ? "Teams" : "Who's playing"}</span>
+                <span className={s.labelText}>{mode === "teams" ? "Teams" : "Who's in"}</span>
                 <div className={s.modeSeg}>
                   <Seg<Mode> label="Play as" tone="teal" value={mode}
                     options={[{ value: "players", label: "Solo" }, { value: "teams", label: "Teams" }]}
@@ -133,7 +133,7 @@ export function Setup(p: Props){
           </div>
 
           <button type="button" className={s.summary} aria-expanded={more} aria-controls="tt-more" onClick={() => setMore(o => !o)}>
-            <span className={s.summaryText}>{summary(S).join(" · ")}</span>
+            <span className={s.summaryText}>{summary(S).map((x, i) => <Fragment key={i}>{i > 0 && " "}<span className="nowrap">{i ? "· " : ""}{x}</span></Fragment>)}</span>
             <span className={s.summaryAct}>{more ? "Done" : "Change"} <ChevronDown size={14} strokeWidth={3} className={more ? s.flip : ""} /></span>
           </button>
 
