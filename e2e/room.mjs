@@ -229,7 +229,12 @@ async function guards(code, hostToken, total){
   // Silent sockets fill the room only up to its cap, and the hello timeout
   // clears them. This runs in a real browser: Node's WebSocket never finishes
   // a close the server starts, so it would never report the 4401.
-  const probe = await host.context.newPage();
+  // Its own context: the game contexts reroute the Worker's host through this
+  // script's proxy, whose Node upstream reports a close the server starts
+  // about 10 s late, so against the production host the probe would time out
+  // before the 4401 reached the page.
+  const probeContext = await host.browser.newContext();
+  const probe = await probeContext.newPage();
   await probe.goto(url + "seed.html");
   // Sockets open one after another; a refused one still opens (the refusal is
   // a close right after the upgrade), so each is classified only once the
@@ -256,7 +261,7 @@ async function guards(code, hostToken, total){
     const codes = await Promise.all(admitted.map(s => Promise.race([s.closed, new Promise(r => setTimeout(() => r(0), 16000))])));
     return { admitted: admitted.length, refused: refused.length, codes: [...new Set(codes)] };
   }, { url: wsBase + code, max: 60 });
-  await probe.close();
+  await probeContext.close();
   if (silent.error) fail(silent.error);
   if (!silent.refused || silent.admitted < 40 || silent.admitted >= 60) fail(`the connection cap let ${silent.admitted} silent sockets in`);
   if (silent.codes.join() !== "4401") fail(`silent sockets were not timed out: ${silent.codes}`);
