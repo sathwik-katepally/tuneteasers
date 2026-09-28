@@ -1,10 +1,10 @@
 <!doctype html>
 <!-- Offline VAD scoring harness, served locally by scripts/build-snips.mjs and
      driven by Playwright. Loads tfjs (WASM backend), essentia.js and the
-     MusiCNN voice/instrumental model, then exposes window.__scoreSong(url):
-     fetch -> decodeAudioData -> 16kHz mono offline render -> coarse scan for
-     candidate regions -> dense scan of each region -> verify one exact
-     SNIP_WINDOW_SEC interval with overlapping patches.
+     MusiCNN voice/instrumental model, then exposes window.__scoreCurve(url):
+     fetch -> decodeAudioData -> 16kHz mono offline render -> p(voice) for
+     overlapping ~3s patches every ~1s across the whole song. The driver keeps
+     that curve and derives clean windows of any length from it.
      The extraction is the client vad.worker.js logic with one fix (see
      extractSegment below): essentia's FrameGenerator silently DROPS
      digitally-silent frames, so a song with any pure silence (fade-in head,
@@ -19,17 +19,16 @@
 <script src="/vendor/tf-backend-wasm.min.js"></script>
 <script type="module">
 import { EssentiaTFInputExtractor, TensorflowMusiCNN } from "/essentia/essentia.js-model.es.js";
-import { SNIP_CLEAN_MAX, SNIP_WINDOW_SEC as WINDOW_SEC } from "/constants.js";
 
 const MODEL_SR = 16000;
 const PATCH_FRAMES = 187, MEL_HOP = 256; // MusiCNN input geometry
-const PATCH_STRIDE = 2;                  // coarse scan scores every 2nd patch (~5.98s granularity)
-const VERIFY_STRIDE = 62;                // 0.992s; overlapping 2.99s patches leave no gap
-const STRIDE_SEC = VERIFY_STRIDE * MEL_HOP / MODEL_SR;
-const VERIFY_PATCHES = Math.ceil((WINDOW_SEC * MODEL_SR / MEL_HOP - PATCH_FRAMES) / VERIFY_STRIDE) + 1;
-const COARSE_MAX = 0.4;                  // a coarse window scoring this high is not worth a dense scan
-const REGION_PAD = 8;                    // dense scan this far either side of a coarse candidate
-const MAX_REGIONS = 4;                   // dense scans per song (each costs ~35 patch predictions)
+const CURVE_STRIDE = 62;                 // 0.992s; overlapping 2.99s patches leave no gap
+const STRIDE_SEC = CURVE_STRIDE * MEL_HOP / MODEL_SR;
+const PATCH_SEC = PATCH_FRAMES * MEL_HOP / MODEL_SR;
+// Patches per extraction and predict call: a whole song in one batch blows
+// the tfjs WASM heap ("memory access out of bounds" / "null function").
+// MusiCNN scores each patch independently, so chunking changes nothing.
+const CHUNK_PATCHES = 32;
 
 let ready = null;
 function init(){
@@ -100,84 +99,36 @@ function extractSegment(extractor, seg, seed, minFrames){
   return features;
 }
 
-/* Mel per stride-kept patch; sample-aligned segments verified bit-identical
-   to a full-song pass (see src history / docs). Segments are COPIED out of
-   the song PCM (pcm.slice) because extractSegment may dither them in place. */
-function extractKept(extractor, pcm){
-  const segSamples = PATCH_FRAMES * MEL_HOP + MEL_HOP; // one extra hop: frame f covers [(f-1)*hop, (f-1)*hop + 2*hop)
-  const kept = [];
-  let features = null;
-  // FrameGenerator centers its first frame (a hop of leading zeros), so a
-  // segment starting one hop before patch p's first frame reproduces the
-  // full-song frames exactly once that centered frame 0 is skipped.
-  for (let p = 0; ; p++){
-    const f0 = p * PATCH_STRIDE * PATCH_FRAMES; // patch p's first frame index in the full song
-    const s = f0 === 0 ? 0 : (f0 - 1) * MEL_HOP;
-    const skip = f0 === 0 ? 0 : 1;
-    if (s + segSamples > pcm.length) break;
-    features = extractSegment(extractor, pcm.slice(s, s + segSamples), s, skip + PATCH_FRAMES);
-    for (let i = 0; i < PATCH_FRAMES; i++) kept.push(features.melSpectrum[skip + i]);
-  }
-  if (!kept.length){ // very short song: keep whatever there is
-    features = extractSegment(extractor, pcm.slice(0), 0, 1);
-    kept.push(...features.melSpectrum);
-  }
-  return { kept, features };
-}
-
-/* p(voice) for overlapping patches every STRIDE_SEC from fromSec. */
-async function denseScan(extractor, model, pcm, fromSec, patches){
-  const start = Math.floor(fromSec * MODEL_SR);
-  const neededFrames = PATCH_FRAMES + (patches - 1) * VERIFY_STRIDE;
+/* p(voice) for overlapping patches every CURVE_STRIDE frames from sample `start`. */
+async function denseScan(extractor, model, pcm, start, patches){
+  const neededFrames = PATCH_FRAMES + (patches - 1) * CURVE_STRIDE;
   const neededSamples = (neededFrames + 1) * MEL_HOP;
   if (patches < 1 || start < 0 || start + neededSamples > pcm.length) return null;
   const features = extractSegment(extractor, pcm.slice(start, start + neededSamples), start, neededFrames);
   const mel = [];
   for (let i = 0; i < patches; i++)
-    mel.push(...features.melSpectrum.slice(i * VERIFY_STRIDE, i * VERIFY_STRIDE + PATCH_FRAMES));
+    mel.push(...features.melSpectrum.slice(i * CURVE_STRIDE, i * CURVE_STRIDE + PATCH_FRAMES));
   const acts = await model.predict({ ...features, melSpectrum:mel, frameSize:mel.length }, true);
   if (acts.length !== patches || acts.some(a => !Number.isFinite(a[1]))) return null;
   return acts.map(a => a[1]);
 }
 
-/* The only acceptance test: every patch across [startSec, startSec + WINDOW_SEC]. */
-async function verify(extractor, model, pcm, startSec){
-  const probs = await denseScan(extractor, model, pcm, startSec, VERIFY_PATCHES);
-  if (!probs) return null;
-  const maxVoice = Math.max(...probs);
-  return maxVoice < SNIP_CLEAN_MAX ? { startSec, endSec:startSec + WINDOW_SEC, maxVoice:Math.round(maxVoice * 1000) / 1000 } : null;
-}
-
-/* Dense-scan a region, then verify whole-second starts inside each run of
-   clean patches long enough to hold a window. The coarse grid alone misses
-   clean stretches that start between its points. */
-async function searchRegion(extractor, model, pcm, fromSec, toSec){
-  const patches = Math.floor((toSec - fromSec - PATCH_FRAMES * MEL_HOP / MODEL_SR) / STRIDE_SEC) + 1;
-  if (patches < VERIFY_PATCHES) return null;
-  const probs = await denseScan(extractor, model, pcm, fromSec, patches);
-  if (!probs) return null;
-  for (let k = 0; k + VERIFY_PATCHES <= probs.length; ){
-    let end = k;
-    while (end < probs.length && probs[end] < SNIP_CLEAN_MAX) end++;
-    if (end - k >= VERIFY_PATCHES){
-      const lo = fromSec + k * STRIDE_SEC, hi = fromSec + (end - VERIFY_PATCHES) * STRIDE_SEC;
-      const starts = [];
-      for (let t = Math.ceil(lo); t <= Math.floor(hi) + 1 && starts.length < 3; t++) starts.push(t);
-      if (!starts.length) starts.push(Math.round(lo));
-      for (const t of starts){
-        const pick = await verify(extractor, model, pcm, t);
-        if (pick) return pick;
-      }
-    }
-    k = end + 1;
+/* p(voice) for patch k covering [k * STRIDE_SEC, k * STRIDE_SEC + PATCH_SEC],
+   for every patch that fits in the song. */
+async function scanCurve(extractor, model, pcm){
+  const total = Math.floor((pcm.length / MEL_HOP - 1 - PATCH_FRAMES) / CURVE_STRIDE) + 1;
+  if (total < 1) throw new Error("song shorter than one patch");
+  const curve = [];
+  for (let k = 0; k < total; k += CHUNK_PATCHES){
+    const probs = await denseScan(extractor, model, pcm, k * CURVE_STRIDE * MEL_HOP, Math.min(CHUNK_PATCHES, total - k));
+    if (!probs) throw new Error(`patches ${k}+ did not score`);
+    curve.push(...probs);
   }
-  return null;
+  return curve;
 }
 
-/* hint: a previously clean start for this recording (from an index of an
-   earlier schema), searched first. Returns { startSec, endSec, maxVoice, ... } or
-   { maxVoice:1, ... } when nothing passes, or { error, stage }. */
-window.__scoreSong = async function(url, hint = null){
+/* Returns { curve, strideSec, patchSec, dur, ms } or { error, stage }. */
+window.__scoreCurve = async function(url){
   const t0 = performance.now();
   let stage = "init";
   try {
@@ -192,73 +143,16 @@ window.__scoreSong = async function(url, hint = null){
     try { buf = await ctx.decodeAudioData(ab); } finally { ctx.close(); }
     stage = "render";
     const pcm = await to16kMono(buf);
-    const dur = buf.duration;
-    stage = "extract";
+    stage = "scan";
     // Fresh module AND extractor per job: reusing an extractor corrupts the
     // essentia heap after a few songs (observed: "Out of bounds memory
     // access", then aborts), and the module accumulates leaked heap.
     const EssentiaWASM = await freshEssentia();
     const extractor = new EssentiaTFInputExtractor(EssentiaWASM, "musicnn", false);
-    const lastStart = dur - WINDOW_SEC - 1;
-    const scanned = [];
-    let regions = 0;
-    // A region [from, to] covers window starts [from, to - WINDOW_SEC]; a
-    // candidate whose start is already covered is skipped.
-    const tryRegion = async (at, from, to) => {
-      if (regions >= MAX_REGIONS || scanned.some(([a, b]) => a <= at && at <= b)) return null;
-      from = Math.max(0, Math.floor(from));
-      to = Math.min(Math.floor(dur) - 1, Math.ceil(to));
-      if (to - from < WINDOW_SEC + 1) return null;
-      regions++;
-      scanned.push([from, to - WINDOW_SEC]);
-      return searchRegion(extractor, model, pcm, from, to);
-    };
-    let pick = null;
-    if (Number.isFinite(hint) && hint >= 0 && hint <= lastStart + WINDOW_SEC)
-      pick = await tryRegion(hint, hint - WINDOW_SEC, hint + 2 * WINDOW_SEC);
-    let patches = 0;
-    if (!pick){
-      const { kept, features } = extractKept(extractor, pcm);
-      stage = "predict";
-      // Predict in bounded batches: a 13+ minute song is 130+ patches, and one
-      // giant batch blows the tfjs WASM heap ("memory access out of bounds" /
-      // "null function"). MusiCNN scores each patch independently, so chunked
-      // output is identical to a single batch.
-      const PATCHES_PER_PREDICT = 32;
-      const probs = []; // p(voice) per patch; acts rows are [p_instrumental, p_voice]
-      for (let i = 0; i < kept.length; i += PATCHES_PER_PREDICT * PATCH_FRAMES){
-        const chunk = kept.slice(i, i + PATCHES_PER_PREDICT * PATCH_FRAMES);
-        const acts = await model.predict({ ...features, melSpectrum: chunk, frameSize: chunk.length }, true);
-        for (const a of acts) probs.push(a[1]);
-      }
-      patches = probs.length;
-      stage = "pick";
-      if (probs.length < 2) throw new Error("too few patches: " + probs.length);
-      const hopSec = (PATCH_FRAMES * MEL_HOP * PATCH_STRIDE) / MODEL_SR; // ~5.98s per kept patch
-      const span = Math.ceil(WINDOW_SEC / hopSec);
-      const ranked = [];
-      for (let i = 0; i < probs.length; i++){
-        const startSec = i * hopSec;
-        if (startSec > lastStart) continue;
-        ranked.push({ startSec, max: Math.max(...probs.slice(i, i + span)) });
-      }
-      ranked.sort((a,b) => a.max - b.max);
-      stage = "search";
-      for (const c of ranked){
-        if (c.max >= COARSE_MAX || regions >= MAX_REGIONS) break;
-        pick = await tryRegion(c.startSec, c.startSec - REGION_PAD, c.startSec + WINDOW_SEC + REGION_PAD);
-        if (pick) break;
-      }
-    }
-    extractor.delete();
-    return {
-      ...(pick || {}),
-      maxVoice: pick ? pick.maxVoice : 1,
-      patches,
-      regions,
-      dur: Math.round(dur),
-      ms: Math.round(performance.now() - t0),
-    };
+    try {
+      const curve = await scanCurve(extractor, model, pcm);
+      return { curve, strideSec:STRIDE_SEC, patchSec:PATCH_SEC, dur:buf.duration, ms:Math.round(performance.now() - t0) };
+    } finally { extractor.delete(); }
   } catch (e){
     return { error: String((e && e.message) || e).slice(0, 200), stage };
   }
@@ -266,7 +160,7 @@ window.__scoreSong = async function(url, hint = null){
 
 window.__harnessInit = init; // let the driver warm the model before the first song
 // debug handles for ad-hoc page.evaluate probes (harmless in production runs)
-window.__dbg = { freshEssentia, EssentiaTFInputExtractor, TensorflowMusiCNN, to16kMono, extractKept, denseScan, verify, searchRegion, init };
+window.__dbg = { freshEssentia, EssentiaTFInputExtractor, TensorflowMusiCNN, to16kMono, denseScan, scanCurve, init };
 window.__harnessReady = true;
 </script>
 <body>snip scorer harness</body>
