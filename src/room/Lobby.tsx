@@ -1,4 +1,4 @@
-import { X } from "lucide-react";
+import { Ticket as TicketIcon, X } from "lucide-react";
 import { BulbFrame } from "../components/Bulbs";
 import { Qr } from "../components/Qr";
 import { DIFFICULTY, ROOM_SONGS_PER_ROUND } from "../lib/config";
@@ -45,7 +45,7 @@ export function Lobby({ code, view, link, settings, error, onStart, onKick, onBa
           <div className={s.chips}>
             {players.map(p => (
               <span key={p.id} className={`${s.chip} ${p.online ? "" : s.chipAway}`}>
-                <span className={s.chipName}>{p.name}</span>
+                <span className={s.chipName}>{p.ticket && <TicketIcon className={s.chipTicket} size={13} strokeWidth={2.5} aria-label="Has a ticket" />}{p.name}</span>
                 <button type="button" className={s.chipX} aria-label={`Remove ${p.name}`} onClick={() => onKick(p.id)}>
                   <X size={14} strokeWidth={3} />
                 </button>

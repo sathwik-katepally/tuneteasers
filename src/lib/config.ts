@@ -63,6 +63,10 @@ export const ROOM_WRONG_BEAT_MS = 1800;
 export const MAX_MEMBERS = 6;
 export const NAME_MAX = 24;
 
+/* How long a song sits out of the crate after it was heard (played) or
+   skipped as heard too often (tired), in days. */
+export const COOLDOWN_DAYS = { played: 7, tired: 30 } as const;
+
 /* The pre-points version scored 1 per song (½ with a hint); a resumed old
    game is rescaled so its scores sit on the same scale as a top-rung answer. */
 export const LEGACY_SCORE_SCALE = 100;

@@ -10,6 +10,7 @@ import { answerTitles } from "../lib/crate.js";
 import { displayTitle } from "../lib/utils.js";
 import { cleanCode, dropSeat, isCode, lastName, loadSeat, newSeat, playerName, rememberName, setRoomUrl, useMsLeft, useRoom,
   type RoomView, type Seat } from "../lib/room";
+import { useMe } from "../lib/me";
 import sh from "../screens/shared.module.css";
 import s from "./Phone.module.css";
 
@@ -30,10 +31,12 @@ const GONE: Record<number, string> = {
 export function Phone({ code: initial, onExit }: { code: string; onExit: () => void }){
   const [code, setCode] = useState(initial);
   const [seat, setSeat] = useState<Seat | null>(() => (initial ? loadSeat(initial) : null));
-  const [name, setName] = useState(lastName);
+  const { me: ticket } = useMe();
+  const [name, setName] = useState(() => lastName() || ticket?.name || "");
   const [joining, setJoining] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
-  const hello = seat ? { t: "join", key: seat.key, name: joining ?? "" } : null;
+  // The ticket rides along so the room can keep this seat's history (docs/tickets.md).
+  const hello = seat ? { t: "join", key: seat.key, name: joining ?? "", ...(ticket ? { ticket: ticket.ticket } : {}) } : null;
   const room = useRoom(seat ? code : "", hello);
   const view = room.view;
   const me = view?.me ?? null;
@@ -77,7 +80,7 @@ export function Phone({ code: initial, onExit }: { code: string; onExit: () => v
 
   let key = "join", screen: React.ReactNode;
   if (!seat){
-    screen = <JoinForm code={code} name={name} notice={notice} onCode={v => setCode(cleanCode(v))} onName={setName} onJoin={join} onBack={() => { setRoomUrl(""); onExit(); }} />;
+    screen = <JoinForm code={code} name={name} notice={notice} ticketed={!!ticket} onCode={v => setCode(cleanCode(v))} onName={setName} onJoin={join} onBack={() => { setRoomUrl(""); onExit(); }} />;
   } else if (!view || !me){
     key = "connecting";
     screen = (
@@ -106,8 +109,8 @@ export function Phone({ code: initial, onExit }: { code: string; onExit: () => v
   );
 }
 
-function JoinForm({ code, name, notice, onCode, onName, onJoin, onBack }: {
-  code: string; name: string; notice: string; onCode: (v: string) => void; onName: (v: string) => void; onJoin: (e: FormEvent) => void; onBack: () => void;
+function JoinForm({ code, name, notice, ticketed, onCode, onName, onJoin, onBack }: {
+  code: string; name: string; notice: string; ticketed: boolean; onCode: (v: string) => void; onName: (v: string) => void; onJoin: (e: FormEvent) => void; onBack: () => void;
 }){
   return (
     <form className={sh.stage} onSubmit={onJoin}>
@@ -126,7 +129,7 @@ function JoinForm({ code, name, notice, onCode, onName, onJoin, onBack }: {
           <input className={s.input} value={name} onChange={e => onName(e.target.value)} placeholder="Name" maxLength={NAME_MAX}
             autoComplete="nickname" enterKeyHint="go" aria-label="Your name" />
         </label>
-        <p className={s.hint}>The big screen plays the songs. Your phone is your buzzer.</p>
+        <p className={s.hint}>{ticketed ? "Your ticket comes with you: songs you've heard here won't come round again." : "The big screen plays the songs. Your phone is your buzzer."}</p>
       </div>
       {notice && <p className={s.notice} role="alert">{notice}</p>}
       <div className={sh.actions}>

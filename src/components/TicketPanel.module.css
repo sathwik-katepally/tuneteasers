@@ -1,0 +1,27 @@
+/* The ticket card shares the group card's dark panel; the accent is the
+   cinema's vermilion so the two read as different desks. */
+.panel {
+  composes: panel from "./GroupPanel.module.css";
+  border-color: var(--vermilion);
+  box-shadow: 4px 4px 0 var(--vermilion-deep);
+}
+
+.top { composes: top from "./GroupPanel.module.css"; }
+.eyebrow { composes: eyebrow from "./GroupPanel.module.css"; }
+.status { composes: status from "./GroupPanel.module.css"; }
+.wait { composes: wait from "./GroupPanel.module.css"; }
+.bad { composes: bad from "./GroupPanel.module.css"; }
+.name { composes: name from "./GroupPanel.module.css"; }
+.text { composes: text from "./GroupPanel.module.css"; }
+.inline { composes: inline from "./GroupPanel.module.css"; }
+.note { composes: note from "./GroupPanel.module.css"; }
+.error { composes: error from "./GroupPanel.module.css"; }
+.row { composes: row from "./GroupPanel.module.css"; }
+.linkBtn { composes: linkBtn from "./GroupPanel.module.css"; }
+.field { composes: field from "./GroupPanel.module.css"; }
+.fieldLabel { composes: fieldLabel from "./GroupPanel.module.css"; }
+.input { composes: input from "./GroupPanel.module.css"; }
+.code { composes: code from "./GroupPanel.module.css"; }
+.check { composes: check from "./GroupPanel.module.css"; }
+.moveBody { composes: inviteBody from "./GroupPanel.module.css"; }
+.qr { composes: qr from "./GroupPanel.module.css"; }

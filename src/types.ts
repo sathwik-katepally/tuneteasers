@@ -19,6 +19,10 @@ export type Mode = "players" | "teams";
 export type Mix = "bolly" | "telugu" | "both";
 export type Category = "dance" | "romantic" | "sad" | "item" | "mass";
 export type Play = "pass" | "room";
+/* How a song left the queue: heard to the reveal, or skipped as heard too often (a longer cooldown). */
+export type PlayKind = "played" | "tired";
+/* Song keys to the last time each was played, per kind (docs/song-loading.md). */
+export interface History { played: Record<string, number>; tired: Record<string, number> }
 
 export interface Settings {
   play: Play;
@@ -34,6 +38,8 @@ export interface RosterEntry {
   id: string;
   name: string;
   members: string[];
+  /* Ticket ids of the people playing as this entry (docs/tickets.md); their histories follow them. */
+  people?: string[];
 }
 
 export interface CastMember extends RosterEntry {

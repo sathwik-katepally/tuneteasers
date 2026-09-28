@@ -8,8 +8,8 @@ import { engine, keepAwake } from "../lib/engine.js";
 import { markPlayed } from "../lib/storage.js";
 import { displayTitle } from "../lib/utils.js";
 import { log } from "../lib/log.js";
-import { groupPlayed, recordPlay } from "../lib/group";
-import { createRoom, loadHostShow, playerName, saveHostShow, useMsLeft, useRoom, type HostShow, type RoomView } from "../lib/room";
+import { recordPlay } from "../lib/group";
+import { createRoom, flushRoomPlays, loadHostShow, playerName, recordRoomPlay, roomCooldown, saveHostShow, useMsLeft, useRoom, type HostShow, type RoomView } from "../lib/room";
 import { Stage } from "../components/Stage";
 import { Countdown } from "../screens/Countdown";
 import { Loading } from "../screens/Loading";
@@ -21,7 +21,7 @@ import { HostPlaying, type Audio } from "./HostPlaying";
 import type { Category, Difficulty, GameState, Settings, Track, Verdict } from "../types";
 
 type Crate = { error?: string; queue?: Track[] };
-const buildCrate = buildCrateJs as (mix: string, eras: string[], sound: string, difficulty: Difficulty, minSongs: number, played: Record<string, number> | undefined, categories: Category[]) => Promise<Crate>;
+const buildCrate = buildCrateJs as (mix: string, eras: string[], sound: string, difficulty: Difficulty, minSongs: number, until: Record<string, number>, categories: Category[], heardBy: Record<string, number>) => Promise<Crate>;
 const answerTitles = answerTitlesJs as (mix: string) => Promise<string[]>;
 
 type Phase = "opening" | "lobby" | "loading" | "countdown" | "song" | "reveal" | "board" | "done" | "failed";
@@ -92,7 +92,7 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
     const last = view.song;
     const lastTrack = s.queue[s.idx - 1];
     if (done > 0 && last?.n === done && last.state === "revealed" && lastTrack){
-      if (done > show.songNo){ markPlayed(lastTrack.title); recordPlay(lastTrack.title); }
+      if (done > show.songNo) heard(lastTrack.title, s);
       showReveal(view, lastTrack, s);
       return;
     }
@@ -119,8 +119,8 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
     engine.ac();
     setPhase("loading");
     setError("");
-    const played = await groupPlayed();
-    const crate = await buildCrate(show.mix, show.eras, show.plain ? "full" : "inst", show.difficulty, show.total, played ?? undefined, show.categories);
+    const { until, heardBy } = await roomCooldown(show.code, show.host);
+    const crate = await buildCrate(show.mix, show.eras, show.plain ? "full" : "inst", show.difficulty, show.total, until, show.categories, heardBy);
     if (crate.error || !crate.queue){
       setError(crate.error === "safe" ? "Not enough verified music-only clips for this show. Go back and pick Easy or fewer rounds."
         : crate.error === "thin" ? `Not enough songs match your picks. Go back and pick more eras${show.categories.length ? " or another kind of song" : ""}.`
@@ -256,11 +256,18 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
     return () => window.clearTimeout(id);
   }, [phase, graceUntil, view?.song?.state]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  /* A song the room heard: this screen's history, the group's, and every seated ticket's. */
+  function heard(title: string, s: HostShow, kind: "played" | "tired" = "played"){
+    markPlayed(title, kind);
+    recordPlay(title, kind);
+    recordRoomPlay(s.code, s.host, title, kind);
+  }
+  useEffect(() => { if (show?.code) void flushRoomPlays(show.code, show.host); }, [show?.code]); // eslint-disable-line react-hooks/exhaustive-deps
+
   function toReveal(v: RoomView){
     const t = live.current.track;
     if (!show || !t) return;
-    markPlayed(t.title);
-    recordPlay(t.title);
+    heard(t.title, show);
     const next = { ...show, idx: show.idx + 1, songNo: show.songNo + 1 };
     setShow(next);
     showReveal(v, t, next);
@@ -294,8 +301,7 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
   function skipSong(){
     if (!show || !track) return;
     engine.stop();
-    markPlayed(track.title);
-    recordPlay(track.title);
+    heard(track.title, show);
     const idx = show.idx + 1;
     setShow({ ...show, idx });
     if (idx >= show.queue.length){

@@ -7,7 +7,8 @@ import { buildCrate as buildCrateJs, refreshMusicQueue as refreshMusicQueueJs } 
 import { engine, keepAwake } from "./lib/engine.js";
 import { log } from "./lib/log.js";
 import { displayTitle } from "./lib/utils.js";
-import { groupPlayed, randomId, recordPlay, recordResult, takeInviteFromUrl, useGroup } from "./lib/group";
+import { randomId, recordResult, takeInviteFromUrl, useGroup } from "./lib/group";
+import { presentCooldown, recordPlays, refreshMe, syncBlocked, syncFilters, takeTicketFromUrl, useMe, type Prefs } from "./lib/me";
 import { loadHostShow, roomFromUrl, saveHostShow } from "./lib/room";
 import { Stage } from "./components/Stage";
 import { Host } from "./room/Host";
@@ -25,11 +26,13 @@ import { PastGames } from "./screens/PastGames";
 import type { AppState, CastMember, Category, Difficulty, GameState, Mode, Phase, RosterEntry, Settings, Track, Turn, Verdict } from "./types";
 
 type Crate = { error?: string; queue?: Track[]; source?: string };
-const buildCrate = buildCrateJs as (mix: string, eras: string[], sound: string, difficulty: Difficulty, minSongs: number, played?: Record<string, number>, categories?: Category[]) => Promise<Crate>;
+const buildCrate = buildCrateJs as (mix: string, eras: string[], sound: string, difficulty: Difficulty, minSongs: number, until?: Record<string, number>, categories?: Category[], heardBy?: Record<string, number>) => Promise<Crate>;
 const refreshMusicQueue = refreshMusicQueueJs as (queue: Track[]) => Promise<Track[]>;
 
 const freshTurn = (): Turn => ({ rung: 0, span: { from: 0, to: 0 }, clipEndedAt: null, clipStartedAt: 0, playKey: 0, hint: false });
 const primaryArtistOf = (t: Track | null) => (t ? String(t.artist || "").split(",")[0].trim() : "");
+/* Every ticket in a roster or cast: the people whose histories the show follows. */
+const peopleOf = (list: RosterEntry[]) => [...new Set(list.flatMap(r => r.people ?? []))];
 
 export function App(){
   const [firstVisit] = useState(isFirstVisit);
@@ -53,7 +56,9 @@ export function App(){
   const [note, setNote] = useState("");
   const [blocked, setBlocked] = useState<string[]>(loadBlocked);
   const [invite, setInvite] = useState(takeInviteFromUrl);
+  const [moveTicket, setMoveTicket] = useState(takeTicketFromUrl);
   const groupSnap = useGroup();
+  const meSnap = useMe();
   const startOnShow = useRef(0);
 
   useEffect(() => { save(state); }, [state]);
@@ -67,6 +72,7 @@ export function App(){
         return;
       }
       const i = takeInviteFromUrl(); if (i){ setInvite(i); setState(st => ({ ...st, screen: st.screen === "past" || st.screen === "landing" ? "setup" : st.screen })); }
+      const t = takeTicketFromUrl(); if (t){ setMoveTicket(t); setState(st => ({ ...st, screen: st.screen === "past" || st.screen === "landing" ? "setup" : st.screen })); }
     };
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
@@ -93,7 +99,18 @@ export function App(){
   const upcoming = g && state.screen === "game" ? g.queue[g.trackIdx + (verdict || phase === "board" ? 0 : 1)] : undefined;
   useEffect(() => { if (upcoming) engine.prefetch(upcoming, plain); }, [upcoming?.stream]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const upSettings = (patch: Partial<Settings>) => setState(st => ({ ...st, settings: { ...st.settings, ...patch } }));
+  // A ticket's preferences land here: the blocked list on this phone, its default filters in the settings.
+  const tookPrefs = (prefs: Prefs | null) => {
+    if (!prefs) return;
+    setBlocked(loadBlocked());
+    if (prefs.filters) setState(st => ({ ...st, settings: { ...st.settings, ...prefs.filters } }));
+  };
+  useEffect(() => { refreshMe().then(tookPrefs); }, [meSnap.me?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const upSettings = (patch: Partial<Settings>) => setState(st => {
+    const settings = { ...st.settings, ...patch };
+    if ("mix" in patch || "eras" in patch || "difficulty" in patch || "categories" in patch) syncFilters(settings);
+    return { ...st, settings };
+  });
   const setRoster = (mode: Mode, list: RosterEntry[]) => setState(st => (mode === "teams" ? { ...st, teams: list } : { ...st, players: list }));
 
   function resetTurn(){
@@ -106,8 +123,8 @@ export function App(){
     setLoading(true); setError("");
     const mode = cast ? g?.mode ?? S.mode : S.mode;
     const roster = cast ?? (mode === "teams" ? state.teams : state.players);
-    const played = groupSnap.group ? await groupPlayed() : null;
-    const crate = await buildCrate(S.mix, S.eras, DIFFICULTY[S.difficulty].sound, S.difficulty, S.rounds * roster.length, played ?? undefined, S.categories);
+    const { until, heardBy } = await presentCooldown(peopleOf(roster));
+    const crate = await buildCrate(S.mix, S.eras, DIFFICULTY[S.difficulty].sound, S.difficulty, S.rounds * roster.length, until, S.categories, heardBy);
     setLoading(false);
     if (crate.error || !crate.queue){
       setError(crate.error === "safe" ? "Not enough verified music-only clips for this show. Try Easy or fewer rounds, or widen your song picks."
@@ -122,7 +139,7 @@ export function App(){
       queue: crate.queue, trackIdx: 0, turn: 0, round: 1, totalRounds: S.rounds,
       totalSongs: crate.queue.length, source: crate.source ?? "corpus",
       mode, difficulty: S.difficulty, mix: S.mix,
-      cast: roster.map(r => ({ id: r.id, name: r.name, members: [...r.members], score: 0 })),
+      cast: roster.map(r => ({ id: r.id, name: r.name, members: [...r.members], ...(r.people?.length ? { people: [...r.people] } : {}), score: 0 })),
       history: [], finished: false,
     };
     resetTurn();
@@ -183,7 +200,7 @@ export function App(){
     setRevealed(track);
     setPhase("reveal");
     markPlayed(track.title);
-    recordPlay(track.title);
+    recordPlays(track.title, "played", peopleOf(g.cast));
     const cast = g.cast.map((c, i) => (i === g.turn ? { ...c, score: c.score + points } : c));
     const trackIdx = g.trackIdx + 1;
     const nextTurn = (g.turn + 1) % cast.length;
@@ -212,7 +229,7 @@ export function App(){
     if (!g || !track) return;
     engine.stop();
     markPlayed(track.title);
-    recordPlay(track.title);
+    recordPlays(track.title, "played", peopleOf(g.cast));
     const trackIdx = g.trackIdx + 1;
     if (trackIdx >= g.queue.length){
       setBoardRound(g.round);
@@ -242,6 +259,7 @@ export function App(){
     const next = list.some((a: string) => normArtist(a) === normArtist(primary)) ? list : [...list, primary];
     saveBlocked(next);
     setBlocked(next);
+    syncBlocked(next);
     const set = new Set(next.map(normArtist));
     const gg = state.game;
     if (!gg) return;
@@ -255,6 +273,7 @@ export function App(){
     const next = loadBlocked().filter((a: string) => normArtist(a) !== normArtist(name));
     saveBlocked(next);
     setBlocked(next);
+    syncBlocked(next);
   }
 
   function goHome(){
@@ -303,6 +322,7 @@ export function App(){
     screen = <Setup error={error} settings={S} upSettings={upSettings} players={state.players} teams={state.teams} setRoster={setRoster}
       blocked={blocked} unblockArtist={unblockArtist} startGame={() => startGame()} savedGame={saved}
       invite={invite} clearInvite={() => setInvite("")} showPastGames={() => setState(st => ({ ...st, screen: "past" }))}
+      moveTicket={moveTicket} clearMoveTicket={() => setMoveTicket("")} onTicketPrefs={tookPrefs} people={groupSnap.people} me={meSnap.me}
       hostShow={hostShow?.started ? hostShow : null}
       openRoom={() => { engine.ac(); saveHostShow(null); setHostShow(null); setHostResume(false); setState(st => ({ ...st, screen: "host" })); }}
       resumeRoom={() => { engine.ac(); setHostResume(true); setState(st => ({ ...st, screen: "host" })); }}

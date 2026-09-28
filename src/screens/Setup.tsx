@@ -1,10 +1,13 @@
 import { useState } from "react";
-import { Plus, X } from "lucide-react";
+import { Plus, Ticket as TicketIcon, X } from "lucide-react";
 import { ERAS } from "../lib/constants.js";
 import { DIFFICULTY, MAX_CAST, MAX_MEMBERS, NAME_MAX, ROOM_SONGS_PER_ROUND, ROUND_OPTIONS } from "../lib/config";
 import { cleanName, newId } from "../lib/save";
 import { Seg } from "../components/Seg";
 import { GroupPanel } from "../components/GroupPanel";
+import { TicketPanel } from "../components/TicketPanel";
+import type { GroupPerson } from "../lib/group";
+import type { Prefs, Ticket } from "../lib/me";
 import { CategoryPicker } from "../components/CategoryPicker";
 import type { HostShow } from "../lib/room";
 import type { Difficulty, GameState, Mix, Mode, Play, RosterEntry, Settings } from "../types";
@@ -27,6 +30,11 @@ interface Props {
   invite: string;
   clearInvite: () => void;
   showPastGames: () => void;
+  moveTicket: string;
+  clearMoveTicket: () => void;
+  onTicketPrefs: (prefs: Prefs | null) => void;
+  people: GroupPerson[];
+  me: Ticket | null;
   hostShow: HostShow | null;
   openRoom: () => void;
   resumeRoom: () => void;
@@ -47,6 +55,12 @@ export function Setup(p: Props){
   const canStart = room || list.length >= MIN_CAST[mode];
 
   const add = (name: string) => setList([...list, { id: newId(), name, members: [] }]);
+  // A person from the group (or this phone's own ticket) joins the roster with their ticket attached.
+  const addPerson = (person: GroupPerson) => setList([...list, { id: newId(), name: person.name, members: [], people: [person.id] }]);
+  const addMemberPerson = (id: string, person: GroupPerson) => setList(list.map(e => (e.id === id
+    ? { ...e, members: [...e.members, person.name], people: [...new Set([...(e.people ?? []), person.id])] } : e)));
+  const linked = new Set(list.flatMap(e => e.people ?? []));
+  const offered = (p.me && !p.people.some(x => x.id === p.me!.id) ? [{ id: p.me.id, name: p.me.name }, ...p.people] : p.people).filter(x => !linked.has(x.id));
   const rename = (id: string, name: string) => setList(list.map(e => (e.id === id ? { ...e, name } : e)));
   const remove = (id: string) => setList(list.filter(e => e.id !== id));
   const setMembers = (id: string, members: string[]) => setList(list.map(e => (e.id === id ? { ...e, members } : e)));
@@ -55,6 +69,7 @@ export function Setup(p: Props){
     <div className={sh.stage}>
       {p.error && <div className={s.error} role="alert">{p.error}</div>}
       {p.invite && <GroupPanel invite={p.invite} clearInvite={p.clearInvite} showPastGames={p.showPastGames} />}
+      {p.moveTicket && <TicketPanel moveTicket={p.moveTicket} clearMoveTicket={p.clearMoveTicket} onPrefs={p.onTicketPrefs} />}
       {p.savedGame && <ResumeCard game={p.savedGame} onResume={p.resumeGame} onDiscard={p.discardGame} />}
       {p.hostShow && <RoomResumeCard show={p.hostShow} onResume={p.resumeRoom} onDiscard={p.discardRoom} />}
       <div className={s.joinStrip}>
@@ -91,7 +106,7 @@ export function Setup(p: Props){
             {mode === "players" ? (
               <div className={s.chips}>
                 {list.map(e => (
-                  <NameChip key={e.id} name={e.name} canRemove={list.length > MIN_CAST.players}
+                  <NameChip key={e.id} name={e.name} canRemove={list.length > MIN_CAST.players} ticket={!!e.people?.length}
                     onRename={n => rename(e.id, n)} onRemove={() => remove(e.id)} />
                 ))}
                 {list.length < MAX_CAST && <AddChip label="Add" placeholder="Name" onAdd={add} />}
@@ -100,22 +115,37 @@ export function Setup(p: Props){
               <div className={s.teams}>
                 {list.map(e => (
                   <div key={e.id} className={s.team}>
-                    <NameChip name={e.name} canRemove={list.length > MIN_CAST.teams} strong
+                    <NameChip name={e.name} canRemove={list.length > MIN_CAST.teams} strong ticket={!!e.people?.length}
                       onRename={n => rename(e.id, n)} onRemove={() => remove(e.id)} />
                     <div className={s.members}>
                       {e.members.map((mName, i) => (
-                        <NameChip key={i} name={mName} small canRemove
+                        <NameChip key={i} name={mName} small canRemove ticket={!!e.people?.length && offeredName(p, e.people, mName)}
                           onRename={n => setMembers(e.id, e.members.map((x, j) => (j === i ? n : x)))}
-                          onRemove={() => setMembers(e.id, e.members.filter((_, j) => j !== i))} />
+                          onRemove={() => setList(list.map(x => (x.id === e.id ? dropMember(x, i, [...p.people, ...(p.me ? [{ id: p.me.id, name: p.me.name }] : [])]) : x)))} />
                       ))}
                       {e.members.length < MAX_MEMBERS && (
                         <AddChip small label="Member" placeholder="Name" onAdd={n => setMembers(e.id, [...e.members, n])} />
                       )}
+                      {e.members.length < MAX_MEMBERS && offered.map(person => (
+                        <button key={person.id} type="button" className={`${s.personChip} ${s.chipSmall}`} onClick={() => addMemberPerson(e.id, person)} aria-label={`Add ${person.name} with their ticket to ${e.name}`}>
+                          <TicketIcon size={12} strokeWidth={2.5} /> {person.name}
+                        </button>
+                      ))}
                     </div>
                   </div>
                 ))}
                 {list.length < MAX_CAST && <AddChip label="Add team" placeholder="Team name" onAdd={add} />}
                 <p className={s.hint}>Members are optional. Add them and the phone rotates through each team.</p>
+              </div>
+            )}
+            {mode === "players" && offered.length > 0 && list.length < MAX_CAST && (
+              <div className={s.fromGroup}>
+                <span className={s.fromGroupLabel}>With a ticket:</span>
+                {offered.map(person => (
+                  <button key={person.id} type="button" className={s.personChip} onClick={() => addPerson(person)} aria-label={`Add ${person.name} with their ticket`}>
+                    <TicketIcon size={13} strokeWidth={2.5} /> {person.name}
+                  </button>
+                ))}
               </div>
             )}
           </div>
@@ -171,6 +201,7 @@ export function Setup(p: Props){
       </div>
 
       {!p.invite && <GroupPanel invite="" clearInvite={p.clearInvite} showPastGames={p.showPastGames} />}
+      {!p.moveTicket && <TicketPanel moveTicket="" clearMoveTicket={p.clearMoveTicket} onPrefs={p.onTicketPrefs} />}
 
       <div className={sh.actions}>
         <div className={`${s.foot} ${sh.muted}`}>
@@ -219,8 +250,19 @@ function RoomResumeCard({ show, onResume, onDiscard }: { show: HostShow; onResum
   );
 }
 
-function NameChip({ name, canRemove, onRename, onRemove, small, strong }: {
-  name: string; canRemove: boolean; onRename: (n: string) => void; onRemove: () => void; small?: boolean; strong?: boolean;
+/* A team member added from a ticket chip takes the ticket along when removed. */
+function dropMember(team: RosterEntry, i: number, known: GroupPerson[]): RosterEntry {
+  const gone = team.members[i];
+  const others = team.members.filter((_, j) => j !== i);
+  const stillNamed = new Set(others.map(m => m.toLowerCase()));
+  const people = (team.people ?? []).filter(id => { const k = known.find(x => x.id === id); return !k || k.name.toLowerCase() !== gone.toLowerCase() || stillNamed.has(k.name.toLowerCase()); });
+  return { ...team, members: others, ...(people.length ? { people } : { people: undefined }) };
+}
+const offeredName = (p: Props, people: string[], name: string) =>
+  [...p.people, ...(p.me ? [{ id: p.me.id, name: p.me.name }] : [])].some(x => people.includes(x.id) && x.name.toLowerCase() === name.toLowerCase());
+
+function NameChip({ name, canRemove, onRename, onRemove, small, strong, ticket }: {
+  name: string; canRemove: boolean; onRename: (n: string) => void; onRemove: () => void; small?: boolean; strong?: boolean; ticket?: boolean;
 }){
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(name);
@@ -235,7 +277,9 @@ function NameChip({ name, canRemove, onRename, onRemove, small, strong }: {
   }
   return (
     <span className={cls}>
-      <button type="button" className={s.chipName} onClick={() => { setDraft(name); setEditing(true); }} aria-label={`Rename ${name}`}>{name}</button>
+      <button type="button" className={s.chipName} onClick={() => { setDraft(name); setEditing(true); }} aria-label={`Rename ${name}`}>
+        {ticket && <TicketIcon className={s.chipTicket} size={13} strokeWidth={2.5} aria-label="Has a ticket" />}{name}
+      </button>
       {canRemove && (
         <button type="button" className={s.chipX} aria-label={`Remove ${name}`} onClick={onRemove}>
           <X size={small ? 12 : 14} strokeWidth={3} />

@@ -3,6 +3,7 @@ import {
   BROKEN_INVITE, GROUP_NAME_MAX, GroupError, createGroup, deleteGroup, inviteLink, joinGroup, leaveGroup,
   localHistoryCount, parseInvite, previewInvite, useGroup,
 } from "../lib/group";
+import { linkCurrentGroup, unlinkGroup } from "../lib/me";
 import { Qr } from "./Qr";
 import s from "./GroupPanel.module.css";
 
@@ -47,10 +48,10 @@ export function GroupPanel({ invite, clearInvite, showPastGames }: Props){
   if (view === "join")
     return <JoinForm invite={invite} current={group?.name ?? ""} currentId={group?.id ?? ""} busy={busy} error={error}
       onCancel={() => { clearInvite(); go("summary"); }}
-      onJoin={(code, withHistory) => run(async () => { await joinGroup(code, withHistory); clearInvite(); }, "summary")} />;
+      onJoin={(code, withHistory) => run(async () => { await joinGroup(code, withHistory); clearInvite(); await linkCurrentGroup(); }, "summary")} />;
   if (view === "create")
     return <CreateForm busy={busy} error={error} onCancel={() => go("summary")}
-      onCreate={(name, withHistory) => run(() => createGroup(name, withHistory), "invite")} />;
+      onCreate={(name, withHistory) => run(async () => { await createGroup(name, withHistory); await linkCurrentGroup(); }, "invite")} />;
 
   if (!group) return (
     <section className={s.panel} aria-label="Group">
@@ -72,7 +73,7 @@ export function GroupPanel({ invite, clearInvite, showPastGames }: Props){
       {error && <p className={s.error} role="alert">{error}</p>}
       <div className={s.row}>
         <button type="button" className="btn btn-ghost" onClick={() => go("summary")}>Stay</button>
-        <button type="button" className="btn btn-primary" onClick={() => { leaveGroup(); go("summary"); }}>Leave</button>
+        <button type="button" className="btn btn-primary" onClick={() => { void unlinkGroup(group.id); leaveGroup(); go("summary"); }}>Leave</button>
       </div>
       {group.owner && <button type="button" className={`link ${s.linkBtn}`} onClick={() => go("delete")}>Delete the group for every phone</button>}
     </section>

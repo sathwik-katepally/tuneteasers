@@ -5,18 +5,20 @@
 import { useEffect, useRef, useState } from "react";
 import { usePartySocket } from "partysocket/react";
 import { WORKER_API } from "./constants.js";
-import { sanitizeTrack } from "./storage.js";
-import { randomId } from "./group";
-import type { Category, Difficulty, Mix, Track } from "../types";
+import { cooldownOf, heardCount, loadHistory, sanitizeTrack } from "./storage.js";
+import { songKey } from "./utils.js";
+import { GroupError, call, groupHistory, randomId } from "./group";
+import type { Category, Difficulty, History, Mix, PlayKind, Track } from "../types";
 
 export const ROOM_ORIGIN = String(WORKER_API).replace(/\/api$/, "");
 const CODE_RX = /^[BCDFGHJKLMNPQRSTVWXZ]{4}$/;
 const LS_SEAT = "tt_room_seat";
 const LS_HOST = "tt_room_host";
 const LS_NAME = "tt_room_name";
+const LS_ROOM_OUTBOX = "tt_room_outbox";
 
 export type SongState = "cue" | "live" | "answering" | "missed" | "revealed";
-export interface RoomPlayer { id: string; name: string; score: number; online: boolean }
+export interface RoomPlayer { id: string; name: string; score: number; online: boolean; ticket: boolean }
 export interface Guess { id: string; text: string; ok: boolean; timeout: boolean }
 export interface RoomAnswer { title: string; film: string; year: number; artist: string }
 export interface RoomSong {
@@ -118,6 +120,52 @@ export async function createRoom(): Promise<{ code: string; host: string }> {
     if (!r.ok || !j || !isCode(j.code) || typeof j.host !== "string") throw new Error(j?.message || `room ${r.status}`);
     return { code: j.code, host: j.host };
   } finally { clearTimeout(timer); }
+}
+
+/* The seated tickets' histories (docs/tickets.md), folded with this screen's
+   own and the group's into the crate's until-map; the host proves itself
+   with its host secret and the room says who is seated. Unreachable means
+   the show goes on without them. */
+export async function roomCooldown(code: string, host: string): Promise<{ until: Record<string, number>; heardBy: Record<string, number> }> {
+  const [group, seated] = await Promise.all([
+    groupHistory(),
+    call<{ people: Record<string, History> }>(`/rooms/${code}/history`, host, { body: {} }).then(r => Object.values(r.people || {}), () => [] as History[]),
+  ]);
+  return { until: cooldownOf(loadHistory(), group, ...seated), heardBy: heardCount(...seated) };
+}
+
+/* A song the room heard, recorded for every seated ticket; queued until the
+   Worker takes it, so a reload mid-show loses nothing. */
+interface RoomOutbox { code: string; rounds: { id: string; key: string; kind: PlayKind }[] }
+function readRoomOutbox(code: string): RoomOutbox {
+  const o = lsGet(LS_ROOM_OUTBOX) as RoomOutbox | null;
+  return o && o.code === code && Array.isArray(o.rounds) ? o : { code, rounds: [] };
+}
+export function recordRoomPlay(code: string, host: string, title: string, kind: PlayKind = "played"){
+  const key = songKey(title);
+  if (!key) return;
+  const o = readRoomOutbox(code);
+  o.rounds = [...o.rounds, { id: randomId(), key, kind }].slice(-200);
+  lsSet(LS_ROOM_OUTBOX, o);
+  void flushRoomPlays(code, host);
+}
+let roomFlushing: Promise<void> | null = null;
+export function flushRoomPlays(code: string, host: string){
+  if (!roomFlushing) roomFlushing = (async () => {
+    for (let o = readRoomOutbox(code); o.rounds.length; o = readRoomOutbox(code)){
+      const batch = o.rounds.slice(0, 50);
+      try {
+        await call(`/rooms/${code}/rounds`, host, { body: { rounds: batch } });
+      } catch (e){
+        // A refused batch is dropped; anything else waits for the next play.
+        if (!(e instanceof GroupError && e.status >= 400 && e.status !== 429)) return;
+      }
+      const ids = new Set(batch.map(r => r.id));
+      const now = readRoomOutbox(code);
+      lsSet(LS_ROOM_OUTBOX, { code, rounds: now.rounds.filter(r => !ids.has(r.id)) });
+    }
+  })().finally(() => { roomFlushing = null; });
+  return roomFlushing;
 }
 
 export type Link = "connecting" | "open" | "retrying" | "gone";

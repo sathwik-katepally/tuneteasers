@@ -7,8 +7,8 @@
 import { useSyncExternalStore } from "react";
 import { WORKER_API } from "./constants.js";
 import { songKey } from "./utils.js";
-import { loadPlayed } from "./storage.js";
-import type { GameState } from "../types";
+import { cooldownOf, loadHistory } from "./storage.js";
+import type { GameState, History, PlayKind } from "../types";
 
 export interface Group {
   id: string;
@@ -34,13 +34,17 @@ export interface GroupResult {
   cast: ResultCast[];
 }
 
-type Round = { id: string; key: string };
+/* people: ticket ids the play is also recorded for (docs/tickets.md). */
+type Round = { id: string; key: string; kind: PlayKind; people?: string[] };
 interface Outbox { groupId: string; rounds: Round[]; results: GroupResult[] }
 export type SyncState = "idle" | "syncing" | "offline" | "revoked";
-export interface GroupSnapshot { group: Group | null; pending: number; sync: SyncState }
+export interface GroupPerson { id: string; name: string }
+export interface GroupSnapshot { group: Group | null; pending: number; sync: SyncState; people: GroupPerson[] }
+export interface GroupHistory extends History { people: Record<string, History> }
 
 const LS_GROUP = "tt_group";
 const LS_OUTBOX = "tt_group_outbox";
+const LS_PEOPLE = "tt_group_people";
 const TIMEOUT_MS = 5000;
 const ROUND_BATCH = 50;
 const OUTBOX_MAX = 500;
@@ -50,6 +54,8 @@ export const GROUP_NAME_MAX = 32;
 
 const INVITE_RX = /([a-z2-7]{12}\.[A-Za-z0-9_-]{22})/;
 const ID_RX = /^[A-Za-z0-9_-]{8,40}$/;
+const PERSON_ID_RX = /^[a-z2-7]{12}$/;
+const KINDS: PlayKind[] = ["played", "tired"];
 
 const lsGet = (k: string): unknown => { try { return JSON.parse(localStorage.getItem(k) || "null"); } catch { return null; } };
 const lsSet = (k: string, v: unknown) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
@@ -91,15 +97,22 @@ function readOutbox(groupId: string): Outbox {
   if (!o || o.groupId !== groupId) return { groupId, rounds: [], results: [] };
   return {
     groupId,
-    rounds: Array.isArray(o.rounds) ? o.rounds.filter(r => r && isResultId(r.id) && typeof r.key === "string") : [],
+    rounds: Array.isArray(o.rounds) ? o.rounds.filter(r => r && isResultId(r.id) && typeof r.key === "string")
+      .map(r => ({ id: r.id, key: r.key, kind: KINDS.includes(r.kind) ? r.kind : "played", ...(Array.isArray(r.people) ? { people: r.people.filter(p => typeof p === "string" && PERSON_ID_RX.test(p)) } : {}) })) : [],
     results: Array.isArray(o.results) ? o.results.filter(r => r && isResultId(r.id)) : [],
   };
 }
 const pendingOf = (o: Outbox) => o.rounds.length + o.results.length;
 
+function readPeople(groupId: string): GroupPerson[] {
+  const p = lsGet(LS_PEOPLE) as { groupId?: string; people?: GroupPerson[] } | null;
+  if (!p || p.groupId !== groupId || !Array.isArray(p.people)) return [];
+  return p.people.filter(x => x && typeof x.id === "string" && PERSON_ID_RX.test(x.id) && typeof x.name === "string");
+}
+
 let snap: GroupSnapshot = (() => {
   const group = readGroup();
-  return { group, pending: group ? pendingOf(readOutbox(group.id)) : 0, sync: "idle" };
+  return { group, pending: group ? pendingOf(readOutbox(group.id)) : 0, sync: "idle", people: group ? readPeople(group.id) : [] };
 })();
 const listeners = new Set<() => void>();
 function emit(patch: Partial<GroupSnapshot>){
@@ -114,7 +127,7 @@ export class GroupError extends Error {
   constructor(public status: number, message: string){ super(message); }
 }
 
-async function call<T>(path: string, token: string | null, init: { method?: string; body?: unknown } = {}): Promise<T> {
+export async function call<T>(path: string, token: string | null, init: { method?: string; body?: unknown } = {}): Promise<T> {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS);
   let r: Response;
@@ -139,25 +152,25 @@ async function call<T>(path: string, token: string | null, init: { method?: stri
   return body as T;
 }
 
-function localHistory(): Record<string, number> {
+/* This phone's recent history, the shape the import routes take. */
+export function localHistory(): History {
   const since = Date.now() - IMPORT_WINDOW_MS;
-  const entries = Object.entries(loadPlayed() as Record<string, number>)
-    .filter(([k, v]) => k && v > since)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, IMPORT_MAX);
-  return Object.fromEntries(entries);
+  const h = loadHistory() as History;
+  const clamp = (m: Record<string, number>) => Object.fromEntries(Object.entries(m).filter(([k, v]) => k && v > since).sort((a, b) => b[1] - a[1]).slice(0, IMPORT_MAX));
+  return { played: clamp(h.played), tired: clamp(h.tired) };
 }
-export const localHistoryCount = () => Object.keys(localHistory()).length;
+export const localHistoryCount = () => { const h = localHistory(); return Object.keys(h.played).length + Object.keys(h.tired).length; };
 
 function adopt(group: Group){
   lsSet(LS_GROUP, group);
   lsDel(LS_OUTBOX);
-  emit({ group, pending: 0, sync: "idle" });
+  lsDel(LS_PEOPLE);
+  emit({ group, pending: 0, sync: "idle", people: [] });
 }
 
 async function importHistory(invite: string){
-  const played = localHistory();
-  if (Object.keys(played).length) await call("/group/import", invite, { body: { played } });
+  const h = localHistory();
+  if (Object.keys(h.played).length + Object.keys(h.tired).length) await call("/group/import", invite, { body: h });
 }
 
 export async function createGroup(name: string, withHistory: boolean){
@@ -181,7 +194,24 @@ export async function joinGroup(invite: string, withHistory: boolean){
 export function leaveGroup(){
   lsDel(LS_GROUP);
   lsDel(LS_OUTBOX);
-  emit({ group: null, pending: 0, sync: "idle" });
+  lsDel(LS_PEOPLE);
+  emit({ group: null, pending: 0, sync: "idle", people: [] });
+}
+
+/* The tickets that joined the group, for the roster chips. Kept in
+   localStorage so the chips still show with the Worker unreachable. */
+export async function fetchGroupPeople(): Promise<GroupPerson[]> {
+  const g = snap.group;
+  if (!g) return [];
+  try {
+    const r = await call<{ people: GroupPerson[] }>("/group/people", g.invite);
+    const people = (r.people || []).filter(p => p && PERSON_ID_RX.test(p.id) && typeof p.name === "string");
+    if (snap.group?.id === g.id){ lsSet(LS_PEOPLE, { groupId: g.id, people }); emit({ people }); }
+    return people;
+  } catch (e){
+    if (snap.group?.id === g.id && e instanceof GroupError && (e.status === 401 || e.status === 403)) emit({ sync: "revoked" });
+    return snap.people;
+  }
 }
 
 export async function deleteGroup(){
@@ -203,9 +233,12 @@ function enqueue(add: (o: Outbox) => void){
   void flush();
 }
 
-export function recordPlay(title: string){
+/* Records a play for the group, and for the tickets in `people` (members of
+   the group; the Worker ignores any other id). */
+export function recordPlay(title: string, kind: PlayKind = "played", people: string[] = []){
   const key = songKey(title);
-  if (key) enqueue(o => { o.rounds.push({ id: randomId(), key }); });
+  const ids = people.filter(p => PERSON_ID_RX.test(p));
+  if (key) enqueue(o => { o.rounds.push({ id: randomId(), key, kind, ...(ids.length ? { people: ids } : {}) }); });
 }
 
 export function recordResult(g: GameState){
@@ -280,21 +313,27 @@ async function send(request: () => Promise<unknown>, done: () => void){
   }
 }
 
-/* The group's cooldown map, merged with this phone's own (latest wins).
-   Returns null with no group or when the group can't be reached in time,
-   and the crate then falls back to this phone's history alone. */
-export async function groupPlayed(): Promise<Record<string, number> | null> {
+/* The group's history, plus the histories of the group members in `people`
+   (docs/tickets.md). Returns null with no group or when the group can't be
+   reached in time, and the crate then falls back to what this phone knows. */
+export async function groupHistory(people: string[] = []): Promise<GroupHistory | null> {
   const g = snap.group;
   if (!g) return null;
   // Only this call's flush says the Worker is down; an "offline" left by an
   // earlier failure must not stop this read, or the group is never asked again.
   if ((await flush()) === "failed" || snap.sync === "revoked") return null;
   try {
-    const r = await call<{ played: Record<string, number> }>("/group/played", g.invite);
-    const merged = { ...(loadPlayed() as Record<string, number>) };
-    for (const [k, v] of Object.entries(r.played || {})) if (Number.isFinite(v)) merged[k] = Math.max(merged[k] || 0, v);
+    const ids = people.filter(p => PERSON_ID_RX.test(p));
+    const q = ids.length ? `?people=${ids.join(",")}` : "";
+    const r = await call<Partial<GroupHistory>>(`/group/played${q}`, g.invite);
+    const map = (m: unknown) => Object.fromEntries(Object.entries((m && typeof m === "object" ? m : {}) as Record<string, unknown>).filter(([, v]) => Number.isFinite(v))) as Record<string, number>;
+    const out: GroupHistory = { played: map(r.played), tired: map(r.tired), people: {} };
+    for (const id of ids){
+      const h = r.people?.[id];
+      if (h) out.people[id] = { played: map(h.played), tired: map(h.tired) };
+    }
     if (snap.group?.id === g.id && snap.sync !== "syncing") emit({ sync: "idle" });
-    return merged;
+    return out;
   } catch (e){
     if (snap.group?.id === g.id){
       const status = e instanceof GroupError ? e.status : 0;
@@ -302,6 +341,13 @@ export async function groupPlayed(): Promise<Record<string, number> | null> {
     }
     return null;
   }
+}
+
+/* The group's cooldown merged with this phone's own, the map buildCrate
+   takes; null when the group is missing or unreachable. */
+export async function groupCooldown(): Promise<Record<string, number> | null> {
+  const h = await groupHistory();
+  return h ? cooldownOf(loadHistory(), h) : null;
 }
 
 export async function fetchResults(before?: number){

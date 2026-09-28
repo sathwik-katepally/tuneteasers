@@ -185,3 +185,10 @@
     height: 104px;
   }
 }
+
+.chipTicket {
+  flex: none;
+  margin-right: 5px;
+  color: var(--vermilion);
+  vertical-align: -2px;
+}

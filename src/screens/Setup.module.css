@@ -234,3 +234,34 @@
   padding: 0 12px;
   font-size: 14px;
 }
+
+.chipTicket {
+  flex: none;
+  margin-right: 5px;
+  color: var(--vermilion);
+  vertical-align: -2px;
+}
+
+.fromGroup {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.fromGroupLabel {
+  font-size: 13px;
+  color: #6b4a3a;
+}
+
+.personChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 30px;
+  padding: 3px 10px 3px 8px;
+  font-weight: 700;
+  font-size: 13px;
+  border: 2px dashed var(--vermilion);
+  color: var(--vermilion-deep);
+}
