@@ -20,7 +20,8 @@
     "e2e:group": "node e2e/group-sync.mjs",
     "e2e:group-edge": "node e2e/group-edge.mjs",
     "e2e:room": "node e2e/room.mjs",
-    "e2e:landing": "node e2e/landing.mjs"
+    "e2e:landing": "node e2e/landing.mjs",
+    "e2e:journeys": "node e2e/journeys.mjs"
   },
   "dependencies": {
     "@fontsource/mukta": "^5.3.0",

@@ -219,7 +219,7 @@
 @media (min-width: 900px) {
   .lobby {
     display: grid;
-    grid-template-columns: 1.25fr 1fr;
+    grid-template-columns: 1.25fr minmax(300px, 1fr);
     align-items: stretch;
     gap: 28px;
     padding: 28px;
@@ -239,18 +239,28 @@
   .letters {
     gap: 14px;
   }
+  /* Sized from the screen, so a laptop and a TV both keep the whole lobby in view. */
   .letter {
-    width: 104px;
-    height: 124px;
-    font-size: 92px;
+    --tile: min(104px, 7.4vw, 13vh);
+    width: var(--tile);
+    height: calc(var(--tile) * 1.2);
+    font-size: calc(var(--tile) * 0.88);
   }
   .join {
-    flex: 1;
     gap: 24px;
   }
+  .house {
+    flex: 1;
+  }
+  .houseTitle {
+    font-size: 34px;
+  }
+  .chip {
+    font-size: 19px;
+  }
   .qr {
-    width: 260px;
-    height: 260px;
+    width: min(260px, 19vw, 32vh);
+    height: min(260px, 19vw, 32vh);
   }
   .how {
     font-size: 19px;
@@ -262,7 +272,7 @@
   }
 }
 
-@media (max-height: 760px) {
+@media (max-height: 760px) and (max-width: 899px) {
   .board {
     padding: 20px 16px 16px;
     gap: 8px;
