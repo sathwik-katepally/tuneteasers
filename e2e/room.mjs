@@ -231,26 +231,30 @@ async function guards(code, hostToken, total){
   // a close the server starts, so it would never report the 4401.
   const probe = await host.context.newPage();
   await probe.goto(url + "seed.html");
+  // Sockets open one after another; a refused one still opens (the refusal is
+  // a close right after the upgrade), so each is classified only once the
+  // network has had time to deliver that close.
   const silent = await probe.evaluate(async ({ url, max }) => {
     const socks = [];
-    const open = () => new Promise(res => {
-      const ws = new WebSocket(url);
-      const s = { ws, code: 0, open: false };
-      s.closed = new Promise(r => ws.addEventListener("close", e => { s.code = e.code; r(e.code); }));
-      ws.addEventListener("open", () => { s.open = true; res(s); });
-      ws.addEventListener("error", () => res(s));
-    });
-    let refused = 0;
     for (let i = 0; i < max; i++){
-      const s = await open();
-      await Promise.race([s.closed, new Promise(r => setTimeout(r, 150))]);
-      if (s.code === 4429){ refused++; break; }
-      if (!s.open || s.code) return { error: `socket ${i} failed (${s.code})` };
+      const s = await new Promise(res => {
+        const ws = new WebSocket(url);
+        const s = { ws, code: 0, open: false, at: 0 };
+        s.closed = new Promise(r => ws.addEventListener("close", e => { s.code = e.code; s.at = Date.now(); r(e.code); }));
+        ws.addEventListener("open", () => { s.open = true; res(s); });
+        ws.addEventListener("error", () => res(s));
+      });
+      if (!s.open) return { error: `socket ${i} failed to open` };
       socks.push(s);
     }
-    const t0 = Date.now();
-    const codes = await Promise.all(socks.map(s => Promise.race([s.closed, new Promise(r => setTimeout(() => r(0), 16000))])));
-    return { admitted: socks.length, refused, codes: [...new Set(codes)], secs: (Date.now() - t0) / 1000 };
+    await new Promise(r => setTimeout(r, 3000));
+    // Over a real network the first admitted sockets may already have hit
+    // the 10 s hello timeout by now; they count as admitted.
+    const refused = socks.filter(s => s.code === 4429);
+    const admitted = socks.filter(s => !s.code || s.code === 4401);
+    if (refused.length + admitted.length !== socks.length) return { error: `unexpected closes: ${[...new Set(socks.map(s => s.code))]}` };
+    const codes = await Promise.all(admitted.map(s => Promise.race([s.closed, new Promise(r => setTimeout(() => r(0), 16000))])));
+    return { admitted: admitted.length, refused: refused.length, codes: [...new Set(codes)] };
   }, { url: wsBase + code, max: 60 });
   await probe.close();
   if (silent.error) fail(silent.error);

@@ -273,7 +273,7 @@ function Buzzer({ view, send, online, error }: {
 /* The phone loads the public title list itself: the room never sends one,
    so nothing a phone receives hints at the show's songs. */
 function useAnswerTitles(mix: RoomView["mix"]){
-  const [list, setList] = useState<{ title: string; f: string }[]>([]);
+  const [list, setList] = useState<{ title: string; forms: string[] }[]>([]);
   useEffect(() => {
     let live = true;
     (answerTitles as (m: string) => Promise<string[]>)(mix).then(t => { if (live) setList(prepareTitles(t)); }, () => {});

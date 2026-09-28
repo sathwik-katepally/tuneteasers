@@ -63,21 +63,29 @@ export function nearTitles(title, titles, max = 60){
   return out;
 }
 
-/* Autocomplete over a large public list: fold every title once up front. */
-export const prepareTitles = titles => titles.map(title => ({ title, f: fold(title) }));
+/* Autocomplete over a large public list: normalise every title once up front,
+   both plainly and folded. Folding alone would lose a half-typed word ("ha"
+   no longer starts "hain" once that folds to "hen"); the plain form alone
+   would miss a spelling variant. */
+const plain = s => songKey(displayTitle(String(s || "")).normalize("NFKD").replace(/\p{M}/gu, ""));
+export const prepareTitles = titles => titles.map(title => ({ title, forms: [plain(title), fold(title)] }));
 
-/* Titles whose words start with what was typed, best first. */
+function rankIn(form, q){
+  if (form.startsWith(q)) return 0;
+  const words = q.split(" "), fw = form.split(" ");
+  if (words.every(w => fw.some(x => x.startsWith(w)))) return 1;
+  return form.replace(/ /g, "").includes(q.replace(/ /g, "")) ? 2 : 3;
+}
+
+/* Titles matching what was typed, best first: whole-title prefix, then every
+   word a prefix of some word, then a run of letters anywhere. */
 export function suggest(query, prepared, limit = 6){
-  const q = fold(query);
-  if (!q) return [];
-  const words = q.split(" ");
-  const flat = q.replace(/ /g, "");
+  const qs = [plain(query), fold(query)];
+  if (!qs[0] && !qs[1]) return [];
   const scored = [];
-  for (const { title, f } of prepared){
-    const fw = f.split(" ");
-    const hit = words.every(w => fw.some(x => x.startsWith(w)));
-    if (!hit && !f.replace(/ /g, "").includes(flat)) continue;
-    scored.push({ title, rank: f.startsWith(q) ? 0 : hit ? 1 : 2, len: f.length });
+  for (const { title, forms } of prepared){
+    const rank = Math.min(rankIn(forms[0], qs[0] || qs[1]), rankIn(forms[1], qs[1] || qs[0]));
+    if (rank < 3) scored.push({ title, rank, len: forms[0].length });
   }
   return scored.sort((a, b) => a.rank - b.rank || a.len - b.len).slice(0, limit).map(x => x.title);
 }
