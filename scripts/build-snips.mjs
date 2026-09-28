@@ -501,12 +501,12 @@ function startExtractor(){
   for (const [pass, list] of [["", todo], ["retry ", null]]){
     const songs = list || failures.splice(0, failures.length);
     if (!list && songs.length) console.log(`\nretrying ${songs.length} failed songs once...`);
-    for (const s of songs){
-      if (Date.now() - t0 > BUDGET_MS){ console.log(`time budget spent; ${songs.length - songs.indexOf(s)} songs left for the next run`); break; }
+    for (const [i, s] of songs.entries()){
+      if (Date.now() - t0 > BUDGET_MS){ console.log(`time budget spent; ${songs.length - i} songs left for the next run`); break; }
       const line = await score(s);
-      done++;
+      if (list) done++;
       if (line.startsWith("FAIL")) failures.push(s);
-      console.log(`${pass}${String(done).padStart(3)}/${todo.length} ${line}`);
+      console.log(`${pass}${String(i + 1).padStart(3)}/${songs.length} ${line}`);
       if (++sinceWrite >= PROGRESS_EVERY){ sinceWrite = 0; progress(); }
     }
   }
