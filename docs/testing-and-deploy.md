@@ -9,6 +9,9 @@ Two profiles: `phone` is WebKit with the iPhone 13 device (390px), `desktop` is 
 Test browsers are silent: Chromium runs with `--mute-audio` (`MUTE_ARGS`) and every `open()` context gets `silence()`, which zeroes element volume and puts a zero-gain node in front of each live AudioContext's destination; media time, paused/muted state and the engine's gain gate read exactly as unmuted, so the checks are unaffected.
 Any new script that launches a browser should use both.
 The landing page shows only on a first visit, so `open()` also adds `skipLanding()` (sets `tt_landing_seen` on every page load) unless called with `{ landing: true }`; scripts that make their own contexts add it themselves.
+Only one suite runs at a time per machine: importing `e2e/harness.mjs` takes a lock at `/tmp/tuneteasers-e2e.lock` (shared by every worktree and agent session, which is why it is not under the per-session `TMPDIR`), and a second suite prints who holds it and waits.
+A suite that is killed stops refreshing the lock, and the next one takes it over within a minute.
+CI runners (`CI` set) skip the lock.
 
 - `e2e/game.mjs` - plays a whole show through the UI: setup, hand-over, countdown, clip ladder (one "Hear 7s more"), hint, Home and Resume mid-turn, the game menu, both one-tap scoring choices, box office after each round, podium.
   The first contestant spends their "Heard it too much" skip (the title shows on the countdown, the same contestant gets a song from the same tier, the song is in `tt_tired` and not `tt_played`, the stub then reads Used), and a dead stream seeded into the saved queue checks that the stream-error skip is free and records nothing.
@@ -23,7 +26,7 @@ The landing page shows only on a first visit, so `open()` also adds `skipLanding
   The expected spans come from the difficulty's ladder in `src/lib/config.ts`: Easy's rungs must cover 0-5s, 5-12s and 12-20s of the window and Replay 0-20s, Music-only's 0-5s and 5-12s and Replay 0-12s (within 0.15s: Easy's stop rides a JS timer a busy machine can delay), the seams must not repeat or skip more than 80ms, no rung past the ladder may be offered, Music-only must stay inside its verified interval, and the first clip must not sound before the listening screen is fully faded in, with "Now playing" and the clip bar starting within 150ms of the sound.
   It prints the measured spans and the hand-off timeline.
   Flags: `--profile=phone|desktop --difficulty=easy|medium|hard --mix=bolly|telugu|both --log`; run it for both profiles with Easy and Medium.
-- `e2e/safe-snips.mjs` - WebKit phone and Chromium desktop play Easy and Music-only through the final rung of each one's ladder and replay, resume saves written by the MusiCNN 12-second and the 20- and 10-second releases (the game must rebind to the current index's windows and keep its score), then replace the local index with missing, mismatched-ID, old-schema (v1, v2, v3), crossed (an accepted version whose entries carry the other version's method), unknown-version, wrong-length (10s, 20s) and stale variants to confirm the visible shortage state.
+- `e2e/safe-snips.mjs` (`--profile=phone|desktop`, default both) - WebKit phone and Chromium desktop play Easy and Music-only through the final rung of each one's ladder and replay, resume saves written by the MusiCNN 12-second and the 20- and 10-second releases (the game must rebind to the current index's windows and keep its score), then replace the local index with missing, mismatched-ID, old-schema (v1, v2, v3), crossed (an accepted version whose entries carry the other version's method), unknown-version, wrong-length (10s, 20s) and stale variants to confirm the visible shortage state.
   It checks whatever index the build serves (`dist/snips.json`); to check the v5 switch, copy a v5 index over `dist/snips.json` after building (the 262-song fixture from the switch, say) and run it again, along with `e2e/ladder.mjs`.
   It first checks that `public/snips.json` itself is a current-schema index of `SNIP_WINDOW_SEC` windows.
 - `e2e/group-sync.mjs` (`npm run e2e:group`) - desktop Chromium finds no group card on the home screen and makes a group from the menu's "Phone group" (importing its own played and tired history, each as its kind) and phone WebKit joins through the `#join` link; a song played on one, or skipped as heard too much (kept by the group as `tired`), is left out of the other's next crate, the desktop's finished show appears in the phone's Past shows, the phone keeps playing with the Worker unreachable and sends its queued plays when it is back, and the owner's delete makes the invite answer 403.
@@ -41,6 +44,22 @@ A release run is the matrix of `game.mjs` over both profiles, both modes, all th
 Playback modes asserted are `snip | plain` (`window.__ttLastMode`); Easy must report `plain`, while Medium and Hard must report `snip` or show a safe-clip shortage.
 Gotchas: screens cross-fade out through `AnimatePresence`, so after a click wait for the old button to detach before looking for the next screen; seed localStorage from a non-app page on the same origin (`/seed.html` 404s, which is fine) so the app's own first save cannot race the seeding.
 
+### E2E in CI
+
+`.github/workflows/e2e.yml` runs the key suites on every pull request, one job per suite in parallel (about 3-5 minutes wall clock): a pass-the-phone game on each profile, safe-snips and the ladder on each profile, the buzz room against a local `wrangler dev`, and the landing and journeys suites.
+`.github/workflows/e2e-release.yml` runs the rest of the release matrix above on pushes to main, nightly (02:30 UTC) and on demand, and alerts through ntfy when it fails; category games play Easy there, since in Music-only the item and mass chips are too thin to pick.
+The shared steps (deps, build, Playwright browsers cached per version) are in `.github/actions/e2e-setup`.
+The suites play real songs from the corpus through the deployed Worker and the Saavn CDN; the song draw is random, so recorded responses would rarely match a run and are not used.
+
+Which runner a suite gets is decided by where its browser plays these AAC/MP4 streams in real time, measured on the runners in September 2026:
+- Linux WebKit (GStreamer) cannot resume after a seek once a stream has played: `readyState` stays at 2 while `currentTime` runs on in silence, with local or CDN files, PulseAudio, either AAC decoder and playbin3 alike.
+  Every Music-only clip and ladder rung seeks, so phone suites that play songs run on `macos-latest`, where WebKit uses AVFoundation like an iPhone.
+- Chromium on the macOS runners plays media at about half speed (the same with `--disable-audio-output` or Google Chrome), so a 20-second Easy replay outlasts the suites' waits.
+  Desktop suites run on `ubuntu-latest`, where Playwright's own Chromium decodes AAC and plays in real time, so no Chrome channel is needed.
+- The buzz room runs on Linux: only its desktop host plays audio, and the WebKit phones there only render and send frames.
+- Two checks stay off CI because the 3-core macOS runners are too loaded for them: the phone Easy ladder (its 150ms "Now playing" hand-off check missed by 170-290ms in 2 of 5 runs) and the buzz room with a phone host (4 WebKit pages; a phone's "You're in" timed out in 2 of 3 runs). Run them locally.
+- A fresh macOS runner indexes its disk for Spotlight for the first minutes (load averages above 20 on 3 cores), which starves the timers the hand-off checks measure; the setup action turns indexing off.
+
 The older ad-hoc scripts in `/tmp/tt-e2e` (and the obsolete on-device pipeline suites `dsp.js`, `pick.js`, `vadtest.js`, `ml*.js`) drove the pre-cinema UI and no longer apply.
 
 ## Deploy (GitHub Pages via Actions)
@@ -49,6 +68,7 @@ The older ad-hoc scripts in `/tmp/tt-e2e` (and the obsolete on-device pipeline s
 The Worker goes first so the site never ships ahead of the API it calls; migrations must stay additive so the live site keeps working against the new schema.
 The `worker` job uses the repo secrets `CLOUDFLARE_API_TOKEN` (Workers and D1 edit) and `CLOUDFLARE_ACCOUNT_ID`, set from Automic Vault (`av inject +CLOUDFLARE_API_TOKEN -- sh -c 'printf %s "$CLOUDFLARE_API_TOKEN" | gh secret set CLOUDFLARE_API_TOKEN'`).
 `.github/workflows/verify.yml` runs the same typecheck and build on pull requests, plus a Worker `wrangler deploy --dry-run` and the migrations against a throwaway local D1.
+`.github/workflows/e2e.yml` runs the browser suites (see E2E in CI above).
 `vite.config.js` sets `base: "./"` so the build works under the `/tuneteasers/` project path.
 After pushing, verify the workflow succeeded (`gh run watch` or `gh run list`) and smoke-test the live URL.
 

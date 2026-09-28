@@ -1,0 +1,45 @@
+name: E2E setup
+description: Node deps, a production build, the Playwright browsers the job needs, and optionally the Worker's deps for wrangler dev.
+inputs:
+  browsers:
+    description: Playwright browsers to install (space separated).
+    default: webkit chromium
+  worker:
+    description: Also install worker/ dependencies (suites that start wrangler dev).
+    default: "false"
+runs:
+  using: composite
+  steps:
+    # A fresh macOS runner spends its first minutes indexing the disk for
+    # Spotlight (load average above 20 on 3 cores), which starves the
+    # browsers' timers that the hand-off and clip-edge checks measure.
+    - if: runner.os == 'macOS'
+      run: sudo mdutil -a -i off >/dev/null; uptime
+      shell: bash
+    - uses: actions/setup-node@v7
+      with:
+        node-version: 22
+        cache: npm
+        cache-dependency-path: |
+          package-lock.json
+          worker/package-lock.json
+    - run: npm ci
+      shell: bash
+    - if: inputs.worker == 'true'
+      run: npm ci
+      working-directory: worker
+      shell: bash
+    - run: npm run build
+      shell: bash
+    - id: pw
+      run: |
+        echo "version=$(node -p 'require("playwright/package.json").version')" >> "$GITHUB_OUTPUT"
+        echo "dir=${{ runner.os == 'macOS' && '~/Library/Caches/ms-playwright' || '~/.cache/ms-playwright' }}" >> "$GITHUB_OUTPUT"
+      shell: bash
+    - uses: actions/cache@v6
+      with:
+        path: ${{ steps.pw.outputs.dir }}
+        key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.pw.outputs.version }}-${{ inputs.browsers }}
+    # --with-deps adds the Linux system libraries; macOS needs none.
+    - run: npx playwright install ${{ runner.os == 'Linux' && '--with-deps' || '' }} ${{ inputs.browsers }}
+      shell: bash

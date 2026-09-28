@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import { serve, open, saved, moreSettings } from "./harness.mjs";
+import { serve, open, args, saved, moreSettings } from "./harness.mjs";
 import { ladderFor } from "../src/lib/config.ts";
 import { SNIP_ACCEPTED, SNIP_INDEX_V, SNIP_LEGACY, SNIP_WINDOW_SEC } from "../src/lib/constants.js";
 
@@ -139,7 +139,8 @@ async function run(profile){
 }
 
 let exit = 0;
-try { for (const profile of ["phone", "desktop"]) await run(profile); }
+const A = args({ profile: "phone,desktop" });
+try { for (const profile of A.profile.split(",")) await run(profile); }
 catch(e){ exit = 1; console.error("FAIL", e); }
 finally { server.close(); }
 process.exit(exit);

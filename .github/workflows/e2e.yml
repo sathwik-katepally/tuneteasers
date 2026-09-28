@@ -1,0 +1,100 @@
+name: E2E
+
+# The key Playwright suites in e2e/ against a production build, one job per
+# suite so they run side by side. e2e-release.yml adds the rest of the release
+# matrix on main and nightly. docs/testing-and-deploy.md, "E2E in CI", has the
+# measurements behind the runner split.
+#
+# Phone WebKit that plays songs runs on macOS: Linux WebKit's GStreamer
+# backend stops delivering audio after any seek once a stream has played.
+# Desktop Chromium runs on Linux: on the macOS runners its media clock runs at
+# about half speed, so a clip outlasts every wait. The buzz room runs on Linux
+# too, since only its desktop host plays audio.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "30 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  key:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: game phone
+            os: macos-latest
+            browsers: webkit
+            run: npm run e2e:game -- --profile=phone
+          - name: game desktop
+            os: ubuntu-latest
+            browsers: chromium
+            run: npm run e2e:game -- --profile=desktop --mode=teams --difficulty=easy
+          - name: safe snips phone
+            os: macos-latest
+            browsers: webkit
+            run: npm run e2e:snips -- --profile=phone
+          - name: safe snips desktop
+            os: ubuntu-latest
+            browsers: chromium
+            run: npm run e2e:snips -- --profile=desktop
+          - name: ladder phone
+            os: macos-latest
+            browsers: webkit
+            # Phone Easy is left out: its 150ms "Now playing" hand-off check
+            # misses by 170-290ms on the loaded macOS runners (2 runs in 5).
+            run: npm run e2e:ladder -- --profile=phone --difficulty=medium
+          - name: ladder desktop
+            os: ubuntu-latest
+            browsers: chromium
+            run: >-
+              npm run e2e:ladder -- --profile=desktop --difficulty=easy &&
+              npm run e2e:ladder -- --profile=desktop --difficulty=medium
+          - name: buzz room
+            os: ubuntu-latest
+            browsers: webkit chromium
+            worker: true
+            run: npm run e2e:room
+          - name: landing and journeys
+            os: macos-latest
+            run: >-
+              npm run e2e:landing -- --profile=phone &&
+              npm run e2e:landing -- --profile=desktop &&
+              npm run e2e:journeys
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/e2e-setup
+        with:
+          browsers: ${{ matrix.browsers || 'webkit chromium' }}
+          worker: ${{ matrix.worker || false }}
+      - run: uptime
+      - run: ${{ matrix.run }}
+
+  # Phone alert when main or the nightly run breaks (ntfy, topic in the
+  # NTFY_TOPIC repo secret). Pull requests show their own red check.
+  alert:
+    needs: [key]
+    if: failure() && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: >-
+          curl -s --max-time 20
+          -H "Title: ${{ github.repository }}/${{ github.workflow }} failed"
+          -H "Priority: high" -H "Tags: x"
+          -d "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          "https://ntfy.sh/$NTFY_TOPIC"
