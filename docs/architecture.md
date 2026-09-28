@@ -20,7 +20,7 @@
 - `src/lib/ladder.ts` - `playRung`, which plays a clip ladder rung through the engine.
 - `src/styles/tokens.css`, `src/styles/global.css` - design tokens (colors, fonts, hard shadows) and the few global classes (`.btn*`, `.display`, `.eyebrow`, `.grain`, `.link`, the debug overlay).
 - `src/components/` - the cinema pieces, each with a CSS Module: `Theatre` (marquee, curtains, seat backs, game menu), `Bulbs` (bulb rows and frames), `Ticket`, `Curtain`, `Stamp`, `SplitFlap`, `Seg` (segmented radio), `CategoryPicker` (the setup screen's song-category stubs), `Equalizer`, `Reel`, `GroupPanel` (the home-screen group card), `Qr`, `Stage` (the theatre plus the screen cross-fade, used by every state owner), and `DebugLog`.
-- `src/screens/` - one component and CSS Module per screen: `Setup`, `Loading`, `Handover`, `Countdown`, `Playing`, `Reveal`, `Scoreboard`, `Podium`, `PastGames`.
+- `src/screens/` - one component and CSS Module per screen: `Landing`, `Setup`, `Loading`, `Handover`, `Countdown`, `Playing`, `Reveal`, `Scoreboard`, `Podium`, `PastGames`.
 - `tsconfig.json` - strict UI type checking; `src/lib/*.js` stays JavaScript with `allowJs` and `checkJs` off.
 
 ## Look and motion
@@ -44,7 +44,8 @@ A `max-height: 760px` pass tightens spacing so every in-game screen fits a short
 Every `state` change is saved to localStorage (`tuneteasers_v7`) by an effect; `loadSaved` restores and sanitizes it on boot.
 A save from the pre-points version (`tuneteasers_v6`) is migrated once: players keep their names, scores are multiplied by `LEGACY_SCORE_SCALE`, "With vocals" becomes Easy and "Music only" Medium, and the old key is removed on the next save.
 Unreadable or finished saved games are discarded instead of offered for resume.
-A page load always lands on the home screen; an unfinished game shows a Resume/Discard card there.
+A page load lands on the home screen; an unfinished game shows a Resume/Discard card there.
+The one exception is a first visit, which opens the landing page instead (see Screens and phases).
 The marquee menu offers "Home, keep the game" (resumable) and "End game" (in-app two-step confirm, clears the game).
 
 Ephemeral per-turn state (`phase`, `turn`, the revealed track and `verdict`) is separate `useState` and intentionally not saved.
@@ -52,8 +53,14 @@ Judging a turn updates the saved game in one step (score, history, next turn and
 
 ## Screens and phases
 
-`screen` is one of `setup | game | done | past | host | buzzer`; `done` is the podium, `past` the group's Past shows list, and `host` / `buzzer` hand the whole page to `src/room/Host.tsx` or `src/room/Phone.tsx`.
+`screen` is one of `landing | setup | game | done | past | host | buzzer`; `landing` is the poster that explains the game, `done` is the podium, `past` the group's Past shows list, and `host` / `buzzer` hand the whole page to `src/room/Host.tsx` or `src/room/Phone.tsx`.
 `settings.play` (`pass | room`) picks the mode on the home screen; a `#room=` link opens `buzzer` directly.
+
+The landing page shows on a first visit only: `isFirstVisit` in `src/lib/save.ts` is true when there is no save (v7 or v6) and `tt_landing_seen` is unset, and the landing sets that flag when it shows.
+Returning visitors and anyone with a saved game land on setup, whose marquee has an About button back to the landing.
+`#room=` and `#join=` links skip it.
+A phone's "Back to the start" in `buzzer` returns to where it came from: the landing if it joined from there (or arrived by a room link on a first visit), otherwise setup.
+The landing's clip ladder is Easy's, read from `src/lib/config.ts`.
 Within `game`, `phase` runs `handover → countdown → cueing → playing ⇄ listened → reveal → (handover | board)`, with `blocked` when the browser refuses to start audio without a tap.
 The screen wrapper is keyed per screen inside `AnimatePresence`, so every screen remounts and cross-fades.
 Never change the key twice within one cross-fade (220 ms): `AnimatePresence mode="wait"` then stays on the old screen. The room host keys its countdown and song screens alike for this reason, since a buzz can land that fast.

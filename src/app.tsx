@@ -39,6 +39,8 @@ export function App(){
     ...(roomCode ? { screen: "buzzer" as const } : firstVisit && !location.hash.startsWith("#join=") ? { screen: "landing" as const } : {}) }));
   // Where a phone's "Back to the start" goes: wherever it came from.
   const [buzzerExit, setBuzzerExit] = useState<"landing" | "setup">(firstVisit ? "landing" : "setup");
+  const screenNow = useRef(state.screen);
+  screenNow.current = state.screen;
   const [hostResume, setHostResume] = useState(false);
   const [hostShow, setHostShow] = useState(loadHostShow);
   const [phase, setPhase] = useState<Phase>("handover");
@@ -58,7 +60,12 @@ export function App(){
   useEffect(() => {
     const onHash = () => {
       const code = roomFromUrl();
-      if (code){ setRoomCode(code); setState(st => (["landing", "setup", "past"].includes(st.screen) ? { ...st, screen: "buzzer" } : st)); return; }
+      if (code){
+        setRoomCode(code);
+        const from = screenNow.current;
+        if (from === "landing" || from === "setup" || from === "past"){ setBuzzerExit(from === "landing" ? "landing" : "setup"); setState(st => ({ ...st, screen: "buzzer" })); }
+        return;
+      }
       const i = takeInviteFromUrl(); if (i){ setInvite(i); setState(st => ({ ...st, screen: st.screen === "past" || st.screen === "landing" ? "setup" : st.screen })); }
     };
     window.addEventListener("hashchange", onHash);

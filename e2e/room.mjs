@@ -15,7 +15,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { chromium, webkit, devices } from "playwright";
-import { serve, args, localWorker, silence, MUTE_ARGS } from "./harness.mjs";
+import { serve, args, localWorker, silence, skipLanding, MUTE_ARGS } from "./harness.mjs";
 import { displayTitle } from "../src/lib/utils.js";
 import { CATEGORIES, CLIP_POINTS, ROOM_ANSWER_SECS } from "../src/lib/config.ts";
 import { songKey } from "../src/lib/utils.js";
@@ -80,6 +80,7 @@ async function device(kind, label){
     : { ...devices["iPhone 13"], reducedMotion: "reduce" });
   await wire(context, label);
   await context.addInitScript(silence);
+  await context.addInitScript(skipLanding);
   // Counts what actually reached the page, to tell a lost frame from an app bug.
   await context.addInitScript(() => {
     const W = window.WebSocket;

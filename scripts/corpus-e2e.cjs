@@ -31,10 +31,11 @@ const SCENARIOS = [
 
 async function run(sc, url){
   const bt = sc.browser === "webkit" ? webkit : chromium;
-  const { MUTE_ARGS, silence } = await import("../e2e/harness.mjs");
+  const { MUTE_ARGS, silence, skipLanding } = await import("../e2e/harness.mjs");
   const b = await bt.launch(sc.browser === "webkit" ? {} : { args: ["--autoplay-policy=no-user-gesture-required", ...MUTE_ARGS] });
   const p = await b.newPage(sc.browser === "webkit" ? { viewport: { width: 390, height: 844 }, isMobile: true } : {});
   await p.addInitScript(silence);
+  await p.addInitScript(skipLanding);
   const reqs = [];
   await p.route("**/*", async r => {
     const u = new URL(r.request().url());

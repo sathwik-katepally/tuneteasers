@@ -167,8 +167,9 @@
 }
 
 .aboutBtn {
+  position: relative;
   flex: none;
-  height: 36px;
+  height: 30px;
   padding: 0 12px;
   font-weight: 700;
   font-size: 12px;
@@ -177,6 +178,13 @@
   color: var(--bulb);
   border: 2px solid var(--cream-shade);
   background: var(--maroon-deep);
+}
+
+/* Slim enough to clear the bulb rows, with a full-size tap target. */
+.aboutBtn::after {
+  content: '';
+  position: absolute;
+  inset: -8px -4px;
 }
 
 .menuBtn {
