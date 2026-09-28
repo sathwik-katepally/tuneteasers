@@ -143,7 +143,8 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
     await titlePool(show.mix);
     // No titles go to the room here: phones load the public list themselves.
     room.send({ t: "start", mix: show.mix, total: show.total, perRound: show.perRound, answerSecs: ROOM_ANSWER_SECS });
-    const next = { ...show, queue, idx: 0, songNo: 0, started: true, skipsSeen: 0 };
+    // A phone that sat down while the crate loaded is only in the latest heard.
+    const next = freshCue({ ...show, queue, idx: 0, songNo: 0, started: true, skipsSeen: 0 });
     setShow(next);
     // No prime here: the crate took the tap's gesture with it, and a prime
     // outside a gesture only races the first clip. A strict browser shows
