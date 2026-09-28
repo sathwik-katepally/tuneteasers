@@ -99,8 +99,8 @@ export function Playing({ name, track, plain, phase, turn, note, onPlay, onJudge
         </div>
         <p className={s.guessPrompt}>Say the song or film out loud, then choose.</p>
         <div className={`${sh.row2} ${s.judgments}`}>
-          <button type="button" className="btn btn-primary" onClick={() => onJudge("correct")} disabled={cueing}>I know this one</button>
-          <button type="button" className="btn btn-cream" onClick={() => onJudge("wrong")} disabled={cueing}>I don't know this one</button>
+          <button type="button" className="btn btn-primary" onClick={() => onJudge("correct")} disabled={cueing}><span className={s.judgment}><span>I know</span> <span>this one</span></span></button>
+          <button type="button" className="btn btn-cream" onClick={() => onJudge("wrong")} disabled={cueing}><span className={s.judgment}><span>I don't know</span> <span>this one</span></span></button>
         </div>
         <div className={s.links}>
           <button type="button" className={s.link} onClick={onHint} disabled={turn.hint}>

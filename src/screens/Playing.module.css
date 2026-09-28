@@ -127,10 +127,14 @@
 
 .judgments > button {
   min-width: 0;
-  white-space: normal;
-  font-size: 14px;
-  line-height: 1.15;
-  letter-spacing: 0.02em;
+  padding: 6px 14px;
+}
+
+.judgment {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.12;
 }
 
 .link {
