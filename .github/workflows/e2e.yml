@@ -80,6 +80,7 @@ jobs:
         with:
           browsers: ${{ matrix.browsers || 'webkit chromium' }}
           worker: ${{ matrix.worker || false }}
+      - run: uptime
       - run: ${{ matrix.run }}
 
   full:
@@ -150,6 +151,7 @@ jobs:
         with:
           browsers: ${{ matrix.browsers || 'webkit chromium' }}
           worker: ${{ matrix.worker || false }}
+      - run: uptime
       - run: ${{ matrix.run }}
 
   # Phone alert when main or the nightly run breaks (ntfy, topic in the

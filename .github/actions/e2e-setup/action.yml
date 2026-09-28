@@ -10,6 +10,12 @@ inputs:
 runs:
   using: composite
   steps:
+    # A fresh macOS runner spends its first minutes indexing the disk for
+    # Spotlight (load average above 20 on 3 cores), which starves the
+    # browsers' timers that the hand-off and clip-edge checks measure.
+    - if: runner.os == 'macOS'
+      run: sudo mdutil -a -i off >/dev/null; uptime
+      shell: bash
     - uses: actions/setup-node@v7
       with:
         node-version: 22
