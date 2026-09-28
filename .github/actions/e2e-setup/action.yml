@@ -1,0 +1,38 @@
+name: E2E setup
+description: Node deps, a production build, Playwright's WebKit with its system libraries, and optionally the Worker's deps for wrangler dev.
+inputs:
+  worker:
+    description: Also install worker/ dependencies (suites that start wrangler dev).
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v7
+      with:
+        node-version: 22
+        cache: npm
+        cache-dependency-path: |
+          package-lock.json
+          worker/package-lock.json
+    - run: npm ci
+      shell: bash
+    - if: inputs.worker == 'true'
+      run: npm ci
+      working-directory: worker
+      shell: bash
+    - run: npm run build
+      shell: bash
+    - id: pw
+      run: echo "version=$(node -p 'require("playwright/package.json").version')" >> "$GITHUB_OUTPUT"
+      shell: bash
+    - uses: actions/cache@v5
+      with:
+        path: ~/.cache/ms-playwright
+        key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
+    # The desktop profile drives the runner's Google Chrome (AAC needs its
+    # proprietary codecs, see e2e/harness.mjs), so only WebKit is downloaded.
+    # Its system libraries include the GStreamer plugins that decode AAC.
+    - run: npx playwright install --with-deps webkit
+      shell: bash
+    - run: google-chrome --version
+      shell: bash

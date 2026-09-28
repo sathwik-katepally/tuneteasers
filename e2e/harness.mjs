@@ -12,11 +12,12 @@ import lockfile from "proper-lockfile";
 /* One heavy browser suite at a time per machine: parallel agent worktrees
    running suites together overload the laptop until timing checks flake.
    Every suite imports this module, so the lock is taken before anything
-   launches. It lives in the OS temp dir so all worktrees share it; a killed
+   launches. It lives in /tmp, not os.tmpdir(): agent sessions get their own
+   TMPDIR, and the lock must be shared by every worktree and session. A killed
    suite stops refreshing it and it goes stale after STALE_MS (long enough
    that a blocking execFileSync, like the D1 migrations, cannot fake a death).
    CI runners have one suite per machine and skip it. */
-const LOCK = path.join(os.tmpdir(), "tuneteasers-e2e");
+const LOCK = path.join(process.platform === "win32" ? os.tmpdir() : "/tmp", "tuneteasers-e2e");
 const LOCK_OWNER = LOCK + ".owner";
 const STALE_MS = 60000;
 async function suiteLock(){
@@ -108,9 +109,16 @@ export function skipLanding(){
   try { localStorage.setItem("tt_landing_seen", "1"); } catch {}
 }
 
+/* The songs are AAC in mp4. Playwright's own Chromium build has no
+   proprietary codecs on Linux, so there the desktop profile drives Google
+   Chrome (preinstalled on GitHub's runners) instead; E2E_CHROMIUM_CHANNEL
+   overrides the choice. */
+export const CHROMIUM_CHANNEL = process.env.E2E_CHROMIUM_CHANNEL || (process.platform === "linux" ? "chrome" : undefined);
+export const DESKTOP_LAUNCH = { channel: CHROMIUM_CHANNEL, args: ["--autoplay-policy=no-user-gesture-required", ...MUTE_ARGS] };
+
 export const PROFILES = {
   phone: { type: webkit, context: { ...devices["iPhone 13"] } },
-  desktop: { type: chromium, launch: { args: ["--autoplay-policy=no-user-gesture-required", ...MUTE_ARGS] }, context: { viewport: { width: 1440, height: 900 } } },
+  desktop: { type: chromium, launch: DESKTOP_LAUNCH, context: { viewport: { width: 1440, height: 900 } } },
 };
 
 export async function open(profile, { reducedMotion = false, landing = false } = {}){

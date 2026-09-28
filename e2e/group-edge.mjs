@@ -11,14 +11,14 @@
 import path from "node:path";
 import { chromium } from "playwright";
 import { createServer } from "vite";
-import { localWorker, MUTE_ARGS } from "./harness.mjs";
+import { localWorker, MUTE_ARGS, CHROMIUM_CHANNEL } from "./harness.mjs";
 
 const WORKER_HOST = "tuneteasers-saavn.sathwik-katepally.workers.dev";
 const worker = await localWorker();
 const vite = await createServer({ root: path.resolve(import.meta.dirname, ".."), server: { port: 0 }, logLevel: "silent" });
 await vite.listen();
 const base = vite.resolvedUrls.local[0];
-const browser = await chromium.launch({ args: MUTE_ARGS });
+const browser = await chromium.launch({ channel: CHROMIUM_CHANNEL, args: MUTE_ARGS });
 const page = await browser.newPage();
 const errors = [];
 page.on("pageerror", e => errors.push(String(e.message)));
