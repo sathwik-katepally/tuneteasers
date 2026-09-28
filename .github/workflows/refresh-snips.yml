@@ -4,13 +4,59 @@ on:
   schedule:
     - cron: "30 4 * * 3"
   workflow_dispatch:
+    inputs:
+      shards:
+        description: "Parallel scoring runners (more for a full rescore after a schema change)"
+        default: "1"
+      limit:
+        description: "Songs each runner scores at most (a runner must finish inside the 6h job limit)"
+        default: "300"
 
 concurrency:
   group: refresh-snips-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  refresh:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      shards: ${{ steps.plan.outputs.shards }}
+    steps:
+      - id: plan
+        env:
+          SHARDS: ${{ inputs.shards || '1' }}
+        run: echo "shards=$(node -e 'const n = Math.min(20, Math.max(1, parseInt(process.env.SHARDS) || 1)); console.log(JSON.stringify([...Array(n).keys()]))')" >> "$GITHUB_OUTPUT"
+
+  score:
+    needs: [plan]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJson(needs.plan.outputs.shards) }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: mkdir -p shard && cp public/snips.json shard/snips.json
+      - run: node scripts/build-snips.mjs
+        env:
+          SNIP_OUT: shard/snips.json
+          SNIP_SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
+          SNIP_LIMIT: ${{ inputs.limit || '300' }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: snips-shard-${{ matrix.shard }}
+          path: shard/snips.json
+          retention-days: 3
+
+  # A shard that failed only leaves its songs unexamined for the next run.
+  merge:
+    needs: [score]
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -19,9 +65,13 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
-      - run: npm ci
-      - run: npx playwright install --with-deps chromium
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: snips-shard-*
+          path: shards
       - run: node scripts/build-snips.mjs
+        env:
+          SNIP_MERGE: shards
       - name: Commit if changed
         run: |
           if git diff --quiet public/snips.json; then
@@ -35,10 +85,11 @@ jobs:
           git push
 
   # Phone alert on failure (ntfy, topic in the NTFY_TOPIC repo secret).
-  # failure() is false for a cancelled run, so a superseded run stays quiet.
+  # failure() is false for a cancelled run, so a superseded run stays quiet;
+  # a run dispatched on a branch is an experiment and does not page.
   alert:
-    needs: [refresh]
-    if: failure()
+    needs: [plan, score, merge]
+    if: failure() && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:

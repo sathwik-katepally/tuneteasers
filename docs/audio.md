@@ -10,33 +10,48 @@ Every `stop()`/play call bumps `engine.session`; async continuations capture the
 This guarantees two songs can never play at once, even when the user mashes buttons while an element is still buffering.
 `playSnippet(track, offset, secs, cb)` returns `"snip"`, `"failed"`, or `"superseded"`; callers must treat `"superseded"` as "do nothing" (a newer user action owns playback).
 `playElement(url, offset, secs, cb)` is the as-is path.
-Both take callbacks `cb = { onStart, onEnd, onErr, onBlocked }` (`playSnippet` uses `onEnd` and `onBlocked`); stale sessions never fire them.
+Both take callbacks `cb = { onStart, onEnd, onErr, onBlocked }`; stale sessions never fire them.
+For a clip (`secs > 0`), `onStart` fires on the element's first `playing` event, when audio is actually flowing, so the UI never runs ahead of the sound.
+The game does not call these directly: `playRung(track, plain, rung, replay, cb)` in `src/lib/ladder.ts` turns a ladder rung into the right call (see "The clip ladder" below).
 
 ## The snips.json contract
 
 `public/snips.json` is built offline in CI (see docs/testing-and-deploy.md) and fetched same-origin, no-cache, once per crate build:
 
-    { "v": 2, "built": "...", "snips": { "<Saavn ID>": { "sourceId": "<Saavn ID>", "startSec": 78, "endSec": 88, "maxVoice": 0.023, "method": "continuous-v2" } }, "checked": { "<rejected Saavn ID>": "continuous-v2/0.25" } }
+    { "v": 3, "built": "...", "snips": { "<Saavn ID>": { "sourceId": "<Saavn ID>", "startSec": 78, "endSec": 98, "maxVoice": 0.023, "method": "continuous-v3" } }, "checked": { "<rejected Saavn ID>": "continuous-v3/0.25" }, "corpusIds": [...] }
 
 The key and `sourceId` must both match the returned Saavn recording ID.
 `checked` records scored recordings that did not pass and never authorizes playback.
-The scorer fetches that recording, then accepts a 10-second interval only if every overlapping ~3-second patch, spaced about one second apart and covering the full interval, has voice probability below `SNIP_CLEAN_MAX` in `src/lib/constants.js`.
+The schema version, method name, window length (`SNIP_WINDOW_SEC`, 20 seconds) and threshold (`SNIP_CLEAN_MAX`) are shared constants in `src/lib/constants.js`, read by the scorer, the crate and the engine alike.
+The window must hold the whole clip ladder; `src/lib/config.ts` throws at load if the ladder outgrows it.
+The scorer fetches that recording, then accepts a whole-second 20-second interval only if every overlapping ~3-second patch, spaced about one second apart and covering the full interval, has voice probability below `SNIP_CLEAN_MAX`.
 It uses the maximum raw patch score, without smoothing away a high-scoring patch.
-An index with another schema, an unmatched ID, a malformed interval, an absent entry, or a build timestamp over 30 days old cannot authorize Music-only playback.
+To find candidates it scores every other patch across the song, then densely scans (every ~1 second) up to four regions around the quietest stretches and verifies whole-second starts inside any run of clean patches long enough for a window.
+An index with another schema (including the old v2 10-second index), an unmatched ID, an interval that is not exactly 20 seconds, an absent entry, or a build timestamp over 30 days old cannot authorize Music-only playback.
+A saved game from the 10-second release drops its old intervals when it loads; resuming a Music-only game rebinds its queue to the current index, or shows the shortage message.
 The client also checks the stream duration covers the interval.
 When the index is missing or too few safe tracks remain, the player sees a shortage message.
 
+## The clip ladder
+
+A turn listens to one continuous 20-second clip window in three rungs: the first 5 seconds, then "Hear 7s more" continues from 5 to 12 seconds, then "Hear 8s more" from 12 to 20.
+Replay plays everything heard so far, from 0 to the current rung's end.
+The numbers are `CLIP_SEGMENTS` in `src/lib/config.ts`; `rungSpan(rung, replay)` gives the `{ from, to }` seconds a play covers.
+A continuation always seeks, even to where the element already is: Chromium otherwise resumes a paused element about 60ms past its pause point, which would skip audio at the seam.
+The engine stops a clip at a media time, not after a wall-clock delay: a timer re-aims at the end from the element's own clock (and, for Music-only, re-aims the gain gate on the audio clock), so each rung is exact to a few milliseconds and the next one starts where it stopped.
+`currentTime` only moves in steps (100-250ms apart, and a busy WebKit reports a stale value for longer), so between steps the engine extrapolates from when it last saw the value change and polls every 15ms near the end.
+`e2e/ladder.mjs` measures this on the media clock.
+
 ## Playback modes
 
-- `"snip"`: Medium and Hard use the verified interval for all four rungs (3, 5, 8, 10 seconds).
-  The engine seeks before unmuting, routes the CORS element through an AudioContext gain gate, and schedules silence at the interval end on the audio clock.
-  A media-time boundary and pause timer also stop the element.
+- `"snip"`: Medium and Hard play only inside the verified 20-second interval.
+  The engine seeks before unmuting, routes the CORS element through an AudioContext gain gate, and closes the gate at the clip's end on the audio clock.
+  The media-time timer also pauses the element there.
   Failure to seek, wire the gate, or find a valid interval returns `"failed"` without starting raw playback.
-- `"plain"`: Easy keeps the full vocals and its 3, 5, 8, 12-second ladder, starting at a likely hook (`hookOffset` in `src/lib/config.ts`); reveals also play as-is.
+  The engine rejects any interval that is not exactly `SNIP_WINDOW_SEC` long and any offset and length outside it.
+- `"plain"`: Easy keeps the full vocals; its window starts at a likely hook (`hookOffset` in `src/lib/config.ts`); reveals also play as-is.
 
-`window.__ttLastMode` reports the mode that actually played (E2E/debug surface).
-Every rung and replay starts at the same interval start.
-The engine rejects any offset and length outside that interval.
+`window.__ttLastMode` reports the mode that actually played, and `window.__ttClips` records each clip's media start and stop (E2E/debug surfaces).
 
 ## What verification can and cannot say
 
@@ -54,8 +69,11 @@ The engine keeps one light prefetch: a `preload="auto"` Audio element for the ne
 
 ## Starting audio from the countdown (autoplay)
 
-The first clip of a turn starts from a timer at the end of the 3-2-1 countdown, not from a tap.
+The first clip of a turn starts from a timer, not from a tap.
+The countdown hands over silently: when "Roll it" ends the listening screen fades in, and only once its fade has finished (the wrapper's `onAnimationComplete` in `src/app.tsx`, with a 1.5s fallback for a hidden tab that never finishes animating) does the clip start.
+The sound, "Now playing" and the clip bar then start together on the element's `playing` event; before this, audio started ~0.3s before the screen was visible.
 iOS Safari only lets an element start audio outside a tap once that element has been played inside one, so the hand-over tap calls `engine.prime(track, plain)`: it resumes the AudioContext and plays the upcoming track's element muted for a moment, then pauses it (session-checked so it can never pause real playback).
+The unlock belongs to the element, so the later, timer-started play is still covered.
 If a browser still refuses (`play()` rejects with `NotAllowedError`), the engine logs `play-blocked`, stops the session and calls `onBlocked`; the game shows a "Tap to play" button that replays the rung inside a tap.
 `e2e/autoplay.mjs` emulates the iOS rule in Chromium and checks both paths.
 

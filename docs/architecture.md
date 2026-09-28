@@ -6,7 +6,7 @@
 - `src/main.tsx` - entry point; loads the fonts (`@fontsource` Rozha One and Mukta), global styles, and renders `App` plus the debug overlay.
 - `src/app.tsx` - the single state owner; all game state, actions, and screen routing live here.
 - `src/types.ts` - shared types for saved state, tracks, turns and verdicts.
-- `src/lib/config.ts` - every gameplay number: clip ladder, points per rung, speed bonus, hint cost, round options, difficulty table; also the song category labels.
+- `src/lib/config.ts` - every gameplay number: clip ladder and its rung spans, points per rung, speed bonus, hint cost, round options, difficulty table; also the song category labels.
 - `src/lib/save.ts` - the saved game: `loadSaved` (sanitize, migrate v6) and `save`.
 - `src/lib/constants.js` - search queries, language/era tables, exclusion regex.
 - `src/lib/utils.js` - pure helpers (`songKey`, `displayTitle`, `shuffle`, `safeUrl`, ...).
@@ -14,6 +14,7 @@
 - `src/lib/group.ts` - optional group sync: the group invite, the write outbox, the group cooldown fetch and past results (docs/group-sync.md).
 - `src/lib/crate.js` - song loading (`buildCrate`) across the 3 source tiers.
 - `src/lib/engine.js` - the audio engine (songs and synthesised sound effects) and screen wake lock.
+- `src/lib/ladder.ts` - `playRung`, which plays a clip ladder rung through the engine.
 - `src/styles/tokens.css`, `src/styles/global.css` - design tokens (colors, fonts, hard shadows) and the few global classes (`.btn*`, `.display`, `.eyebrow`, `.grain`, `.link`, the debug overlay).
 - `src/components/` - the cinema pieces, each with a CSS Module: `Theatre` (marquee, curtains, seat backs, game menu), `Bulbs` (bulb rows and frames), `Ticket`, `Curtain`, `Stamp`, `SplitFlap`, `Seg` (segmented radio), `CategoryPicker` (the setup screen's song-category stubs), `Equalizer`, `Reel`, `GroupPanel` (the home-screen group card), and `DebugLog`.
 - `src/screens/` - one component and CSS Module per screen: `Setup`, `Loading`, `Handover`, `Countdown`, `Playing`, `Reveal`, `Scoreboard`, `Podium`, `PastGames`.
@@ -61,8 +62,9 @@ Difficulty: Easy plays popular songs with vocals ("full" sound, from a likely ho
 Song categories (Dance & party, Romantic, Sad, Item songs, Mass beats) narrow the pool to corpus songs carrying any chosen tag; they are passed to `buildCrate` as its 7th argument (see docs/song-loading.md).
 On the setup screen "Any" is the empty selection and clears the others; each category shows how many songs it offers for the chosen languages, eras and difficulty, and one with fewer than rounds x contestants is greyed out with "only N" (in Music-only with a note that few dance or item songs have a clean instrumental stretch).
 A chosen category that turns thin stays tappable so it can be turned off.
-Clip ladder: each turn starts with a 3s clip, and "Hear more" steps to 5, 8 and 12s; each rung replays from the start of the clip window.
-Points: 100 / 70 / 50 / 30 by rung, plus a speed bonus of up to 20 that stays full while a clip plays and fades over about 13s once it has ended, minus 20 if the film/year hint was taken, never below 10.
+Clip ladder: each turn starts with a 5s clip; "Hear 7s more" continues to 12s and "Hear 8s more" to 20s without replaying what was heard, and Replay plays from the top to the current end (docs/audio.md).
+The rung arithmetic (`CLIP_SEGMENTS`, `rungSpan`) is in `src/lib/config.ts` and the play call (`playRung`) in `src/lib/ladder.ts`, so any screen that runs a turn shares them.
+Points: 100 / 60 / 30 by rung, plus a speed bonus of up to 20 that stays full while a clip plays and fades over about 13s once it has ended, minus 20 if the film/year hint was taken, never below 10.
 The player says the song or film aloud, then taps "I know this one" to score the current points or "I don't know this one" to score zero.
 Either choice records the turn and reveals the answer immediately.
 Teams: turns rotate through teams; if a team lists members, the phone holder rotates through them round by round.

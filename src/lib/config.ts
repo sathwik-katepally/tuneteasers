@@ -1,11 +1,25 @@
 import type { Category, Difficulty, Track } from "../types";
+import { SNIP_WINDOW_SEC } from "./constants.js";
 
 /* Every gameplay number lives here: the clip ladder, what each rung pays,
    the speed bonus, the hint cost and the show length. */
 
-export const CLIP_STEPS = [3, 5, 8, 12] as const;
-export const MUSIC_CLIP_STEPS = [3, 5, 8, 10] as const;
-export const CLIP_POINTS = [100, 70, 50, 30] as const;
+/* Each rung plays the next stretch of one continuous clip window: the first
+   5s, then "Hear more" carries on for 7s, then 8s. Music-only windows are
+   verified vocal-free for their whole length, so the ladder must fit one. */
+export const CLIP_SEGMENTS = [5, 7, 8] as const;
+export const CLIP_POINTS = [100, 60, 30] as const;
+export const LAST_RUNG = CLIP_SEGMENTS.length - 1;
+
+/* Seconds into the clip window where a rung stops. */
+export const rungEnd = (rung: number) => CLIP_SEGMENTS.slice(0, Math.min(rung, LAST_RUNG) + 1).reduce((a, b) => a + b, 0);
+export const rungStart = (rung: number) => (rung > 0 ? rungEnd(rung - 1) : 0);
+export const CLIP_WINDOW = rungEnd(LAST_RUNG);
+if (CLIP_WINDOW > SNIP_WINDOW_SEC) throw new Error(`clip ladder (${CLIP_WINDOW}s) is longer than a verified snip window (${SNIP_WINDOW_SEC}s)`);
+
+/* What a play of `rung` covers inside the window: "Hear more" plays only the
+   new stretch, a replay plays everything heard so far from the top. */
+export const rungSpan = (rung: number, replay: boolean) => ({ from: replay ? 0 : rungStart(rung), to: rungEnd(rung) });
 
 export const SPEED_BONUS_MAX = 20;
 export const SPEED_BONUS_FADE_SECS = 13;

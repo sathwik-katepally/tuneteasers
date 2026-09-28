@@ -6,21 +6,27 @@ There is no unit test suite; verification is E2E against real browsers and the r
 The harness lives in `e2e/` (plain Node ES modules on the `playwright` dev dependency; run `npx playwright install chromium webkit` once).
 Every script serves `dist/` on a free local port the way Pages does, so run `npm run typecheck && npm run build` first.
 Two profiles: `phone` is WebKit with the iPhone 13 device (390px), `desktop` is Chromium at 1440x900.
+Test browsers are silent: Chromium runs with `--mute-audio` (`MUTE_ARGS`) and every `open()` context gets `silence()`, which zeroes element volume and puts a zero-gain node in front of each live AudioContext's destination; media time, paused/muted state and the engine's gain gate read exactly as unmuted, so the checks are unaffected.
+Any new script that launches a browser should use both.
 
-- `e2e/game.mjs` - plays a whole show through the UI: setup, hand-over, countdown, clip ladder (one "Hear 5s"), hint, Home and Resume mid-turn, the game menu, both one-tap scoring choices, box office after each round, podium.
+- `e2e/game.mjs` - plays a whole show through the UI: setup, hand-over, countdown, clip ladder (one "Hear 7s more"), hint, Home and Resume mid-turn, the game menu, both one-tap scoring choices, box office after each round, podium.
   It then checks the bookkeeping (every contestant's score equals their history, one history entry per turn, points in range, team members kept), that no page errors were thrown, and that no in-game screen scrolls at that size.
   Flags: `--profile=phone|desktop --mode=players|teams --mix=bolly|telugu|both --difficulty=easy|medium|hard --rounds=3|5|8 --categories=item,mass --reduced --no-worker --shots=<dir>`; `--categories` picks those chips and checks that the game came from the corpus and every queued song carries one of the tags; `--shots` saves one screenshot per screen for review, and `--no-worker` makes the project's Worker unreachable (songs come from the mirror).
 - `e2e/categories.mjs` (`npm run e2e:categories`) - the setup screen's song-category chips: Any clears the others, chips combine and persist across a reload, a thin chip is greyed with its count on Easy (a 48-turn Hindi 2000s show) and in Music-only (with the note), a chosen chip that turns thin can be turned off, saves without categories (or with junk ids) load as Any, and with `corpus.json` unreachable the chips stay off and a categories game reports a load error instead of falling back to untagged songs.
 - `e2e/migrate.mjs` - seeds a `tuneteasers_v6` save from the previous release with real Saavn tracks, resumes it, plays a turn and checks names, rescaled scores, settings mapping and that the old key is dropped; then feeds junk into the old key and expects a clean home screen.
 - `e2e/autoplay.mjs` - emulates iOS's per-element autoplay rule in Chromium: the hand-over tap's prime must let the countdown start the clip, and a stricter browser must get a working "Tap to play" fallback; also covers End game.
 - `e2e/offline.mjs` - aborts every song source and expects a visible error on the home screen and the `crate` line in the `?debug=1` overlay.
-- `e2e/safe-snips.mjs` - WebKit phone and Chromium desktop play Easy and Music-only through the final rung and replay, then replace the local index with missing, mismatched-ID, stale, and old-schema variants to confirm the visible shortage state.
+- `e2e/ladder.mjs` - one turn through every rung and Replay, measured on the media clock: the engine's `window.__ttClips` records each clip's media position when it starts playing and once its pause settles, and a 10ms sampler of audible audio (element playing and unmuted, gate open) independently counts the stretches heard.
+  Rung 1 must cover 0-5s of the window, rung 2 5-12s, rung 3 12-20s, Replay 0-20s (within 0.15s: Easy's stop rides a JS timer a busy machine can delay), the seams must not repeat or skip more than 80ms, Music-only must stay inside its verified interval, and the first clip must not sound before the listening screen is fully faded in, with "Now playing" and the clip bar starting within 150ms of the sound.
+  It prints the measured spans and the hand-off timeline.
+  Flags: `--profile=phone|desktop --difficulty=easy|medium|hard --mix=bolly|telugu|both --log`; run it for both profiles with Easy and Medium.
+- `e2e/safe-snips.mjs` - WebKit phone and Chromium desktop play Easy and Music-only through the final rung and replay, resume a save written by the 10-second release (its game must rebind to 20s windows and keep its score), then replace the local index with missing, mismatched-ID, old-schema (v1, v2), 10-second-window and stale variants to confirm the visible shortage state.
 - `e2e/group-sync.mjs` (`npm run e2e:group`) - desktop Chromium makes a group (importing its own history) and phone WebKit joins through the `#join` link; a song played on one is left out of the other's next crate, the desktop's finished show appears in the phone's Past shows, the phone keeps playing with the Worker unreachable and sends its queued plays when it is back, and the owner's delete makes the invite answer 403.
   It starts its own `wrangler dev` with a fresh local D1 and reroutes the deployed Worker host to it; `--worker=<origin>` points it at a deployed Worker instead (the preview one, see docs/group-sync.md), and `--shots=<dir>` saves the group screens.
 - `e2e/group-edge.mjs` (`npm run e2e:group-edge`) - timing cases the journey cannot hit on purpose, driving `src/lib/group.ts` through the Vite dev server in Chromium against a local `wrangler dev`: switching groups while the old group's upload is in flight, a cooldown read after a failed one, an idle-expired group's invite (403, and a write cannot revive it), and a malformed `#join=` link.
 - `node scripts/corpus-e2e.cjs [repo] [local-worker-origin]` - the corpus tier: games in each language resolve ids through a local `wrangler dev` worker (the deployed worker host is rerouted to it), through the deployed worker, and with no batch endpoint at all (must fall back to `source: "saavn"`); checks every queue track's corpus film/year/tier and the reveal; includes a phone-width WebKit pass.
 
-Package scripts: `npm run e2e:game -- --profile=desktop`, `e2e:categories`, `e2e:migrate`, `e2e:autoplay`, `e2e:offline`, `e2e:snips`, `e2e:group`, `e2e:group-edge`.
+Package scripts: `npm run e2e:game -- --profile=desktop`, `e2e:categories`, `e2e:ladder`, `e2e:migrate`, `e2e:autoplay`, `e2e:offline`, `e2e:snips`, `e2e:group`, `e2e:group-edge`.
 A release run is the matrix of `game.mjs` over both profiles, both modes, all three difficulties and all three language mixes (not every combination, but each value at least once per profile), one `--reduced` run, one `--no-worker` run, one `--categories=item` and one `--categories=mass` run, plus the other scripts.
 Playback modes asserted are `snip | plain` (`window.__ttLastMode`); Easy must report `plain`, while Medium and Hard must report `snip` or show a safe-clip shortage.
 Gotchas: screens cross-fade out through `AnimatePresence`, so after a click wait for the old button to detach before looking for the next screen; seed localStorage from a non-app page on the same origin (`/seed.html` 404s, which is fine) so the app's own first save cannot race the seeding.
@@ -65,20 +71,23 @@ Run it locally with `CORPUS_CACHE=<dir>` to cache upstream responses across reru
 ## Snips refresh CI
 
 `.github/workflows/refresh-snips.yml` runs `scripts/build-snips.mjs` weekly (Wed 04:30 UTC, after the corpus refresh, which also dispatches it on change) and commits `public/snips.json` if changed, which in turn triggers a deploy.
+Scoring runs in a matrix of `shards` runners (1 on schedule), each scoring at most `limit` songs of its share into a partial index (`SNIP_SHARD=i/n`); a `merge` job combines them (`SNIP_MERGE=<dir>`), applies the size floor, prints the pass rate and entries per language/tier, and commits.
+After a schema change, dispatch it with more runners, for example `gh workflow run refresh-snips.yml -f shards=12 -f limit=400`, so the whole corpus is rescored in one go; a runner that fails only leaves its songs for the next run.
+A failure alert pages only for runs on main.
 The scorer resolves corpus IDs to streams through the worker's batch endpoint (mirror fallback), then runs the MusiCNN VAD in a Playwright Chromium page against local assets (`scripts/vad-assets/`).
-It reuses only valid v2 entries for the same source ID and writes 10-second intervals whose overlapping patches all pass the clean threshold.
+It reuses only valid entries of the current schema (v3) for the same source ID and writes 20-second intervals whose overlapping patches all pass the clean threshold.
 Each scheduled run scores at most 300 unexamined IDs and records rejected IDs in `checked`, so later runs advance through the corpus instead of rescoring the same failures.
 New IDs in the weekly corpus are prioritized using the previous index's `corpusIds` snapshot.
 The resolver tries both Saavn endpoints with short retries and fails with an endpoint summary after three empty corpus batches; the existing workflow failure alert remains active.
 It refuses to write fewer than 80 entries.
-`SNIP_HINTS=<old-v1-index> SNIP_MIGRATE_ONLY=1` is the one-time migration path: it rescans the old clean candidates continuously against the live recording, discards failures, and leaves other recordings for the normal scheduled full scan.
+A previous v2 index (10-second windows) never authorizes anything, but its starts seed the search for the same recordings: automatically while the output file is still v2, or from `SNIP_HINTS=<v2-index>`.
 The client fails closed with a clear Music-only shortage if the index is missing or inadequate.
 
 ## Monitoring
 
 ### Workflow failure alerts
 
-The production workflows (`deploy.yml`, including its Worker job, `refresh-catalog.yml`, `refresh-snips.yml`) end in an `alert` job that `needs` the other job and runs on `if: failure()`.
+The production workflows (`deploy.yml`, including its Worker job, `refresh-catalog.yml`, `refresh-snips.yml`) end in an `alert` job that `needs` the other jobs and runs on `if: failure()` (for `refresh-snips.yml`, only on main).
 It POSTs the run URL to `https://ntfy.sh/$NTFY_TOPIC` with the title `<repo>/<workflow> failed`.
 `failure()` is false for cancelled runs, so a deploy superseded by a newer push stays quiet.
 The topic is the shared ops topic (`~/.config/ops/secrets.env`, `OPS_NTFY_TOPIC`), set with `gh secret set NTFY_TOPIC --repo sathwik-katepally/tuneteasers --body <topic>`.

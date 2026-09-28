@@ -31,8 +31,10 @@ const SCENARIOS = [
 
 async function run(sc, url){
   const bt = sc.browser === "webkit" ? webkit : chromium;
-  const b = await bt.launch(sc.browser === "webkit" ? {} : { args: ["--autoplay-policy=no-user-gesture-required", "--mute-audio"] });
+  const { MUTE_ARGS, silence } = await import("../e2e/harness.mjs");
+  const b = await bt.launch(sc.browser === "webkit" ? {} : { args: ["--autoplay-policy=no-user-gesture-required", ...MUTE_ARGS] });
   const p = await b.newPage(sc.browser === "webkit" ? { viewport: { width: 390, height: 844 }, isMobile: true } : {});
+  await p.addInitScript(silence);
   const reqs = [];
   await p.route("**/*", async r => {
     const u = new URL(r.request().url());
@@ -45,6 +47,9 @@ async function run(sc, url){
         return r.fulfill({ status: res.status, headers: { "content-type": "application/json", "access-control-allow-origin": "*" }, body: await res.text() });
       } catch (e){ return r.abort(); }
     }
+    // blockMirror: only the worker (or its local stand-in) may answer, so a
+    // scenario cannot pass by quietly falling back to the public mirror.
+    if (sc.blockMirror && u.host !== WORKER_HOST && /saavn/.test(u.host) && u.pathname.startsWith("/api/")) return r.abort();
     if (u.host === WORKER_HOST && sc.blockLocalSongs && u.pathname === "/api/songs")
       return r.fulfill({ status: 404, headers: { "content-type": "application/json", "access-control-allow-origin": "*" }, body: '{"success":false}' });
     if (/saavn|itunes/.test(u.host)) reqs.push(u.href);
@@ -54,6 +59,8 @@ async function run(sc, url){
   p.on("console", m => { if (/crate|play |fallback|fail/.test(m.text())) logs.push(m.text().slice(0, 300)); });
   await p.goto(url);
   await p.getByRole("radio", { name: sc.mix, exact: true }).click();
+  // Easy plays every resolved song; Music-only would also filter by the snips index.
+  await p.getByRole("radio", { name: "Easy", exact: false }).click();
   await p.getByRole("button", { name: /Start the show/ }).click();
   const handover = p.getByRole("button", { name: /^It's with me/ });
   await handover.waitFor({ timeout: 45000 });
@@ -64,8 +71,7 @@ async function run(sc, url){
   await p.waitForFunction(() => window.__ttLastMode, null, { timeout: 25000 });
   const mode = await p.evaluate(() => window.__ttLastMode);
   await p.getByRole("button", { name: "I know this one" }).click();
-  await p.getByRole("button", { name: "Show the answer" }).click();
-  await p.getByRole("button", { name: /Got it/ }).waitFor();
+  await p.getByRole("button", { name: /Pass it on|box office/ }).waitFor();
   await p.waitForTimeout(1800);
   const reveal = await p.evaluate(() => document.body.innerText);
   await b.close();
@@ -73,7 +79,7 @@ async function run(sc, url){
   const crate = logs.find(l => l.includes("crate")) || "";
   const problems = [];
   if (!["snip", "muffle", "plain"].includes(mode)) problems.push(`mode=${mode}`);
-  if (!/Got it/i.test(reveal)) problems.push("no reveal");
+  if (!/Pass it on|box office/i.test(reveal)) problems.push("no reveal");
   if (state.game.source !== sc.expect) problems.push(`source=${state.game.source} expected ${sc.expect}`);
   if (sc.expect === "corpus"){
     const langOk = sc.lang ? queue.every(t => t.lang === (sc.lang === "hindi" ? "bolly" : "telugu")) : true;

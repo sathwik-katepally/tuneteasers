@@ -12,6 +12,7 @@
     "build:snips": "node scripts/build-snips.mjs",
     "e2e:game": "node e2e/game.mjs",
     "e2e:categories": "node e2e/categories.mjs",
+    "e2e:ladder": "node e2e/ladder.mjs",
     "e2e:migrate": "node e2e/migrate.mjs",
     "e2e:autoplay": "node e2e/autoplay.mjs",
     "e2e:offline": "node e2e/offline.mjs",

@@ -82,6 +82,8 @@ export type Phase =
 
 export interface Turn {
   rung: number;
+  /* Seconds into the clip window the current play covers. */
+  span: { from: number; to: number };
   clipEndedAt: number | null;
   clipStartedAt: number;
   playKey: number;
