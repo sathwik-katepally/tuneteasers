@@ -78,7 +78,7 @@ async function resumeOldSave(page, oldSecs){
   const now = await saved(page);
   const t = now.game.queue[now.game.trackIdx];
   const e = index.snips[t.sourceId];
-  if (!t.snip || !e || t.snip.startSec !== e.startSec || t.snip.endSec !== e.endSec || t.snip.method !== SNIP_METHOD)
+  if (!t.snip || !e || t.snip.startSec !== e.startSec || t.snip.endSec !== e.endSec || t.snip.method !== accept.method)
     fail(`old save resumed on ${JSON.stringify(t.snip)}, not the current window ${JSON.stringify(e)}`);
   if (now.game.cast.find(c => c.id === me.id).score !== 70 || now.game.history.length !== 1) fail("old save lost its score or history");
 }
