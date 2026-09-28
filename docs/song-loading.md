@@ -99,6 +99,7 @@ Each kind sits out for its own `COOLDOWN_DAYS` in `src/lib/config.ts`: 7 days af
 Entries older than the longest cooldown are pruned; a stream-error skip records nothing.
 `cooldownOf(...histories)` in `src/lib/storage.js` turns histories (`{ played, tired }`, this device's from `loadHistory`, a group's, later a person's) into one map of song key → the time the song may come back, latest wins, and that map is `buildCrate`'s `cooldown`.
 In a group, `startGame` passes the group's history merged with the device's (`groupCooldown`), so songs any phone in the group played or skipped sit out too; see docs/group-sync.md.
+A buzz-in host also merges in every seated phone's history, which each phone brings to its seat, and passes `heardBy` (song key → how many of the people present heard it); see "No repeats" in docs/room-mode.md.
 Songs still cooling down are excluded from the crate when at least 15 fresh songs remain.
-When fresh songs run low, they are appended AFTER all fresh ones, soonest-due first, so repeats only appear when unavoidable.
+When fresh songs run low, they are appended AFTER all fresh ones, fewest people present first (`heardBy`, empty outside a room), then soonest-due, so repeats only appear when unavoidable.
 Old installs stored `tt_played` as a plain array; `loadHistory` migrates that format transparently.
