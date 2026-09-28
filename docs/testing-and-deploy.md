@@ -47,7 +47,7 @@ Gotchas: screens cross-fade out through `AnimatePresence`, so after a click wait
 ### E2E in CI
 
 `.github/workflows/e2e.yml` runs the key suites on every pull request, one job per suite in parallel (about 3-5 minutes wall clock): a pass-the-phone game on each profile, safe-snips and the ladder on each profile, the buzz room against a local `wrangler dev`, and the landing and journeys suites.
-Pushes to main, a nightly run (02:30 UTC) and a manual run add the rest of the release matrix above, and alert through ntfy when it fails.
+`.github/workflows/e2e-release.yml` runs the rest of the release matrix above on pushes to main, nightly (02:30 UTC) and on demand, and alerts through ntfy when it fails; category games play Easy there, since in Music-only the item and mass chips are too thin to pick.
 The shared steps (deps, build, Playwright browsers cached per version) are in `.github/actions/e2e-setup`.
 The suites play real songs from the corpus through the deployed Worker and the Saavn CDN; the song draw is random, so recorded responses would rarely match a run and are not used.
 
@@ -57,6 +57,7 @@ Which runner a suite gets is decided by where its browser plays these AAC/MP4 st
 - Chromium on the macOS runners plays media at about half speed (the same with `--disable-audio-output` or Google Chrome), so a 20-second Easy replay outlasts the suites' waits.
   Desktop suites run on `ubuntu-latest`, where Playwright's own Chromium decodes AAC and plays in real time, so no Chrome channel is needed.
 - The buzz room runs on Linux: only its desktop host plays audio, and the WebKit phones there only render and send frames.
+- Two checks stay off CI because the 3-core macOS runners are too loaded for them: the phone Easy ladder (its 150ms "Now playing" hand-off check missed by 170-290ms in 2 of 5 runs) and the buzz room with a phone host (4 WebKit pages; a phone's "You're in" timed out in 2 of 3 runs). Run them locally.
 - A fresh macOS runner indexes its disk for Spotlight for the first minutes (load averages above 20 on 3 cores), which starves the timers the hand-off checks measure; the setup action turns indexing off.
 
 The older ad-hoc scripts in `/tmp/tt-e2e` (and the obsolete on-device pipeline suites `dsp.js`, `pick.js`, `vadtest.js`, `ml*.js`) drove the pre-cinema UI and no longer apply.

@@ -7,7 +7,6 @@ name: E2E release matrix
 # suite follows the same rule: WebKit that plays songs on macOS, Chromium and
 # the buzz room on Linux (see the header of e2e.yml).
 on:
-  pull_request:
   push:
     branches: [main]
   schedule:
@@ -19,7 +18,7 @@ permissions:
 
 concurrency:
   group: e2e-release-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: false
 
 jobs:
   release:
@@ -73,11 +72,6 @@ jobs:
             browsers: chromium
             worker: true
             run: npm run e2e:group-edge
-          - name: buzz room on a phone host
-            os: macos-latest
-            browsers: webkit
-            worker: true
-            run: npm run e2e:room -- --host=phone
           - name: buzz room music-only, no repeats
             os: ubuntu-latest
             browsers: webkit chromium
@@ -96,7 +90,7 @@ jobs:
   # NTFY_TOPIC repo secret).
   alert:
     needs: [release]
-    if: failure() && github.event_name != 'pull_request'
+    if: failure()
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
