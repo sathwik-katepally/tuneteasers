@@ -70,7 +70,7 @@ export function Scoreboard({ game, round, onSettle, onNext }: { game: GameState;
             <span className={s.logHead}>Reels this round</span>
             {reels.map((h, i) => (
               <div key={i} className={s.logRow}>
-                <span className={s.logName}>{names.get(h.id)}</span>
+                <span className={s.logName}>{names.get(h.id) ?? "Nobody"}</span>
                 <span className={s.logSong}>{h.song}</span>
                 <span className={`${s.logPts} ${h.points === 0 ? s.deltaZero : ""}`}>{h.points > 0 ? `+${h.points}` : "missed"}</span>
               </div>

@@ -1,12 +1,13 @@
 import { useState } from "react";
 import { Plus, X } from "lucide-react";
 import { ERAS } from "../lib/constants.js";
-import { DIFFICULTY, MAX_CAST, MAX_MEMBERS, NAME_MAX, ROUND_OPTIONS } from "../lib/config";
+import { DIFFICULTY, MAX_CAST, MAX_MEMBERS, NAME_MAX, ROOM_SONGS_PER_ROUND, ROUND_OPTIONS } from "../lib/config";
 import { cleanName, newId } from "../lib/save";
 import { Seg } from "../components/Seg";
 import { GroupPanel } from "../components/GroupPanel";
 import { CategoryPicker } from "../components/CategoryPicker";
-import type { Difficulty, GameState, Mix, Mode, RosterEntry, Settings } from "../types";
+import type { HostShow } from "../lib/room";
+import type { Difficulty, GameState, Mix, Mode, Play, RosterEntry, Settings } from "../types";
 import sh from "./shared.module.css";
 import s from "./Setup.module.css";
 
@@ -26,6 +27,11 @@ interface Props {
   invite: string;
   clearInvite: () => void;
   showPastGames: () => void;
+  hostShow: HostShow | null;
+  openRoom: () => void;
+  resumeRoom: () => void;
+  discardRoom: () => void;
+  joinRoom: () => void;
 }
 
 const ERA_ALL = "all";
@@ -37,7 +43,8 @@ export function Setup(p: Props){
   const list = mode === "teams" ? p.teams : p.players;
   const setList = (l: RosterEntry[]) => p.setRoster(mode, l);
   const era = S.eras.length === 1 ? S.eras[0] : ERA_ALL;
-  const canStart = list.length >= MIN_CAST[mode];
+  const room = S.play === "room";
+  const canStart = room || list.length >= MIN_CAST[mode];
 
   const add = (name: string) => setList([...list, { id: newId(), name, members: [] }]);
   const rename = (id: string, name: string) => setList(list.map(e => (e.id === id ? { ...e, name } : e)));
@@ -49,6 +56,11 @@ export function Setup(p: Props){
       {p.error && <div className={s.error} role="alert">{p.error}</div>}
       {p.invite && <GroupPanel invite={p.invite} clearInvite={p.clearInvite} showPastGames={p.showPastGames} />}
       {p.savedGame && <ResumeCard game={p.savedGame} onResume={p.resumeGame} onDiscard={p.discardGame} />}
+      {p.hostShow && <RoomResumeCard show={p.hostShow} onResume={p.resumeRoom} onDiscard={p.discardRoom} />}
+      <div className={s.joinStrip}>
+        <span className={s.joinText}>Someone else hosting a buzz-in show?</span>
+        <button type="button" className={`btn btn-teal ${s.joinBtn}`} onClick={p.joinRoom}>Join with a code</button>
+      </div>
 
       <div className={sh.paper}>
         <div className={s.head}>
@@ -57,45 +69,57 @@ export function Setup(p: Props){
         </div>
 
         <div className={s.group}>
-          <div className={s.label}>
-            <span className={s.labelText}>{mode === "teams" ? "Teams" : "Who's in"}</span>
-            <div className={s.modeSeg}>
-              <Seg<Mode> label="Play as" tone="teal" value={mode}
-                options={[{ value: "players", label: "Solo" }, { value: "teams", label: "Teams" }]}
-                onChange={v => upSettings({ mode: v })} />
-            </div>
-          </div>
-          {mode === "players" ? (
-            <div className={s.chips}>
-              {list.map(e => (
-                <NameChip key={e.id} name={e.name} canRemove={list.length > MIN_CAST.players}
-                  onRename={n => rename(e.id, n)} onRemove={() => remove(e.id)} />
-              ))}
-              {list.length < MAX_CAST && <AddChip label="Add" placeholder="Name" onAdd={add} />}
-            </div>
-          ) : (
-            <div className={s.teams}>
-              {list.map(e => (
-                <div key={e.id} className={s.team}>
-                  <NameChip name={e.name} canRemove={list.length > MIN_CAST.teams} strong
-                    onRename={n => rename(e.id, n)} onRemove={() => remove(e.id)} />
-                  <div className={s.members}>
-                    {e.members.map((mName, i) => (
-                      <NameChip key={i} name={mName} small canRemove
-                        onRename={n => setMembers(e.id, e.members.map((x, j) => (j === i ? n : x)))}
-                        onRemove={() => setMembers(e.id, e.members.filter((_, j) => j !== i))} />
-                    ))}
-                    {e.members.length < MAX_MEMBERS && (
-                      <AddChip small label="Member" placeholder="Name" onAdd={n => setMembers(e.id, [...e.members, n])} />
-                    )}
-                  </div>
-                </div>
-              ))}
-              {list.length < MAX_CAST && <AddChip label="Add team" placeholder="Team name" onAdd={add} />}
-              <p className={s.hint}>Members are optional. Add them and the phone rotates through each team.</p>
-            </div>
-          )}
+          <span className={s.labelText}>How you play</span>
+          <Seg<Play> label="How you play" tone="teal" value={S.play}
+            options={[{ value: "pass", label: "Pass the phone" }, { value: "room", label: "Buzz in" }]}
+            onChange={v => upSettings({ play: v })} />
+          <p className={s.hint}>{room
+            ? "This screen plays the songs. Everyone joins on their own phone and buzzes in; first to buzz answers."
+            : "One phone goes round the room, one song per turn."}</p>
         </div>
+
+        {!room && (
+          <div className={s.group}>
+            <div className={s.label}>
+              <span className={s.labelText}>{mode === "teams" ? "Teams" : "Who's in"}</span>
+              <div className={s.modeSeg}>
+                <Seg<Mode> label="Play as" tone="teal" value={mode}
+                  options={[{ value: "players", label: "Solo" }, { value: "teams", label: "Teams" }]}
+                  onChange={v => upSettings({ mode: v })} />
+              </div>
+            </div>
+            {mode === "players" ? (
+              <div className={s.chips}>
+                {list.map(e => (
+                  <NameChip key={e.id} name={e.name} canRemove={list.length > MIN_CAST.players}
+                    onRename={n => rename(e.id, n)} onRemove={() => remove(e.id)} />
+                ))}
+                {list.length < MAX_CAST && <AddChip label="Add" placeholder="Name" onAdd={add} />}
+              </div>
+            ) : (
+              <div className={s.teams}>
+                {list.map(e => (
+                  <div key={e.id} className={s.team}>
+                    <NameChip name={e.name} canRemove={list.length > MIN_CAST.teams} strong
+                      onRename={n => rename(e.id, n)} onRemove={() => remove(e.id)} />
+                    <div className={s.members}>
+                      {e.members.map((mName, i) => (
+                        <NameChip key={i} name={mName} small canRemove
+                          onRename={n => setMembers(e.id, e.members.map((x, j) => (j === i ? n : x)))}
+                          onRemove={() => setMembers(e.id, e.members.filter((_, j) => j !== i))} />
+                      ))}
+                      {e.members.length < MAX_MEMBERS && (
+                        <AddChip small label="Member" placeholder="Name" onAdd={n => setMembers(e.id, [...e.members, n])} />
+                      )}
+                    </div>
+                  </div>
+                ))}
+                {list.length < MAX_CAST && <AddChip label="Add team" placeholder="Team name" onAdd={add} />}
+                <p className={s.hint}>Members are optional. Add them and the phone rotates through each team.</p>
+              </div>
+            )}
+          </div>
+        )}
 
         <div className={s.group}>
           <span className={s.labelText}>Songs from</span>
@@ -121,7 +145,7 @@ export function Setup(p: Props){
 
         <div className={s.group}>
           <span className={s.labelText}>Kind of songs</span>
-          <CategoryPicker settings={S} need={S.rounds * list.length} blocked={p.blocked} onChange={categories => upSettings({ categories })} />
+          <CategoryPicker settings={S} need={S.rounds * (room ? ROOM_SONGS_PER_ROUND : list.length)} blocked={p.blocked} onChange={categories => upSettings({ categories })} />
         </div>
 
         <div className={s.group}>
@@ -150,11 +174,16 @@ export function Setup(p: Props){
 
       <div className={sh.actions}>
         <div className={`${s.foot} ${sh.muted}`}>
-          <span>{S.rounds} rounds, one song each per round.</span>
-          <span>{list.length} {mode === "teams" ? "teams" : "playing"}</span>
+          {room ? <>
+            <span>{S.rounds} rounds of {ROOM_SONGS_PER_ROUND} songs.</span>
+            <span>Phones join next</span>
+          </> : <>
+            <span>{S.rounds} rounds, one song each per round.</span>
+            <span>{list.length} {mode === "teams" ? "teams" : "playing"}</span>
+          </>}
         </div>
-        <button type="button" className="btn btn-primary btn-block" onClick={p.startGame} disabled={!canStart}>
-          {p.savedGame ? "Start a new show" : "Start the show"}
+        <button type="button" className="btn btn-primary btn-block" onClick={room ? p.openRoom : p.startGame} disabled={!canStart}>
+          {room ? "Open a room" : p.savedGame ? "Start a new show" : "Start the show"}
         </button>
       </div>
     </div>
@@ -169,6 +198,19 @@ function ResumeCard({ game, onResume, onDiscard }: { game: GameState; onResume: 
       <p className={s.resumeLine}>
         Round {Math.min(game.round, game.totalRounds)} of {game.totalRounds}, {who?.name} is up next.
       </p>
+      <div className={sh.row2}>
+        <button type="button" className="btn btn-ghost" onClick={onDiscard}>Discard</button>
+        <button type="button" className="btn btn-primary" onClick={onResume}>Resume</button>
+      </div>
+    </div>
+  );
+}
+
+function RoomResumeCard({ show, onResume, onDiscard }: { show: HostShow; onResume: () => void; onDiscard: () => void }){
+  return (
+    <div className={s.resume}>
+      <div className={s.resumeHead}>Buzz-in show in progress</div>
+      <p className={s.resumeLine}>Room {show.code}, {show.songNo} of {show.total} songs played. Phones stay in their seats.</p>
       <div className={sh.row2}>
         <button type="button" className="btn btn-ghost" onClick={onDiscard}>Discard</button>
         <button type="button" className="btn btn-primary" onClick={onResume}>Resume</button>

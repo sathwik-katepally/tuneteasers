@@ -80,7 +80,8 @@ If a browser still refuses (`play()` rejects with `NotAllowedError`), the engine
 ## Sound effects
 
 `engine.sfx(name)` synthesises short effects on the engine's AudioContext; there are no audio files.
-Names: `tick` (a bulb clicking on, per countdown number), `roll` (countdown "Roll it"), `stamp` (the HOUSEFULL stamp), `projector` (the projector sputter on a miss), `flaps` (the box-office board settling) and `fanfare` (the podium).
+Names: `tick` (a bulb clicking on, per countdown number), `roll` (countdown "Roll it"), `stamp` (the HOUSEFULL stamp), `projector` (the projector sputter on a miss), `flaps` (the box-office board settling), `fanfare` (the podium), and on a room's host screen `buzz` (a game-show buzzer when someone buzzes in) and `nope` (a wrong answer).
+In a buzz-in room only the host screen makes any sound; phones are silent.
 It never creates or resumes the context itself, because it is also called from timers; a tap has to have called `ac()` first (every play and the hand-over prime do), otherwise the call is a silent no-op.
 Effects share one cached 0.5s noise buffer; each call builds a few short-lived oscillator and filter nodes that stop themselves.
 
@@ -95,7 +96,7 @@ An element that was routed through the Music-only gain gate is rewired straight 
 
 ## Diagnostics
 
-`src/lib/log.js` keeps a structured ring buffer (250 entries) mirrored to the console and persisted in localStorage: boot, crate tier results (including `snips: "ok"|"none"` and the `snipped` count), every play with its mode, and failures (`element-fail`, `snip-fail`, `element-play`, `play-blocked`, `sfx-fail`), plus `snippet` (rung and clip length), `skip` and `go-home` from the game.
+`src/lib/log.js` keeps a structured ring buffer (250 entries) mirrored to the console and persisted in localStorage: boot, crate tier results (including `snips: "ok"|"none"` and the `snipped` count), every play with its mode, and failures (`element-fail`, `snip-fail`, `element-play`, `play-blocked`, `sfx-fail`), plus `snippet` (rung and clip length), `skip` and `go-home` from the game, and `room-song` (each change of a room song's state on the host) and `room-create-fail`.
 A `boot` entry with no preceding `pagehide` is the signature of a crash or jetsam kill.
 On any device, append `?debug=1` to the URL for a live on-screen log overlay with copy-to-clipboard (`?debug=0` turns it off).
 `window.__ttLog.dump()` reads the log programmatically.

@@ -3,6 +3,7 @@ import {
   BROKEN_INVITE, GROUP_NAME_MAX, GroupError, createGroup, deleteGroup, inviteLink, joinGroup, leaveGroup,
   localHistoryCount, parseInvite, previewInvite, useGroup,
 } from "../lib/group";
+import { Qr } from "./Qr";
 import s from "./GroupPanel.module.css";
 
 type View = "summary" | "create" | "join" | "invite" | "leave" | "delete";
@@ -220,7 +221,7 @@ function InviteView({ invite, name, onDone }: { invite: string; name: string; on
     <section className={s.panel} aria-label="Invite a phone">
       <span className={s.eyebrow}>Invite a phone to {name}</span>
       <div className={s.inviteBody}>
-        <Qr text={link} />
+        <Qr text={link} className={s.qr} label="Invite QR code" />
         <p className={s.text}>Scan it with the other phone's camera, or send the link. Anyone with it joins the group and sees its past shows.</p>
       </div>
       <input id="tt-invite-link" className={`${s.input} ${s.code}`} value={link} readOnly aria-label="Invite link" onFocus={e => e.target.select()} />
@@ -232,27 +233,5 @@ function InviteView({ invite, name, onDone }: { invite: string; name: string; on
       </div>
       {canShare && <button type="button" className={`link ${s.linkBtn}`} onClick={onDone}>Done</button>}
     </section>
-  );
-}
-
-// The encoder loads only when an invite is shown, keeping it out of the game bundle.
-function Qr({ text }: { text: string }){
-  const [qr, setQr] = useState<{ size: number; d: string } | null>(null);
-  useEffect(() => {
-    let live = true;
-    import("uqr").then(({ encode }) => {
-      const { size, data } = encode(text, { ecc: "M", border: 2 });
-      let d = "";
-      data.forEach((row, y) => row.forEach((on, x) => { if (on) d += `M${x} ${y}h1v1h-1z`; }));
-      if (live) setQr({ size, d });
-    }, () => {});
-    return () => { live = false; };
-  }, [text]);
-  if (!qr) return <div className={s.qr} aria-hidden />;
-  return (
-    <svg className={s.qr} viewBox={`0 0 ${qr.size} ${qr.size}`} shapeRendering="crispEdges" role="img" aria-label="Invite QR code">
-      <rect width={qr.size} height={qr.size} fill="#fff8e8" />
-      <path d={qr.d} fill="#1c0b08" />
-    </svg>
   );
 }

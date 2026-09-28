@@ -8,7 +8,8 @@
     "deploy": "wrangler deploy"
   },
   "dependencies": {
-    "node-forge": "^1.4.0"
+    "node-forge": "^1.4.0",
+    "partyserver": "^0.5.10"
   },
   "devDependencies": {
     "wrangler": "^4.140.0"

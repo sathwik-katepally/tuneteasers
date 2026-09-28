@@ -15,12 +15,13 @@ interface Props {
   verdict: Verdict;
   note: string;
   onNext: () => void;
+  nextLabel?: string;
   primaryArtist: string;
   artistBlocked: boolean;
   onBlockArtist: () => void;
 }
 
-export function Reveal({ track, name, verdict, note, onNext, primaryArtist, artistBlocked, onBlockArtist }: Props){
+export function Reveal({ track, name, verdict, note, onNext, nextLabel, primaryArtist, artistBlocked, onBlockArtist }: Props){
   const reduce = useReducedMotion();
   const [open, setOpen] = useState(false);
   useEffect(() => {
@@ -71,7 +72,7 @@ export function Reveal({ track, name, verdict, note, onNext, primaryArtist, arti
           {correct ? `+${verdict.points} for ${name}, ${verdict.total} in total` : "Better luck next reel"}
         </m.p>
         <button type="button" className="btn btn-primary btn-block" onClick={onNext}>
-          {verdict.finished ? "Final box office" : verdict.roundOver ? "To the box office" : "Pass it on"}
+          {nextLabel ?? (verdict.finished ? "Final box office" : verdict.roundOver ? "To the box office" : "Pass it on")}
         </button>
         {primaryArtist && (
           <button type="button" className={s.block} onClick={onBlockArtist} disabled={artistBlocked}>
