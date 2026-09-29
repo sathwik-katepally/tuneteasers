@@ -21,6 +21,7 @@
     "e2e:group-edge": "node e2e/group-edge.mjs",
     "e2e:room": "node e2e/room.mjs",
     "e2e:room-norepeat": "node e2e/room-norepeat.mjs",
+    "e2e:room-background": "node e2e/room-background.mjs",
     "e2e:landing": "node e2e/landing.mjs",
     "e2e:journeys": "node e2e/journeys.mjs"
   },
