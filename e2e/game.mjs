@@ -11,7 +11,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { serve, open, args, saved, moreSettings } from "./harness.mjs";
 import { displayTitle, songKey } from "../src/lib/utils.js";
-import { CATEGORIES, SKIPS_PER_PLAYER, SPEED_BONUS_FADE_SECS, SPEED_BONUS_MAX } from "../src/lib/config.ts";
+import { CATEGORIES, HINT_PENALTY, SKIPS_PER_PLAYER, SPEED_BONUS_FADE_SECS, SPEED_BONUS_MAX } from "../src/lib/config.ts";
 
 const A = args({ profile: "phone", mode: "players", mix: "both", difficulty: "medium", rounds: "3" });
 const shotsDir = A.shots && A.shots !== "true" ? A.shots : null;
@@ -136,6 +136,8 @@ try {
     await shot("05-playing", 1200);
     if (turns < 2){
       await heardBtn.waitFor();
+      // Playback is requested before the clip is flowing, and the link stays disabled while it loads.
+      await page.waitForFunction(() => [...document.querySelectorAll("button")].some(b => b.textContent.startsWith("Heard it") && !b.disabled), null, { timeout: 25000 }).catch(() => {});
       const label = await heardBtn.textContent();
       if (!label.includes(`${SKIPS_PER_PLAYER} left`) || await heardBtn.isDisabled()) fail(`turn ${turns}: fresh contestant's skip reads "${label}"`);
     }
@@ -172,12 +174,23 @@ try {
       extended = true;
     }
     if (!hinted && turns === 1){
-      await btn(/Hint, costs/).click();
+      // Every hint on one song: each one shows up and takes HINT_PENALTY off what it is worth.
+      const g = (await saved(page)).game, t = g.queue[g.trackIdx];
+      const want = [t.year > 0 && `Released in ${t.year}`, t.music && `Music by ${t.music}`, t.artist && `Sung by ${t.artist}`, t.album && `From ${t.album}`].filter(Boolean);
+      for (let i = 0; i < want.length; i++){
+        const hint = btn(new RegExp(`^Hint ${i + 1} of ${want.length}, costs ${HINT_PENALTY}$`));
+        const before = Number((await page.getByText(/^Worth /).textContent()).match(/\d+/)[0]);
+        await hint.click();
+        await page.getByText(want[i], { exact: true }).waitFor();
+        const after = Number((await page.getByText(/^Worth /).textContent()).match(/\d+/)[0]);
+        if (after > before - HINT_PENALTY + 1 && after > 10) fail(`hint ${i + 1} took ${before - after}, not ${HINT_PENALTY}`);
+      }
+      if (!(await btn("No more hints").isDisabled())) fail("hint link still offered after the last hint");
       await shot("05c-hint", 300);
       hinted = true;
     }
     await page.getByText("Say the song or film out loud, then choose.").waitFor();
-    await btn("I don't know this one").waitFor();
+    await btn(/^I don.t know this one$|^Pass to /).waitFor();
     if (!taken.has("11-menu")){
       await btn("Game menu").click();
       await page.getByText("Standings").waitFor();
@@ -194,11 +207,37 @@ try {
       await page.waitForFunction(() => [...document.querySelectorAll("button")].some(b => b.textContent === "I know this one" && !b.disabled), null, { timeout: 25000 });
       resumed = true;
     }
-    const correct = turns % 3 !== 2;
-    const before = (await saved(page)).game.history.length;
+    // Every third song is passed on and stolen, every third passed round the table with nobody knowing it.
+    const pass = turns % 3 === 0 ? null : turns % 3 === 1 ? "steal" : "nobody";
+    const correct = pass !== "nobody";
+    const g0 = (await saved(page)).game;
+    const before = g0.history.length;
+    let scorer = g0.cast[g0.turn];
+    if (pass){
+      const passTo = btn(/^Pass to/);
+      for (let hop = 1; ; hop++){
+        if (!(await passTo.count())) break;
+        const next = g0.cast[(g0.turn + hop) % g0.cast.length];
+        if ((await passTo.textContent()).replace(/\s+/g, " ").trim() !== `Pass to ${next.name}`) fail(`pass button names ${await passTo.textContent()}, not ${next.name}`);
+        await passTo.click();
+        await page.getByText(new RegExp(`passed it to$`)).waitFor();
+        if (!taken.has("06-steal-handover")) await shot("06-steal-handover", 900);
+        await page.getByRole("button", { name: new RegExp(`^(It's with me|We're), ${next.name}|^We're ${next.name}, we'll take it$`) }).click();
+        await page.getByText(`${next.name} is stealing`).waitFor();
+        if (await heardBtn.count()) fail("Heard it too much offered to a stealer");
+        const stolen = (await saved(page)).game;
+        if (stolen.trackIdx !== g0.trackIdx || stolen.turn !== g0.turn) fail("a pass moved the song or the turn");
+        scorer = next;
+        if (pass === "steal") break;
+        if (!taken.has("06b-stealing")) await shot("06b-stealing", 300);
+      }
+      if (pass === "nobody" && scorer.id === g0.cast[g0.turn].id && g0.cast.length > 1) fail("nobody pass never left the contestant");
+    }
     const readAt = Date.now();
     const worth = Number((await page.getByText(/^Worth /).textContent()).match(/\d+/)[0]);
-    await btn(correct ? "I know this one" : "I don't know this one").click();
+    if (pass === "steal" && (worth < 10 || worth > 60)) fail(`steal worth ${worth} is not half points`);
+    const nobodyLink = btn("Nobody knows it");
+    await (correct ? btn("I know this one") : (await nobodyLink.count()) ? nobodyLink : btn("I don't know this one")).click();
     // The bonus keeps fading between reading "Worth" and the tap; a busy machine stretches that gap.
     const fade = Math.ceil((Date.now() - readAt) / 1000 * SPEED_BONUS_MAX / SPEED_BONUS_FADE_SECS) + 1;
     await page.getByRole("button", { name: /Pass it on|box office/ }).waitFor();
@@ -208,6 +247,11 @@ try {
     const history = (await saved(page)).game.history;
     const scored = history.at(-1).points;
     if (correct ? scored > worth || scored < worth - fade : scored !== 0) fail(`one-tap score ${scored} vs displayed worth ${worth}`);
+    const credited = correct ? scorer.id : g0.cast[g0.turn].id;
+    if (history.at(-1).id !== credited) fail(`song credited to ${history.at(-1).id}, not ${credited}`);
+    if (pass === "steal") await page.getByText(`+${scored} for ${scorer.name},`, { exact: false }).waitFor();
+    if (pass === "nobody") await page.getByText("Nothing for anyone").waitFor();
+    if ((await saved(page)).game.turn !== (g0.turn + 1) % g0.cast.length && !(await saved(page)).game.finished) fail("the turn after a pass did not go to the next contestant");
     await shot("07-reveal", 100);
     await shot(correct ? "07b-reveal-correct" : "08-reveal-wrong", 1300);
     await page.getByRole("button", { name: /Pass it on|box office/ }).click();
