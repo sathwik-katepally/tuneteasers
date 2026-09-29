@@ -85,13 +85,20 @@ Test locally with `npx wrangler d1 migrations apply DB --local && npx wrangler d
 
 ## Catalog refresh CI
 
-`.github/workflows/refresh-catalog.yml` runs `scripts/build-catalog.mjs` weekly (Mon 03:00 UTC) and commits `public/catalog.json` if changed, which in turn triggers a deploy.
+### Landing data commits
+
+main has a ruleset that requires a passing `verify` check on every commit pushed to it, and a push made with the workflow's `GITHUB_TOKEN` starts no workflows, so a data commit pushed straight to main is refused and would never deploy.
+The refresh workflows land their commit with `scripts/land-bot-commit.sh` instead: it rebases on main, pushes the commit to a `bot/data-<run>` branch, dispatches `verify.yml` there (a dispatch is the one event `GITHUB_TOKEN` may start), waits for it, pushes the same commit to main, dispatches `deploy.yml`, and deletes the branch.
+If main moves while verify runs, it rebases and verifies again, up to three times.
+The jobs that commit need `contents: write` and `actions: write`; on any branch but main the script just pushes.
+
+`.github/workflows/refresh-catalog.yml` runs `scripts/build-catalog.mjs` weekly (Mon 03:00 UTC) and commits `public/catalog.json` if changed and lands it on main (see Landing data commits).
 The script must stay sequential with delays (iTunes rate limit) and refuses to write a catalog with fewer than 100 tracks.
 The script imports its search terms and `EXCLUDE_RX` from `src/lib/constants.js`, so it shares the page-side filters described in docs/song-loading.md.
 
 ## Corpus refresh CI
 
-`.github/workflows/refresh-corpus.yml` runs `scripts/build-corpus.mjs` weekly (Tue 02:00 UTC) and commits `public/corpus.json` if changed, which triggers a deploy.
+`.github/workflows/refresh-corpus.yml` runs `scripts/build-corpus.mjs` weekly (Tue 02:00 UTC) and commits `public/corpus.json` if changed and lands it on main.
 Play counts move every week, so the file practically always changes.
 When it does, the `snips` job dispatches `refresh-snips.yml` (`gh workflow run`), so the snips index scores the newly added songs the same night.
 The script calls the Wikidata SPARQL endpoint (two queries per configured language, ~1 minute total), JioSaavn's `api.php` (a few hundred playlist fetches and roughly one title search per compilation copy, at concurrency 4) and English Wikipedia for the song categories (one title lookup per 50 candidate titles and one raw article per film, about 1,200); a full build takes about 15 minutes.
@@ -100,7 +107,7 @@ Run it locally with `CORPUS_CACHE=<dir>` to cache upstream responses across reru
 
 ## Snips refresh CI
 
-`.github/workflows/refresh-snips.yml` runs `scripts/build-snips.mjs` nightly (04:30 UTC; the weekly corpus refresh also dispatches it) and commits `public/snips.json` and `scripts/voice-curves.json` if changed, which in turn triggers a deploy.
+`.github/workflows/refresh-snips.yml` runs `scripts/build-snips.mjs` nightly (04:30 UTC; the weekly corpus refresh also dispatches it) and commits `public/snips.json` and `scripts/voice-curves.json` if changed and lands it on main.
 Its `plan` job counts the corpus songs without vocal-stem curves (`SNIP_PLAN=1`, no network) and starts one scoring runner per 35 of them, at most 40 and 20 at a time; a night with nothing to score skips scoring and only refreshes the index.
 Each runner scores its share (`SNIP_SHARD=i/n`, at most `limit` songs) and stops taking songs after 5 hours (`SNIP_BUDGET_MIN`), well inside GitHub's 6-hour job limit, so whatever it scored is kept; the rest wait for the next night.
 A `merge` job on the branch tip combines the shards' curves (`SNIP_MERGE=<dir>`), judges every corpus song from them, prints the curve coverage, the pass rate, entries per language/tier and the calibration, and commits.
