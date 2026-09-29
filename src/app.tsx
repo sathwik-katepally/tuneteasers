@@ -50,6 +50,8 @@ export function App(){
   const [turn, setTurn] = useState<Turn>(freshTurn);
   const [revealed, setRevealed] = useState<Track | null>(null);
   const [verdict, setVerdict] = useState<Verdict | null>(null);
+  // The cast index a passed song is with, or null while it is with the contestant whose turn it is.
+  const [steal, setSteal] = useState<number | null>(null);
   const [boardRound, setBoardRound] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -87,6 +89,10 @@ export function App(){
   const g = state.game;
   const track = g ? g.queue[g.trackIdx] ?? null : null;
   const who = g ? g.cast[g.turn] : null;
+  const guesser = g ? g.cast[steal ?? g.turn] : null;
+  // Round the table once: the song never comes back to the contestant whose turn it is.
+  const passIdx = g ? ((steal ?? g.turn) + 1) % g.cast.length : 0;
+  const passTo = g && passIdx !== g.turn ? g.cast[passIdx] : null;
   const plain = g ? DIFFICULTY[g.difficulty].sound === "full" : false;
 
   // A finished show goes to the group once; the id makes a resend harmless.
@@ -102,7 +108,7 @@ export function App(){
 
   function resetTurn(){
     clearTimeout(startOnShow.current); startOnShow.current = 0;
-    setTurn(freshTurn()); setVerdict(null); setRevealed(null); setNote(""); setSkipped("");
+    setTurn(freshTurn()); setVerdict(null); setRevealed(null); setNote(""); setSkipped(""); setSteal(null);
   }
 
   async function startGame(cast?: CastMember[]){
@@ -179,8 +185,9 @@ export function App(){
   }
 
   function revealAndScore(result: "correct" | "wrong"){
-    if (!g || !who || !track || verdict || phase === "reveal") return;
-    const points = result === "correct" ? pointsNow(ladderFor(plain), turn.rung, turn.clipEndedAt, turn.hint) : 0;
+    if (!g || !who || !guesser || !track || verdict || phase === "reveal") return;
+    const points = result === "correct" ? pointsNow(ladderFor(plain), turn.rung, turn.clipEndedAt, turn.hint, Date.now(), steal !== null) : 0;
+    const scorer = result === "correct" ? guesser : who;
     engine.stop();
     setNote("");
     engine.playElement(track.stream, hookOffset(track), 0, { onErr: () => setNote("Couldn't stream the full song.") });
@@ -188,12 +195,13 @@ export function App(){
     setPhase("reveal");
     markPlayed(track.title);
     recordPlay(track.title);
-    const cast = g.cast.map((c, i) => (i === g.turn ? { ...c, score: c.score + points } : c));
+    const cast = g.cast.map(c => (c.id === scorer.id ? { ...c, score: c.score + points } : c));
     const trackIdx = g.trackIdx + 1;
     const nextTurn = (g.turn + 1) % cast.length;
     const roundOver = nextTurn === 0;
     const finished = (roundOver && g.round >= g.totalRounds) || trackIdx >= g.queue.length;
-    setVerdict({ name: who.name, result, points, total: who.score + points, roundOver: roundOver || finished, finished, completedRound: g.round });
+    const name = result === "wrong" && steal !== null ? "anyone" : scorer.name;
+    setVerdict({ name, result, points, total: scorer.score + points, roundOver: roundOver || finished, finished, completedRound: g.round });
     setBoardRound(g.round);
     if (result === "correct") setTimeout(() => engine.sfx("stamp"), 90);
     else engine.sfx("projector");
@@ -201,8 +209,24 @@ export function App(){
       ...g, cast, trackIdx, finished,
       turn: finished ? g.turn : nextTurn,
       round: roundOver && !finished ? g.round + 1 : g.round,
-      history: [...g.history, { id: who.id, song: displayTitle(track.title), points, round: g.round }],
+      history: [...g.history, { id: scorer.id, song: displayTitle(track.title), points, round: g.round }],
     } }));
+  }
+
+  /* The song stays the same and so does the clip heard so far; the phone goes
+     to the next contestant, who can replay it or hear more. */
+  function passSong(){
+    if (!g || !passTo || verdict) return;
+    engine.stop();
+    log("pass", { to: passIdx });
+    setNote("");
+    setSteal(passIdx);
+    setPhase("steal");
+  }
+  function stealHanded(){
+    // The speed bonus starts fading from when the stealer has the phone, not from when the clip ended.
+    setTurn(t => ({ ...t, clipEndedAt: Date.now() }));
+    setPhase("listened");
   }
 
   function passOn(){
@@ -358,6 +382,11 @@ export function App(){
         key = `handover-${g.trackIdx}`;
         screen = <Handover game={g} holder={holder} onPrime={() => primeCurrent()} onHanded={() => setPhase("countdown")} />;
         break;
+      case "steal":
+        key = `steal-${steal}`;
+        screen = <Handover game={g} holder="" steal={{ name: guesser!.name, from: who!.name, worth: pointsNow(ladderFor(plain), turn.rung, Date.now(), turn.hint, Date.now(), true) }}
+          onPrime={() => {}} onHanded={stealHanded} />;
+        break;
       case "countdown":
         key = "countdown";
         screen = <Countdown skipped={skipped} onTick={n => engine.sfx(n > 0 ? "tick" : "roll")} onDone={startWhenShown} />;
@@ -373,8 +402,9 @@ export function App(){
         break;
       default:
         key = "playing";
-        screen = <Playing name={who!.name} track={track!} plain={plain} phase={phase} turn={turn} note={note}
+        screen = <Playing name={guesser!.name} track={track!} plain={plain} phase={phase} turn={turn} note={note} stealing={steal !== null}
           onPlay={playClip} onJudge={revealAndScore} onHint={() => setTurn(t => ({ ...t, hint: true }))} onSkip={skipSong}
+          passTo={passTo?.name} onPass={passSong}
           skipsLeft={Math.max(0, SKIPS_PER_PLAYER - who!.skips)} onHeardIt={heardItQueue ? heardIt : undefined} />;
     }
   }

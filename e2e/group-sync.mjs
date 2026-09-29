@@ -83,13 +83,13 @@ async function play(page, turns = null, { heardIt = false } = {}){
     if (await board.isVisible()){ await board.click(); await board.waitFor({ state: "detached" }); continue; }
     if (turns !== null && n >= turns) break;
     await handover.click();
-    const nope = btn("I don't know this one");
+    const nope = btn("I know this one");
     for (let skip = heardIt && !tired.length; ; skip = false){
       await nope.waitFor({ timeout: 30000 });
       for (let tries = 0; ; tries++){
         const dead = page.getByText("This song won't stream right now");
         await Promise.race([
-          page.waitForFunction(() => [...document.querySelectorAll("button")].some(b => b.textContent === "I don't know this one" && !b.disabled), null, { timeout: 30000 }),
+          page.waitForFunction(() => [...document.querySelectorAll("button")].some(b => b.textContent === "I know this one" && !b.disabled), null, { timeout: 30000 }),
           dead.waitFor({ timeout: 30000 }),
         ]).catch(() => {});
         if (!(await dead.isVisible())) break;

@@ -79,6 +79,7 @@ export interface AppState {
 
 export type Phase =
   | "handover"
+  | "steal"
   | "countdown"
   | "cueing"
   | "playing"
