@@ -74,3 +74,5 @@ try {
   server.close();
   worker.stop();
 }
+// The suite lock and wrangler's children keep the event loop alive, as in the other room suites.
+process.exit();
