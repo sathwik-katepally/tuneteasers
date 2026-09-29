@@ -136,6 +136,8 @@ try {
     await shot("05-playing", 1200);
     if (turns < 2){
       await heardBtn.waitFor();
+      // Playback is requested before the clip is flowing, and the link stays disabled while it loads.
+      await page.waitForFunction(() => [...document.querySelectorAll("button")].some(b => b.textContent.startsWith("Heard it") && !b.disabled), null, { timeout: 25000 }).catch(() => {});
       const label = await heardBtn.textContent();
       if (!label.includes(`${SKIPS_PER_PLAYER} left`) || await heardBtn.isDisabled()) fail(`turn ${turns}: fresh contestant's skip reads "${label}"`);
     }
