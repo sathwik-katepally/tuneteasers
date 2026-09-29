@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Lightbulb, Play, Plus, RotateCcw } from "lucide-react";
 import { Equalizer } from "../components/Equalizer";
-import { HINT_PENALTY, SPEED_BONUS_MAX, STEAL_SHARE, ladderFor, pointsNow } from "../lib/config";
+import { HINT_PENALTY, SPEED_BONUS_MAX, STEAL_SHARE, hintsFor, ladderFor, pointsNow } from "../lib/config";
 import type { Phase, Track, Turn } from "../types";
 import s from "./Playing.module.css";
 import sh from "./shared.module.css";
@@ -42,7 +42,9 @@ export function Playing({ name, track, plain, phase, turn, note, onPlay, onJudge
   const ladder = ladderFor(plain);
   const { from, to } = turn.span;
   const left = Math.max(0, Math.ceil(to - from - (now - turn.clipStartedAt) / 1000));
-  const worth = pointsNow(ladder, turn.rung, turn.clipEndedAt, turn.hint, now, stealing);
+  const worth = pointsNow(ladder, turn.rung, turn.clipEndedAt, turn.hints, now, stealing);
+  const hints = hintsFor(track);
+  const shown = hints.slice(0, turn.hints);
   const nextLen = turn.rung < ladder.last ? ladder.segments[turn.rung + 1] : null;
   const state = cueing ? "Loading" : playing ? `${left}s left` : phase === "blocked" ? "Paused" : "Guess, or hear more";
   const inSpan = (i: number) => i <= turn.rung && ladder.start(i) >= from;
@@ -62,15 +64,11 @@ export function Playing({ name, track, plain, phase, turn, note, onPlay, onJudge
               <Play size={18} strokeWidth={3} /> Tap to play
             </button>
           ) : <>
-            <div className={`${s.mark} ${playing ? s.markOn : ""}`}>?</div>
+            <div className={`${s.mark} ${playing ? s.markOn : ""} ${shown.length ? s.markSmall : ""}`}>?</div>
             <span className={s.posterLine}>{LINE[phase]}</span>
           </>}
           {note && <p className={s.note}>{note}</p>}
-          {turn.hint && (
-            <p className={s.hintShown}>
-              {track.album ? <>From <b>{track.album}</b></> : "No film on record"}{track.year ? `, ${track.year}` : ""}
-            </p>
-          )}
+          {shown.length > 0 && <p className={s.hintShown}>{shown.map(h => <span key={h}>{h}</span>)}</p>}
         </div>
         <Equalizer on={playing} />
       </div>
@@ -115,8 +113,8 @@ export function Playing({ name, track, plain, phase, turn, note, onPlay, onJudge
             : <button type="button" className="btn btn-cream" onClick={() => onJudge("wrong")} disabled={cueing}><span className={s.judgment}><span>I don't know</span> <span>this one</span></span></button>}
         </div>
         <div className={s.links}>
-          <button type="button" className={s.link} onClick={onHint} disabled={turn.hint}>
-            <Lightbulb size={15} strokeWidth={2.5} /> {turn.hint ? "Hint shown" : `Hint, costs ${HINT_PENALTY}`}
+          <button type="button" className={s.link} onClick={onHint} disabled={turn.hints >= hints.length}>
+            <Lightbulb size={15} strokeWidth={2.5} /> {turn.hints >= hints.length ? "No more hints" : `Hint ${turn.hints + 1} of ${hints.length}, costs ${HINT_PENALTY}`}
           </button>
           {note.includes("Skip it") ? <button type="button" className={s.link} onClick={onSkip}>Skip this song</button>
             : stealing ? passTo && <button type="button" className={s.link} onClick={() => onJudge("wrong")} disabled={cueing}>Nobody knows it</button>

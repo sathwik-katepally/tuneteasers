@@ -84,14 +84,16 @@ A chosen category that turns thin stays tappable so it can be turned off.
 Clip ladder: each turn starts with a 5s clip; "Hear 7s more" continues to 12s without replaying what was heard, and on Easy "Hear 8s more" goes on to 20s; Replay plays from the top to the current end (docs/audio.md).
 Music-only (Medium and Hard) stops at 12s because it may only play inside a verified 12-second vocal-free window.
 The ladders (`CLIP_LADDERS`, one per sound, and `ladderFor(plain)` with its `span`, `start` and `end`) are in `src/lib/config.ts` and the play call (`playRung`) in `src/lib/ladder.ts`, so any screen that runs a turn, the room host included, shares them.
-Points: 100 / 60 / 30 by rung on Easy and 100 / 60 on Music-only, plus a speed bonus of up to 20 that stays full while a clip plays and fades over about 13s once it has ended, minus 20 if the film/year hint was taken, never below 10.
+Points: 100 / 60 / 30 by rung on Easy and 100 / 60 on Music-only, plus a speed bonus of up to 20 that stays full while a clip plays and fades over about 13s once it has ended, minus 20 for each hint taken, never below 10.
+Hints come one tap at a time, least telling first (`HINT_ORDER` and `hintsFor` in `src/lib/config.ts`): the year, the music director, the singers, then the film, which goes last because naming the film scores.
+A detail the song's record lacks is left out, so the link counts what that song has ("Hint 1 of 3, costs 20").
 The player says the song or film aloud, then taps "I know this one" to score the current points, or "Pass to <next>" to hand the song on.
 Either "I know this one" or giving up records the turn and reveals the answer immediately.
 
 ## Passing and steals
 
 A contestant who doesn't know a song passes it to the next one in turn order, who can steal it (phase `steal`, a handover ticket that reads "<name> passed it to").
-The stealer gets the same song with the clip heard so far, can replay it, hear more or take the hint, and scores `STEAL_SHARE` (half) of what it is worth, never below the floor.
+The stealer gets the same song with the clip heard so far, can replay it, hear more or take more hints (the ones already shown stay up), and scores `STEAL_SHARE` (half) of what it is worth, never below the floor.
 Their speed bonus starts fading when they take the phone, not when the clip ended.
 A song goes round the table at most once: the contestant just before the one whose turn it is sees "I don't know this one" instead of a pass, and any stealer before that can end it with "Nobody knows it".
 The song is credited to whoever scored it (the history entry's `id`), or to the contestant whose turn it was when nobody did, so the box office and the group's past shows need nothing new.

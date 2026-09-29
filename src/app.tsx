@@ -30,7 +30,7 @@ const buildCrate = buildCrateJs as (mix: string, eras: string[], sound: string, 
 const withSameTierNext = withSameTierNextJs as (queue: Track[], idx: number) => Track[] | null;
 const refreshMusicQueue = refreshMusicQueueJs as (queue: Track[]) => Promise<Track[]>;
 
-const freshTurn = (): Turn => ({ rung: 0, span: { from: 0, to: 0 }, clipEndedAt: null, clipStartedAt: 0, playKey: 0, hint: false });
+const freshTurn = (): Turn => ({ rung: 0, span: { from: 0, to: 0 }, clipEndedAt: null, clipStartedAt: 0, playKey: 0, hints: 0 });
 const primaryArtistOf = (t: Track | null) => (t ? String(t.artist || "").split(",")[0].trim() : "");
 
 export function App(){
@@ -186,7 +186,7 @@ export function App(){
 
   function revealAndScore(result: "correct" | "wrong"){
     if (!g || !who || !guesser || !track || verdict || phase === "reveal") return;
-    const points = result === "correct" ? pointsNow(ladderFor(plain), turn.rung, turn.clipEndedAt, turn.hint, Date.now(), steal !== null) : 0;
+    const points = result === "correct" ? pointsNow(ladderFor(plain), turn.rung, turn.clipEndedAt, turn.hints, Date.now(), steal !== null) : 0;
     const scorer = result === "correct" ? guesser : who;
     engine.stop();
     setNote("");
@@ -384,7 +384,7 @@ export function App(){
         break;
       case "steal":
         key = `steal-${steal}`;
-        screen = <Handover game={g} holder="" steal={{ name: guesser!.name, from: who!.name, worth: pointsNow(ladderFor(plain), turn.rung, Date.now(), turn.hint, Date.now(), true) }}
+        screen = <Handover game={g} holder="" steal={{ name: guesser!.name, from: who!.name, worth: pointsNow(ladderFor(plain), turn.rung, Date.now(), turn.hints, Date.now(), true) }}
           onPrime={() => {}} onHanded={stealHanded} />;
         break;
       case "countdown":
@@ -403,7 +403,7 @@ export function App(){
       default:
         key = "playing";
         screen = <Playing name={guesser!.name} track={track!} plain={plain} phase={phase} turn={turn} note={note} stealing={steal !== null}
-          onPlay={playClip} onJudge={revealAndScore} onHint={() => setTurn(t => ({ ...t, hint: true }))} onSkip={skipSong}
+          onPlay={playClip} onJudge={revealAndScore} onHint={() => setTurn(t => ({ ...t, hints: t.hints + 1 }))} onSkip={skipSong}
           passTo={passTo?.name} onPass={passSong}
           skipsLeft={Math.max(0, SKIPS_PER_PLAYER - who!.skips)} onHeardIt={heardItQueue ? heardIt : undefined} />;
     }

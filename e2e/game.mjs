@@ -11,7 +11,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { serve, open, args, saved, moreSettings } from "./harness.mjs";
 import { displayTitle, songKey } from "../src/lib/utils.js";
-import { CATEGORIES, SKIPS_PER_PLAYER, SPEED_BONUS_FADE_SECS, SPEED_BONUS_MAX } from "../src/lib/config.ts";
+import { CATEGORIES, HINT_PENALTY, SKIPS_PER_PLAYER, SPEED_BONUS_FADE_SECS, SPEED_BONUS_MAX } from "../src/lib/config.ts";
 
 const A = args({ profile: "phone", mode: "players", mix: "both", difficulty: "medium", rounds: "3" });
 const shotsDir = A.shots && A.shots !== "true" ? A.shots : null;
@@ -174,7 +174,18 @@ try {
       extended = true;
     }
     if (!hinted && turns === 1){
-      await btn(/Hint, costs/).click();
+      // Every hint on one song: each one shows up and takes HINT_PENALTY off what it is worth.
+      const g = (await saved(page)).game, t = g.queue[g.trackIdx];
+      const want = [t.year > 0 && `Released in ${t.year}`, t.music && `Music by ${t.music}`, t.artist && `Sung by ${t.artist}`, t.album && `From ${t.album}`].filter(Boolean);
+      for (let i = 0; i < want.length; i++){
+        const hint = btn(new RegExp(`^Hint ${i + 1} of ${want.length}, costs ${HINT_PENALTY}$`));
+        const before = Number((await page.getByText(/^Worth /).textContent()).match(/\d+/)[0]);
+        await hint.click();
+        await page.getByText(want[i], { exact: true }).waitFor();
+        const after = Number((await page.getByText(/^Worth /).textContent()).match(/\d+/)[0]);
+        if (after > before - HINT_PENALTY + 1 && after > 10) fail(`hint ${i + 1} took ${before - after}, not ${HINT_PENALTY}`);
+      }
+      if (!(await btn("No more hints").isDisabled())) fail("hint link still offered after the last hint");
       await shot("05c-hint", 300);
       hinted = true;
     }
