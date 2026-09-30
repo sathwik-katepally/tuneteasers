@@ -64,7 +64,7 @@ export function Playing({ name, track, plain, phase, turn, note, onPlay, onJudge
               <Play size={18} strokeWidth={3} /> Tap to play
             </button>
           ) : <>
-            <div className={`${s.mark} ${playing ? s.markOn : ""} ${shown.length ? s.markSmall : ""}`}>?</div>
+            {!shown.length && <div className={`${s.mark} ${playing ? s.markOn : ""}`}>?</div>}
             <span className={s.posterLine}>{LINE[phase]}</span>
           </>}
           {note && <p className={s.note}>{note}</p>}
