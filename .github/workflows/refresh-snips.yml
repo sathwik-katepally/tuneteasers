@@ -91,6 +91,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      pull-requests: write
       actions: write
     steps:
       # The branch tip, not the commit that started this hours-long run.

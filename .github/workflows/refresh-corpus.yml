@@ -10,6 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      pull-requests: write
       actions: write
     outputs:
       changed: ${{ steps.commit.outputs.changed }}

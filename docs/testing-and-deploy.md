@@ -87,10 +87,10 @@ Test locally with `npx wrangler d1 migrations apply DB --local && npx wrangler d
 
 ### Landing data commits
 
-main has a ruleset that requires a passing `verify` check on every commit pushed to it, and a push made with the workflow's `GITHUB_TOKEN` starts no workflows, so a data commit pushed straight to main is refused and would never deploy.
-The refresh workflows land their commit with `scripts/land-bot-commit.sh` instead: it rebases on main, pushes the commit to a `bot/data-<run>` branch, dispatches `verify.yml` there (a dispatch is the one event `GITHUB_TOKEN` may start), waits for it, pushes the same commit to main, dispatches `deploy.yml`, and deletes the branch.
-If main moves while verify runs, it rebases and verifies again, up to three times.
-The jobs that commit need `contents: write` and `actions: write`; on any branch but main the script just pushes.
+main has a ruleset that requires a passing `verify` check, and in practice it only lets commits in through a merged pull request: a direct push is refused even when the commit already carries a passing `verify`.
+A pull request opened with the workflow's `GITHUB_TOKEN` starts no workflows, so the refresh workflows land their commit with `scripts/land-bot-commit.sh`: it rebases on main, pushes the commit to a `bot/data-<run>` branch, opens a PR, dispatches `verify.yml` on that branch (a dispatch is the one event `GITHUB_TOKEN` may start), squash-merges the PR once it passes, and dispatches `deploy.yml`, since the merge starts no deploy either.
+A PR whose `verify` fails stays open for a person to look at, and the workflow's alert fires.
+The jobs that commit need `contents`, `pull-requests` and `actions: write`, and the repo setting "Allow GitHub Actions to create and approve pull requests" must stay on; on any branch but main the script just pushes.
 
 `.github/workflows/refresh-catalog.yml` runs `scripts/build-catalog.mjs` weekly (Mon 03:00 UTC) and commits `public/catalog.json` if changed and lands it on main (see Landing data commits).
 The script must stay sequential with delays (iTunes rate limit) and refuses to write a catalog with fewer than 100 tracks.
