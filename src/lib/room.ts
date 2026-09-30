@@ -233,6 +233,24 @@ export function useRoom(code: string, hello: object | (() => object) | null){
 
   useEffect(() => { setView(null); setHeard(null); setGone(null); setError(null); setLink("connecting"); kicked.current = false; }, [code]);
 
+  /* iOS suspends a page in the background, which is where a host goes to send
+     the code, and can drop its socket without a close: it still looks open but
+     nothing arrives, so the lobby never shows who joined meanwhile. Coming back
+     reconnects, and the hello brings the whole view again. */
+  const live = !!code && !!hello && !gone;
+  useEffect(() => {
+    if (!live) return;
+    let hiddenAt = 0;
+    const vis = () => {
+      if (document.visibilityState === "hidden") hiddenAt = Date.now();
+      else if (hiddenAt && Date.now() - hiddenAt > 2000){ hiddenAt = 0; socket.reconnect(); }
+    };
+    const show = (e: PageTransitionEvent) => { if (e.persisted) socket.reconnect(); };
+    document.addEventListener("visibilitychange", vis);
+    window.addEventListener("pageshow", show);
+    return () => { document.removeEventListener("visibilitychange", vis); window.removeEventListener("pageshow", show); };
+  }, [live, socket]);
+
   const send = (m: object) => {
     if (socket.readyState !== WebSocket.OPEN) return false;
     socket.send(JSON.stringify(m));

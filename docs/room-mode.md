@@ -114,6 +114,8 @@ Codes are four letters from `BCDFGHJKLMNPQRSTVWXZ` (no vowels, so no words).
 
 - A phone makes a random seat key per room and keeps it in `localStorage` (`tt_room_seat`); the room stores only its hash.
   Every reconnect (PartySocket retries on its own) says hello with the key, so a dropped, reloaded or reopened phone keeps its seat and score.
+- A device coming back from the background (more than 2 seconds hidden, or restored from the back-forward cache) reconnects straight away.
+  iOS suspends a backgrounded page and can drop its socket without a close event, so it would look open and receive nothing: a host that left Safari to send the code would never see who joined meanwhile.
 - The room link `#room=CODE` stays in the address bar while a phone is in the room, so a reload goes straight back in.
 - The host keeps its show (code, host secret, queue and position) in `tt_room_host`. After a reload the home screen offers "Resume", and the host reconciles with the room rather than its saved counters: a song the room finished while the host was away (someone answered during the reload) counts as played and comes back on its reveal, a reload on the final reveal returns to that reveal and the end of the show, and only an unfinished song starts over.
 - Close codes 4404 (no such room), 4403 (not the host, or removed) and 4410 (room expired) stop the retries and send the device home with a message.
