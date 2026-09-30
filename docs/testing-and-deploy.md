@@ -87,8 +87,10 @@ Test locally with `npx wrangler d1 migrations apply DB --local && npx wrangler d
 
 ### Landing data commits
 
-main has a ruleset that requires a passing `verify` check, and in practice it only lets commits in through a merged pull request: a direct push is refused even when the commit already carries a passing `verify`.
-A pull request opened with the workflow's `GITHUB_TOKEN` starts no workflows, so the refresh workflows land their commit with `scripts/land-bot-commit.sh`: it rebases on main, pushes the commit to a `bot/data-<run>` branch, opens a PR, dispatches `verify.yml` on that branch (a dispatch is the one event `GITHUB_TOKEN` may start), squash-merges the PR once it passes, and dispatches `deploy.yml`, since the merge starts no deploy either.
+main has a ruleset that requires a passing `verify` check, and it only counts a `verify` that a pull request started: a direct push is refused, and so is a merge relying on a `verify` dispatched on the branch, even on the same commit.
+The refresh workflows land their commit with `scripts/land-bot-commit.sh`: it rebases on main, pushes the commit to a `bot/data-<run>` branch and opens a PR.
+A PR opened with the workflow's `GITHUB_TOKEN` does start "Verify pull request", but GitHub parks the run as `action_required` until someone approves it, so the script approves it (the approve-run API), waits for it, squash-merges the PR, and dispatches `deploy.yml`, since a merge made with `GITHUB_TOKEN` starts no deploy.
+The PR's E2E run stays parked; it is not required, and the release matrix covers the data after the deploy.
 A PR whose `verify` fails stays open for a person to look at, and the workflow's alert fires.
 The jobs that commit need `contents`, `pull-requests` and `actions: write`, and the repo setting "Allow GitHub Actions to create and approve pull requests" must stay on; on any branch but main the script just pushes.
 

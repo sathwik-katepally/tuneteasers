@@ -2,8 +2,6 @@ name: Verify pull request
 
 on:
   pull_request:
-  # The data refresh workflows dispatch it on their commits (scripts/land-bot-commit.sh).
-  workflow_dispatch:
 
 permissions:
   contents: read
