@@ -46,6 +46,12 @@ export const SPEED_BONUS_MAX = 20;
 export const SPEED_BONUS_FADE_SECS = 13;
 export const POINTS_FLOOR = 10;
 export const HINT_PENALTY = 20;
+/* Hints come one tap at a time, least telling first, each costing HINT_PENALTY.
+   The film goes last because naming the film scores. */
+export const HINT_ORDER = ["year", "music", "singers", "film"] as const;
+/* A contestant can pass a song on round the table instead of giving up; whoever
+   steals it scores this share of what it is worth then, never below the floor. */
+export const STEAL_SHARE = 0.5;
 
 export const ROUND_OPTIONS = [3, 5, 8] as const;
 export const DEFAULT_ROUNDS = 5;
@@ -101,9 +107,17 @@ export function speedBonus(clipEndedAt: number | null, now: number): number {
   return Math.max(0, Math.round(SPEED_BONUS_MAX * (1 - waited / SPEED_BONUS_FADE_SECS)));
 }
 
-export function pointsNow(l: Ladder, rung: number, clipEndedAt: number | null, hint: boolean, now = Date.now()): number {
+export function pointsNow(l: Ladder, rung: number, clipEndedAt: number | null, hints: number, now = Date.now(), steal = false): number {
   const base = l.points[Math.min(rung, l.last)];
-  return Math.max(POINTS_FLOOR, base + speedBonus(clipEndedAt, now) - (hint ? HINT_PENALTY : 0));
+  const full = Math.max(POINTS_FLOOR, base + speedBonus(clipEndedAt, now) - hints * HINT_PENALTY);
+  return steal ? Math.max(POINTS_FLOOR, Math.round(full * STEAL_SHARE)) : full;
+}
+
+/* The hints a song has, in HINT_ORDER; a detail missing from its record is left out. */
+export function hintsFor(t: Track): string[] {
+  const text = { year: t.year > 0 ? `Released in ${t.year}` : "", music: t.music ? `Music by ${t.music}` : "",
+    singers: t.artist ? `Sung by ${t.artist}` : "", film: t.album ? `From ${t.album}` : "" };
+  return HINT_ORDER.map(k => text[k]).filter(Boolean);
 }
 
 /* A likely hook for full-length songs: past the intro, clear of the outro.

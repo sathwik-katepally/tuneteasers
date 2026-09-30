@@ -79,6 +79,7 @@ export interface AppState {
 
 export type Phase =
   | "handover"
+  | "steal"
   | "countdown"
   | "cueing"
   | "playing"
@@ -94,7 +95,8 @@ export interface Turn {
   clipEndedAt: number | null;
   clipStartedAt: number;
   playKey: number;
-  hint: boolean;
+  /* How many hints have been shown (hintsFor). */
+  hints: number;
 }
 
 export interface Verdict {

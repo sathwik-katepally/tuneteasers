@@ -13,7 +13,7 @@ Only one suite runs at a time per machine: importing `e2e/harness.mjs` takes a l
 A suite that is killed stops refreshing the lock, and the next one takes it over within a minute.
 CI runners (`CI` set) skip the lock.
 
-- `e2e/game.mjs` - plays a whole show through the UI: setup, hand-over, countdown, clip ladder (one "Hear 7s more"), hint, Home and Resume mid-turn, the game menu, both one-tap scoring choices, box office after each round, podium.
+- `e2e/game.mjs` - plays a whole show through the UI: setup, hand-over, countdown, clip ladder (one "Hear 7s more"), every hint on one song (each shows and costs its points), Home and Resume mid-turn, the game menu, a right answer, a pass that the next contestant steals for half, a pass round the table that nobody knows (ended by "Nobody knows it" or the last contestant's "I don't know this one"), box office after each round, podium.
   The first contestant spends their "Heard it too much" skip (the title shows on the countdown, the same contestant gets a song from the same tier, the song is in `tt_tired` and not `tt_played`, the stub then reads Used), and a dead stream seeded into the saved queue checks that the stream-error skip is free and records nothing.
   It then checks the bookkeeping (every contestant's score equals their history, one history entry per turn, points in range, team members kept), that no page errors were thrown, and that no in-game screen scrolls at that size.
   Flags: `--profile=phone|desktop --mode=players|teams --mix=bolly|telugu|both --difficulty=easy|medium|hard --rounds=3|5|8 --categories=item,mass --reduced --no-worker --shots=<dir>`; `--categories` picks those chips and checks that the game came from the corpus and every queued song carries one of the tags; `--shots` saves one screenshot per screen for review, and `--no-worker` makes the project's Worker unreachable (songs come from the mirror).
@@ -86,13 +86,20 @@ Test locally with `npx wrangler d1 migrations apply DB --local && npx wrangler d
 
 ## Catalog refresh CI
 
-`.github/workflows/refresh-catalog.yml` runs `scripts/build-catalog.mjs` weekly (Mon 03:00 UTC) and commits `public/catalog.json` if changed, which in turn triggers a deploy.
+### Landing data commits
+
+main has a ruleset that requires a passing `verify` check, and in practice it only lets commits in through a merged pull request: a direct push is refused even when the commit already carries a passing `verify`.
+A pull request opened with the workflow's `GITHUB_TOKEN` starts no workflows, so the refresh workflows land their commit with `scripts/land-bot-commit.sh`: it rebases on main, pushes the commit to a `bot/data-<run>` branch, opens a PR, dispatches `verify.yml` on that branch (a dispatch is the one event `GITHUB_TOKEN` may start), squash-merges the PR once it passes, and dispatches `deploy.yml`, since the merge starts no deploy either.
+A PR whose `verify` fails stays open for a person to look at, and the workflow's alert fires.
+The jobs that commit need `contents`, `pull-requests` and `actions: write`, and the repo setting "Allow GitHub Actions to create and approve pull requests" must stay on; on any branch but main the script just pushes.
+
+`.github/workflows/refresh-catalog.yml` runs `scripts/build-catalog.mjs` weekly (Mon 03:00 UTC) and commits `public/catalog.json` if changed and lands it on main (see Landing data commits).
 The script must stay sequential with delays (iTunes rate limit) and refuses to write a catalog with fewer than 100 tracks.
 The script imports its search terms and `EXCLUDE_RX` from `src/lib/constants.js`, so it shares the page-side filters described in docs/song-loading.md.
 
 ## Corpus refresh CI
 
-`.github/workflows/refresh-corpus.yml` runs `scripts/build-corpus.mjs` weekly (Tue 02:00 UTC) and commits `public/corpus.json` if changed, which triggers a deploy.
+`.github/workflows/refresh-corpus.yml` runs `scripts/build-corpus.mjs` weekly (Tue 02:00 UTC) and commits `public/corpus.json` if changed and lands it on main.
 Play counts move every week, so the file practically always changes.
 When it does, the `snips` job dispatches `refresh-snips.yml` (`gh workflow run`), so the snips index scores the newly added songs the same night.
 The script calls the Wikidata SPARQL endpoint (two queries per configured language, ~1 minute total), JioSaavn's `api.php` (a few hundred playlist fetches and roughly one title search per compilation copy, at concurrency 4) and English Wikipedia for the song categories (one title lookup per 50 candidate titles and one raw article per film, about 1,200); a full build takes about 15 minutes.
@@ -101,7 +108,7 @@ Run it locally with `CORPUS_CACHE=<dir>` to cache upstream responses across reru
 
 ## Snips refresh CI
 
-`.github/workflows/refresh-snips.yml` runs `scripts/build-snips.mjs` nightly (04:30 UTC; the weekly corpus refresh also dispatches it) and commits `public/snips.json` and `scripts/voice-curves.json` if changed, which in turn triggers a deploy.
+`.github/workflows/refresh-snips.yml` runs `scripts/build-snips.mjs` nightly (04:30 UTC; the weekly corpus refresh also dispatches it) and commits `public/snips.json` and `scripts/voice-curves.json` if changed and lands it on main.
 Its `plan` job counts the corpus songs without vocal-stem curves (`SNIP_PLAN=1`, no network) and starts one scoring runner per 35 of them, at most 40 and 20 at a time; a night with nothing to score skips scoring and only refreshes the index.
 Each runner scores its share (`SNIP_SHARD=i/n`, at most `limit` songs) and stops taking songs after 5 hours (`SNIP_BUDGET_MIN`), well inside GitHub's 6-hour job limit, so whatever it scored is kept; the rest wait for the next night.
 A `merge` job on the branch tip combines the shards' curves (`SNIP_MERGE=<dir>`), judges every corpus song from them, prints the curve coverage, the pass rate, entries per language/tier and the calibration, and commits.
