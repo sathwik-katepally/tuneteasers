@@ -68,12 +68,6 @@
   line-height: 0.9;
 }
 
-/* Room for up to four hints on a short phone. */
-.markSmall {
-  font-size: clamp(36px, 7vh, 72px);
-  text-shadow: 4px 4px 0 var(--ink);
-}
-
 .markOn {
   animation: sway 1.6s ease-in-out infinite;
 }
