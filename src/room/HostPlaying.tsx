@@ -1,13 +1,15 @@
-import { useEffect, useState } from "react";
 import { Eye, Play, Plus } from "lucide-react";
+import { ClipStrip, useNow } from "../components/ClipStrip";
 import { Equalizer } from "../components/Equalizer";
 import { ROOM_WRONG_BEAT_MS, type Ladder } from "../lib/config";
+import type { ClipStatus } from "../lib/ladder";
 import { playerName, type Link, type RoomSong, type RoomView } from "../lib/room";
+import type { Turn } from "../types";
 import p from "../screens/Playing.module.css";
 import sh from "../screens/shared.module.css";
 import s from "./HostPlaying.module.css";
 
-export type Audio = "cueing" | "playing" | "listened" | "blocked" | "paused";
+export type Audio = ClipStatus | "paused";
 
 interface Props {
   view: RoomView;
@@ -15,7 +17,7 @@ interface Props {
   songNo: number;
   total: number;
   ladder: Ladder;
-  clip: { rung: number; span: { from: number; to: number }; startedAt: number; key: number };
+  clip: Turn;
   audio: Audio;
   graceUntil: number | null;
   msLeft: number | null;
@@ -30,12 +32,7 @@ interface Props {
 }
 
 export function HostPlaying({ view, song, songNo, total, ladder, clip, audio, graceUntil, msLeft, note, wrong, link, onPlay, onMore, onReveal, onSkip, onHeardIt }: Props){
-  const [now, setNow] = useState(Date.now);
-  useEffect(() => {
-    const id = window.setInterval(() => setNow(Date.now()), 200);
-    return () => window.clearInterval(id);
-  }, []);
-
+  const now = useNow();
   const state = song?.state ?? "cue";
   const playing = audio === "playing";
   const cueing = audio === "cueing";
@@ -46,8 +43,7 @@ export function HostPlaying({ view, song, songNo, total, ladder, clip, audio, gr
   const recentWrong = wrong && now - wrong.at < ROOM_WRONG_BEAT_MS + 700 ? wrong : null;
   const { from, to } = clip.span;
   const nextLen = clip.rung < ladder.last ? ladder.segments[clip.rung + 1] : null;
-  const clipLeft = Math.max(0, Math.ceil(to - from - (now - clip.startedAt) / 1000));
-  const inSpan = (i: number) => i <= clip.rung && ladder.start(i) >= from;
+  const clipLeft = Math.max(0, Math.ceil(to - from - (now - clip.clipStartedAt) / 1000));
   const paused = answering || audio === "paused";
   const line = answering ? "" : state === "missed" ? "Nobody yet"
     : cueing ? "Threading the film" : playing ? "Buzz when you know it" : graceLeft !== null ? `Anyone? ${graceLeft}` : "";
@@ -99,27 +95,7 @@ export function HostPlaying({ view, song, songNo, total, ladder, clip, audio, gr
         <Equalizer on={playing} />
       </div>
 
-      <div className={p.ladder}>
-        <div className={p.ladderHead}>
-          <span className={p.ladderLabel}>Clip length</span>
-          <span className={p.ladderState}>{ladderState}</span>
-        </div>
-        <div className={p.strip} style={{ gridTemplateColumns: ladder.segments.map(sec => `${sec}fr`).join(" ") }}>
-          {ladder.segments.map((sec, i) => {
-            const heard = i < clip.rung || (i === clip.rung && !cueing);
-            const running = (playing || paused) && inSpan(i) && clip.startedAt > 0;
-            return (
-              <div key={i} className={`${p.frame} ${heard && !running && !(cueing && inSpan(i)) ? p.frameDone : ""} ${i === clip.rung ? p.frameNow : ""} ${running ? p.frameLit : ""}`}>
-                {running && (
-                  <div key={clip.key} className={`${p.frameFill} ${p.frameRun}`}
-                    style={{ animationDuration: `${sec}s`, animationDelay: `${ladder.start(i) - from}s`, animationPlayState: paused ? "paused" : undefined }} />
-                )}
-                <span className={p.frameText}>{i ? "+" : ""}{sec}s · {ladder.points[i]}</span>
-              </div>
-            );
-          })}
-        </div>
-      </div>
+      <ClipStrip ladder={ladder} turn={clip} cueing={cueing} playing={playing} paused={paused} state={ladderState} />
 
       <div className={s.seats} aria-label="Players">
         {view.players.map(pl => {

@@ -193,132 +193,14 @@
   color: var(--teal);
 }
 
-.ladder {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.ladderHead {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-}
-
-.ladderLabel {
-  composes: eyebrow from global;
-  color: var(--cream-dim);
-}
-
-.ladderState {
-  font-size: 13px;
-  color: var(--cream-dim);
-}
-
-.strip {
-  position: relative;
-  display: grid;
-  gap: 4px;
-  padding: 9px 6px;
-  background: var(--ink);
-  border: 2px solid var(--cream-shade);
-}
-
-.strip::before,
-.strip::after {
-  content: '';
-  position: absolute;
-  left: 6px;
-  right: 6px;
-  height: 4px;
-  background: repeating-linear-gradient(90deg, var(--cream-dim) 0 7px, transparent 7px 14px);
-}
-
-.strip::before {
-  top: 2px;
-}
-
-.strip::after {
-  bottom: 2px;
-}
-
-.frame {
-  position: relative;
-  height: 34px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 700;
-  font-size: 13px;
-  color: var(--cream-shade);
-  background: #2c1a15;
-  overflow: hidden;
-}
-
-.frameDone {
-  background: var(--vermilion-deep);
-  color: var(--cream);
-}
-
-.frameNow {
-  color: var(--cream);
-  outline: 2px solid var(--bulb);
-  outline-offset: -2px;
-}
-
-.frameLit {
-  color: var(--cream);
-}
-
-.frameFill {
-  position: absolute;
-  inset: 0;
-  background: var(--vermilion);
-  transform-origin: left;
-}
-
-.frameRun {
-  animation-name: fill;
-  animation-timing-function: linear;
-  animation-fill-mode: both;
-}
-
-@keyframes fill {
-  from {
-    transform: scaleX(0);
-  }
-  to {
-    transform: scaleX(1);
-  }
-}
-
-.frameText {
-  position: relative;
-}
-
-
-
-
-
-
 @media (min-width: 900px) {
   .screen {
     min-height: 300px;
   }
 }
 
-
 @media (max-height: 760px) {
   .pelmet {
     height: 16px;
-  }
-  .strip {
-    padding: 8px 6px;
-  }
-  .frame {
-    height: 28px;
-  }
-  .ladder {
-    gap: 6px;
   }
 }

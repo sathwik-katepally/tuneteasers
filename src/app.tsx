@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { isFirstVisit, loadSaved, save } from "./lib/save";
 import { DIFFICULTY, SKIPS_PER_PLAYER, hookOffset, ladderFor, pointsNow } from "./lib/config";
-import { playRung } from "./lib/ladder";
+import { useClipPlayer } from "./lib/ladder";
 import { cooldownOf, loadHistory, markPlayed, loadBlocked, saveBlocked, normArtist, isBlocked, type Cooldown } from "./lib/storage";
 import { buildCrate, refreshMusicQueue, withSameTierNext } from "./lib/crate";
 import { engine, keepAwake } from "./lib/engine.js";
@@ -23,9 +23,8 @@ import { Podium } from "./screens/Podium";
 import { Landing } from "./screens/Landing";
 import { PastGames } from "./screens/PastGames";
 import { GroupScreen } from "./screens/GroupScreen";
-import type { AppState, CastMember, GameState, Mode, Phase, Play, RosterEntry, Settings, Track, Turn, Verdict } from "./types";
+import type { AppState, CastMember, GameState, Mode, Phase, Play, RosterEntry, Settings, Track, Verdict } from "./types";
 
-const freshTurn = (): Turn => ({ rung: 0, span: { from: 0, to: 0 }, clipEndedAt: null, clipStartedAt: 0, playKey: 0, hints: 0 });
 const primaryArtistOf = (t: Track | null) => (t ? String(t.artist || "").split(",")[0].trim() : "");
 
 export function App(){
@@ -42,7 +41,6 @@ export function App(){
   const [hostResume, setHostResume] = useState(false);
   const [hostShow, setHostShow] = useState(loadHostShow);
   const [phase, setPhase] = useState<Phase>("handover");
-  const [turn, setTurn] = useState<Turn>(freshTurn);
   const [revealed, setRevealed] = useState<Track | null>(null);
   const [verdict, setVerdict] = useState<Verdict | null>(null);
   // The cast index a passed song is with, or null while it is with the contestant whose turn it is.
@@ -50,7 +48,6 @@ export function App(){
   const [boardRound, setBoardRound] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [note, setNote] = useState("");
   // The title of a song just skipped as heard too much, shown on the next countdown.
   const [skipped, setSkipped] = useState("");
   const [blocked, setBlocked] = useState<string[]>(loadBlocked);
@@ -94,6 +91,11 @@ export function App(){
   const passIdx = g ? ((steal ?? g.turn) + 1) % g.cast.length : 0;
   const passTo = g && passIdx !== g.turn ? g.cast[passIdx] : null;
   const plain = g ? DIFFICULTY[g.difficulty].sound === "full" : false;
+  const player = useClipPlayer({ track, plain,
+    // A refused play() reports back before playing starts; keep the tap prompt.
+    setStatus: s => setPhase(p => (s === "playing" && (p === "blocked" || p === "listened") ? p : s)),
+  });
+  const { turn, setTurn, note, setNote, play: playClip } = player;
 
   // A finished show goes to the group once; the id makes a resend harmless.
   useEffect(() => { if (g?.finished) recordResult(g); }, [g?.id, g?.finished]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -108,7 +110,7 @@ export function App(){
 
   function resetTurn(){
     clearTimeout(startOnShow.current); startOnShow.current = 0;
-    setTurn(freshTurn()); setVerdict(null); setRevealed(null); setNote(""); setSkipped(""); setSteal(null);
+    player.reset(); setVerdict(null); setRevealed(null); setSkipped(""); setSteal(null);
   }
 
   async function startGame(cast?: CastMember[]){
@@ -143,31 +145,6 @@ export function App(){
   function primeCurrent(t: Track | null = track){
     engine.prime(t, plain);
     resetTurn();
-  }
-
-  async function playClip(rung: number, replay = false){
-    if (!track) return;
-    engine.ac();
-    const span = ladderFor(plain).span(rung, replay);
-    setNote("");
-    setTurn(t => ({ ...t, rung, span, clipEndedAt: replay ? t.clipEndedAt : null }));
-    const started = () => {
-      setTurn(t => ({ ...t, clipStartedAt: Date.now(), playKey: t.playKey + 1 }));
-      // A refused play() reports back before playing starts; keep the tap prompt.
-      setPhase(p => (p === "blocked" || p === "listened" ? p : "playing"));
-    };
-    const ended = () => {
-      setTurn(t => ({ ...t, clipEndedAt: t.clipEndedAt ?? Date.now() }));
-      setPhase("listened");
-    };
-    const failed = () => {
-      setNote(plain ? "This song won't stream right now. Skip it to try another." : "This music-only clip isn't available. Skip it to try another.");
-      ended();
-    };
-    log("snippet", { rung, from: span.from, to: span.to, sound: plain ? "full" : "inst", title: String(track.title).slice(0, 28) });
-    setPhase("cueing");
-    const r = await playRung(track, plain, rung, replay, { onStart: started, onEnd: ended, onErr: failed, onBlocked: () => setPhase("blocked") });
-    if (r === "failed") failed();
   }
 
   /* The countdown hands over silently: the first clip starts only once the

@@ -99,6 +99,8 @@ export interface Turn {
   playKey: number;
   /* How many hints have been shown (hintsFor). */
   hints: number;
+  /* A buzz stopped the clip before its end (rooms), so the next play starts from the top of the window. */
+  cut: boolean;
 }
 
 export interface Verdict {

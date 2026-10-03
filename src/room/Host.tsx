@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { DIFFICULTY, ROOM_ANSWER_SECS, ROOM_GRACE_SECS, ROOM_SONGS_PER_ROUND, ROOM_WRONG_BEAT_MS,
   hookOffset, ladderFor } from "../lib/config";
 import { nearTitles } from "../lib/answer.js";
-import { playRung } from "../lib/ladder";
+import { useClipPlayer } from "../lib/ladder";
 import { answerTitles, buildCrate, withFreshAt, withSameTierNext } from "../lib/crate";
 import { engine, keepAwake } from "../lib/engine.js";
 import { cooldownOf, loadHistory, markPlayed, type Cooldown } from "../lib/storage";
@@ -21,10 +21,8 @@ import { HostPlaying, type Audio } from "./HostPlaying";
 import type { GameState, Mix, Settings, Track, Verdict } from "../types";
 
 type Phase = "opening" | "lobby" | "loading" | "countdown" | "song" | "reveal" | "board" | "done" | "failed";
-interface Clip { rung: number; span: { from: number; to: number }; startedAt: number; endedAt: number | null; key: number; cut: boolean }
 interface Revealed { track: Track; verdict: Verdict }
 
-const freshClip = (): Clip => ({ rung: 0, span: { from: 0, to: 0 }, startedAt: 0, endedAt: null, key: 0, cut: false });
 /* Refusals that leave the show stuck get a note on the big screen. A refused
    skip or a clip beaten by a buzz does not: the note also offers the free
    "Skip this song", which would read wrong right after a skip-cap refusal. */
@@ -38,9 +36,7 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
   const [phase, setPhase] = useState<Phase>(resume ? "lobby" : "opening");
   const [error, setError] = useState("");
   const [audio, setAudio] = useState<Audio>("cueing");
-  const [clip, setClip] = useState<Clip>(freshClip);
   const [graceUntil, setGraceUntil] = useState<number | null>(null);
-  const [note, setNote] = useState("");
   const [revealed, setRevealed] = useState<Revealed | null>(null);
   const [wrong, setWrong] = useState<{ name: string; text: string; timeout: boolean; at: number } | null>(null);
   const [skipped, setSkipped] = useState("");
@@ -52,6 +48,12 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
   const track = show ? show.queue[show.idx] ?? null : null;
   const plain = show?.plain ?? DIFFICULTY[settings.difficulty].sound === "full";
   const ladder = ladderFor(plain);
+  const player = useClipPlayer({ track, plain,
+    setStatus: s => setAudio(a => (s === "playing" && a === "blocked" ? a : s)),
+    onStarted: rung => room.send({ t: "clip", rung, points: ladder.points[rung] }),
+    onEnded: () => setGraceUntil(Date.now() + ROOM_GRACE_SECS * 1000),
+  });
+  const { turn: clip, note, setNote } = player;
 
   // Timers and socket callbacks read the latest values through these.
   const live = useRef({ view, show, clip, phase, track, audio, heard: room.heard });
@@ -158,10 +160,9 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
 
   function toCountdown(skippedTitle = ""){
     setSkipped(skippedTitle);
-    setClip(freshClip());
+    player.reset();
     setAudio("cueing");
     setGraceUntil(null);
-    setNote("");
     setRevealed(null);
     setWrong(null);
     setPhase("countdown");
@@ -181,33 +182,11 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
 
   /* A replay starts from the top of the clip window; otherwise the rung plays
      only its new stretch, carrying on from where the last one stopped. */
-  async function playClip(rung: number, replay = false){
-    const t = live.current.track;
-    if (!t) return;
-    engine.ac();
-    const span = ladder.span(rung, replay);
-    setNote("");
+  function playClip(rung: number, replay = false){
+    if (!live.current.track) return;
     setGraceUntil(null);
     setPhase("song");
-    setClip(c => ({ ...c, rung, span, endedAt: replay ? c.endedAt : null, cut: false }));
-    const started = () => {
-      setClip(c => ({ ...c, startedAt: Date.now(), key: c.key + 1 }));
-      setAudio(a => (a === "blocked" ? a : "playing"));
-      room.send({ t: "clip", rung, points: ladder.points[rung] });
-    };
-    const ended = () => {
-      setClip(c => ({ ...c, endedAt: Date.now() }));
-      setAudio("listened");
-      setGraceUntil(Date.now() + ROOM_GRACE_SECS * 1000);
-    };
-    const failed = () => {
-      setNote(plain ? "This song won't stream right now. Skip it to try another." : "This music-only clip isn't available. Skip it to try another.");
-      setAudio("listened");
-    };
-    log("snippet", { rung, from: span.from, to: span.to, sound: plain ? "full" : "inst", room: true });
-    setAudio("cueing");
-    const r = await playRung(t, plain, rung, replay, { onStart: started, onEnd: ended, onErr: failed, onBlocked: () => setAudio("blocked") });
-    if (r === "failed") failed();
+    void player.play(rung, replay);
   }
 
   /* Nobody has it yet: the next rung for everyone, or the reveal once the
@@ -253,7 +232,7 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
       if (a === "playing" || a === "cueing"){
         engine.stop();
         // A buzz that beat the next rung to the speakers is on the rung the room last opened.
-        setClip(c => ({ ...c, rung: a === "cueing" ? Math.max(0, s.rung) : c.rung, cut: true }));
+        player.setTurn(c => ({ ...c, rung: a === "cueing" ? Math.max(0, s.rung) : c.rung, cut: true }));
         setAudio("paused");
       }
     } else if (s.state === "revealed" && phase === "song") toReveal(view!);
