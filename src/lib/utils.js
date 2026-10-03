@@ -1,9 +1,4 @@
 export const de = s => { const t=document.createElement("textarea"); t.innerHTML=s||""; return t.value; };
-/* iOS Safari enforces tight per-tab memory budgets (jetsam kills the tab and
-   reloads the page mid-game); memory-heavy pipeline stages check this.
-   iPadOS reports itself as MacIntel, hence the maxTouchPoints check. */
-export const isIOS = typeof navigator !== "undefined" && (/iPad|iPhone|iPod/.test(navigator.userAgent)
-  || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1));
 /* Canonical identity key for a song title. Different sources title the same
    song differently — 'Srivalli [From "Pushpa - The Rise (Part - 01)"]',
    'Galatfehmi - From "Nadaaniyan"', "Single's Anthem" — so the key strips
