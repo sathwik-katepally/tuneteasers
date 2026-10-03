@@ -4,15 +4,19 @@
 import { DIFFICULTIES, SNIP_WINDOW_SEC, snipMethodOk } from "./constants.js";
 import { songKey, safeUrl } from "./utils.js";
 import { COOLDOWN_DAYS } from "./config";
+import type { PlayKind, Track } from "../types";
 
 const LS_PLAYED = "tt_played";   // { titleKey: lastPlayedMs }, songs heard through to the reveal
 const LS_TIRED = "tt_tired";     // { titleKey: lastSkippedMs }, songs skipped as heard too much
 const LS_BLOCKED = "tt_blocked"; // [ artistName ], device-local "never play this artist" list
-const lsGet = k => { try { return JSON.parse(localStorage.getItem(k)); } catch(e){ return null; } };
-const lsSet = (k,v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch(e){} };
+const lsGet = (k: string): unknown => { try { return JSON.parse(localStorage.getItem(k) ?? "null"); } catch(e){ return null; } };
+const lsSet = (k: string, v: unknown) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch(e){} };
 
-export function sanitizeTrack(t){
-  const stream = safeUrl(t && t.stream); if (!stream) return null;
+/* Whatever a save, a catalog row or a song source hands over; every field is
+   checked here before it becomes a Track. */
+export function sanitizeTrack(raw: unknown): Track | null {
+  const t: Record<string, any> = raw && typeof raw === "object" ? raw : {};
+  const stream = safeUrl(t.stream); if (!stream) return null;
   return {
     title: String(t.title||"").slice(0,120),
     artist: String(t.artist||"").slice(0,120),
@@ -37,25 +41,31 @@ const DAY = 24*3600*1000;
 // Kept as long as the longest cooldown; a group import reads the same window.
 export const HISTORY_MS = Math.max(...Object.values(COOLDOWN_DAYS)) * DAY;
 
-function loadMap(k){
+/* Song key -> when the song last left the stage (ms), one map per kind. */
+export type HistoryMap = Record<string, number>;
+export type History = Record<PlayKind, HistoryMap>;
+/* Song key -> the time the song may come back (ms). */
+export type Cooldown = Record<string, number>;
+
+function loadMap(k: string): HistoryMap {
   const raw = lsGet(k);
   if (Array.isArray(raw)){ // migrate the old list format: treat every entry as just played
-    const m = {}; const t = Date.now();
+    const m: HistoryMap = {}; const t = Date.now();
     for (const x of raw) if (typeof x === "string") m[songKey(x)] = t;
     return m;
   }
   if (!raw || typeof raw !== "object") return {};
   // Re-key through songKey: entries written before the key normalization
   // strengthened (e.g. 'song - from "movie"') collapse to the current key.
-  const m = {};
+  const m: HistoryMap = {};
   for (const [k, v] of Object.entries(raw)) if (Number.isFinite(v)) m[songKey(k)] = Math.max(m[songKey(k)] || 0, v);
   return m;
 }
 
 /* This device's history: { played: { key: ms }, tired: { key: ms } }. */
-export const loadHistory = () => ({ played: loadMap(LS_PLAYED), tired: loadMap(LS_TIRED) });
+export const loadHistory = (): History => ({ played: loadMap(LS_PLAYED), tired: loadMap(LS_TIRED) });
 
-export function markPlayed(title, kind = "played"){
+export function markPlayed(title: string, kind: PlayKind = "played"){
   const k = kind === "tired" ? LS_TIRED : LS_PLAYED;
   const m = loadMap(k);
   m[songKey(title)] = Date.now();
@@ -66,9 +76,9 @@ export function markPlayed(title, kind = "played"){
 
 /* Histories (this device, a group, ...) to one map of song key -> the time
    the song may come back, each kind sitting out its own COOLDOWN_DAYS. */
-export function cooldownOf(...histories){
-  const until = {};
-  for (const h of histories) for (const kind of Object.keys(COOLDOWN_DAYS)){
+export function cooldownOf(...histories: (History | null)[]): Cooldown {
+  const until: Cooldown = {};
+  for (const h of histories) for (const kind of Object.keys(COOLDOWN_DAYS) as PlayKind[]){
     for (const [k, at] of Object.entries(h?.[kind] || {})){
       if (Number.isFinite(at)) until[k] = Math.max(until[k] || 0, at + COOLDOWN_DAYS[kind] * DAY);
     }
@@ -76,8 +86,8 @@ export function cooldownOf(...histories){
   return until;
 }
 
-export const normArtist = s => String(s||"").trim().toLowerCase();
-export const loadBlocked = () => { const l = lsGet(LS_BLOCKED); return Array.isArray(l) ? l.filter(x=>typeof x==="string" && x.trim()).slice(0,50) : []; };
-export const saveBlocked = l => lsSet(LS_BLOCKED, l.slice(0,50));
-export const trackArtists = t => String(t.artist||"").split(",").map(normArtist).filter(Boolean);
-export const isBlocked = (t, set) => trackArtists(t).some(a=>set.has(a));
+export const normArtist = (s: string) => String(s||"").trim().toLowerCase();
+export const loadBlocked = (): string[] => { const l = lsGet(LS_BLOCKED); return Array.isArray(l) ? l.filter(x=>typeof x==="string" && x.trim()).slice(0,50) : []; };
+export const saveBlocked = (l: string[]) => lsSet(LS_BLOCKED, l.slice(0,50));
+export const trackArtists = (t: Pick<Track, "artist">) => String(t.artist||"").split(",").map(normArtist).filter(Boolean);
+export const isBlocked = (t: Pick<Track, "artist">, set: Set<string>) => trackArtists(t).some(a=>set.has(a));

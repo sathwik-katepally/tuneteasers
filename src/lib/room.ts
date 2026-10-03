@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from "react";
 import { usePartySocket } from "partysocket/react";
 import { ROOM_HEARD, WORKER_API } from "./constants.js";
-import { cooldownOf, loadHistory, markPlayed, sanitizeTrack } from "./storage.js";
+import { cooldownOf, loadHistory, markPlayed, sanitizeTrack } from "./storage";
 import { songKey } from "./utils.js";
 import { randomId } from "./group";
 import type { Category, Difficulty, Mix, Track } from "../types";

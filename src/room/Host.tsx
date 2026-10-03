@@ -5,7 +5,7 @@ import { nearTitles } from "../lib/answer.js";
 import { playRung } from "../lib/ladder";
 import { answerTitles as answerTitlesJs, buildCrate as buildCrateJs, withFreshAt as withFreshAtJs, withSameTierNext as withSameTierNextJs } from "../lib/crate.js";
 import { engine, keepAwake } from "../lib/engine.js";
-import { cooldownOf, loadHistory, markPlayed } from "../lib/storage.js";
+import { cooldownOf, loadHistory, markPlayed } from "../lib/storage";
 import { displayTitle } from "../lib/utils.js";
 import { log } from "../lib/log.js";
 import { groupCooldown, recordPlay } from "../lib/group";

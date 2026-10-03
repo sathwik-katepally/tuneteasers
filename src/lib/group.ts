@@ -7,7 +7,7 @@
 import { useSyncExternalStore } from "react";
 import { WORKER_API } from "./constants.js";
 import { songKey } from "./utils.js";
-import { HISTORY_MS, cooldownOf, loadHistory } from "./storage.js";
+import { HISTORY_MS, cooldownOf, loadHistory } from "./storage";
 import type { GameState, PlayKind } from "../types";
 
 export interface Group {

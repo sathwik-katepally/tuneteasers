@@ -6,7 +6,7 @@
 import { SAAVN_BASES, SAAVN_QUERIES, SAAVN_PAGES, SAAVN_MIN_PLAYS, CORPUS_DRAW, CORPUS_BATCH, DIFFICULTY_TIERS, EXCLUDE_RX, ERAS, eraOf, SNIP_ACCEPTED, SNIP_WINDOW_SEC, SNIP_MAX_AGE_MS } from "./constants.js";
 import { COOLDOWN_MIN_FRESH } from "./config";
 import { de, songKey, shuffle, safeUrl, displayTitle } from "./utils.js";
-import { sanitizeTrack, loadHistory, cooldownOf, loadBlocked, normArtist, isBlocked } from "./storage.js";
+import { sanitizeTrack, loadHistory, cooldownOf, loadBlocked, normArtist, isBlocked } from "./storage";
 import { log, ms } from "./log.js";
 
 let saavnBase = null;

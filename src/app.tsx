@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { isFirstVisit, loadSaved, save } from "./lib/save";
 import { DIFFICULTY, SKIPS_PER_PLAYER, hookOffset, ladderFor, pointsNow } from "./lib/config";
 import { playRung } from "./lib/ladder";
-import { markPlayed, loadBlocked, saveBlocked, normArtist, isBlocked } from "./lib/storage.js";
+import { markPlayed, loadBlocked, saveBlocked, normArtist, isBlocked } from "./lib/storage";
 import { buildCrate as buildCrateJs, refreshMusicQueue as refreshMusicQueueJs, withSameTierNext as withSameTierNextJs } from "./lib/crate.js";
 import { engine, keepAwake } from "./lib/engine.js";
 import { log } from "./lib/log.js";
