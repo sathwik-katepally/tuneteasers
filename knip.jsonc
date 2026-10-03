@@ -5,6 +5,11 @@
       // e2e/group-edge.mjs imports the client module through the Vite dev server URL.
       "ignoreUnresolved": ["/src/lib/group.ts"]
     },
-    "worker": {}
+    "worker": {
+      // The verify job installs only the root's dependencies, so there Knip cannot tie the
+      // wrangler command in the worker's scripts to its package.
+      "ignoreBinaries": ["wrangler"],
+      "ignoreDependencies": ["wrangler"]
+    }
   }
 }
