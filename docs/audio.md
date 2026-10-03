@@ -92,7 +92,7 @@ The engine keeps one light prefetch: a `preload="auto"` Audio element for the ne
 ## Starting audio from the countdown (autoplay)
 
 The first clip of a turn starts from a timer, not from a tap.
-The countdown hands over silently: when "Roll it" ends the listening screen fades in, and only once its fade has finished (the wrapper's `onAnimationComplete` in `src/app.tsx`, with a 1.5s fallback for a hidden tab that never finishes animating) does the clip start.
+The countdown hands over silently: when "Roll it" ends the listening screen fades in, and only once its fade has finished (the wrapper's `onAnimationComplete`, wired in `src/app.tsx` to `shown` in `src/game/usePassTheGame.ts`, with a 1.5s fallback for a hidden tab that never finishes animating) does the clip start.
 The sound, "Now playing" and the clip bar then start together on the element's `playing` event; before this, audio started ~0.3s before the screen was visible.
 iOS Safari only lets an element start audio outside a tap once that element has been played inside one, so the hand-over tap calls `engine.prime(track, plain)`: it resumes the AudioContext and plays the upcoming track's element muted for a moment, then pauses it (session-checked so it can never pause real playback).
 The unlock belongs to the element, so the later, timer-started play is still covered.
