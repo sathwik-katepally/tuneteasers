@@ -119,7 +119,7 @@ An element that was routed through the Music-only gain gate is rewired straight 
 
 ## Diagnostics
 
-`src/lib/log.js` keeps a structured ring buffer (250 entries) mirrored to the console and persisted in localStorage: boot, crate tier results (including `snips: "ok"|"none"` and the `snipped` count), every play with its mode, and failures (`element-fail`, `snip-fail`, `element-play`, `play-blocked`, `sfx-fail`), plus `snippet` (rung and clip length), `skip` and `go-home` from the game, and `room-song` (each change of a room song's state on the host) and `room-create-fail`.
+`src/lib/log.js` keeps a structured ring buffer (250 entries) mirrored to the console and persisted in localStorage: boot, crate tier results (including `snips: "ok"|"none"` and the `snipped` count), every play with its mode, and failures (`element-fail`, `snip-fail`, `element-play`, `play-blocked`, `sfx-fail`), plus `snippet` (rung and clip length), `skip` and `go-home` from the game, and `room-song` (each change of a room song's state on the host), `room-create-fail` and `room-refused` (a host command the room refused, with its code and the host's phase).
 A `boot` entry with no preceding `pagehide` is the signature of a crash or jetsam kill.
 On any device, append `?debug=1` to the URL for a live on-screen log overlay with copy-to-clipboard (`?debug=0` turns it off).
 `window.__ttLog.dump()` reads the log programmatically.

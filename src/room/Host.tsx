@@ -120,6 +120,14 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
   useEffect(() => { if (room.gone) setPhase(p => (p === "done" ? p : "failed")); }, [room.gone]);
 
   useEffect(() => {
+    if (!room.error) return;
+    log("room-refused", { code: room.error.code, phase });
+    // A clip that lands as someone buzzes is refused as busy; the host already stops for the answer.
+    if (room.error.code === "busy" && view?.song?.state === "answering") return;
+    setNote(`The room didn't accept that (${room.error.code}). If the show is stuck, go Home from the menu and resume it.`);
+  }, [room.error?.at]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
     const upcoming = show?.queue[show.idx + (phase === "reveal" ? 0 : 1)];
     if (upcoming) engine.prefetch(upcoming, plain);
   }, [show?.idx, phase]); // eslint-disable-line react-hooks/exhaustive-deps
