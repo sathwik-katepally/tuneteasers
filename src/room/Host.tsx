@@ -32,6 +32,10 @@ interface Clip { rung: number; span: { from: number; to: number }; startedAt: nu
 interface Revealed { track: Track; verdict: Verdict }
 
 const freshClip = (): Clip => ({ rung: 0, span: { from: 0, to: 0 }, startedAt: 0, endedAt: null, key: 0, cut: false });
+/* Refusals that leave the show stuck get a note on the big screen. A refused
+   skip or a clip beaten by a buzz does not: the note also offers the free
+   "Skip this song", which would read wrong right after a skip-cap refusal. */
+const STUCK = new Set(["bad-song-number", "bad-song", "not-started", "already-started", "no-players"]);
 
 /* The host screen of a buzz-in room: the only device that plays audio. It
    runs the show (songs, clip ladder, reveals, box office) and tells the room
@@ -118,6 +122,13 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
   };
 
   useEffect(() => { if (room.gone) setPhase(p => (p === "done" ? p : "failed")); }, [room.gone]);
+
+  useEffect(() => {
+    if (!room.error) return;
+    log("room-refused", { code: room.error.code, phase });
+    if (!STUCK.has(room.error.code)) return;
+    setNote(`The room didn't accept that (${room.error.code}). Go Home from the menu and resume the show.`);
+  }, [room.error?.at]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const upcoming = show?.queue[show.idx + (phase === "reveal" ? 0 : 1)];

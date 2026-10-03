@@ -49,6 +49,7 @@ export async function rooms(request, env, url){
       const stub = await getServerByName(env.Room, code);
       if (await stub.claim(hostHash, code)) return json({ success: true, code, host }, 201, origin);
     }
+    console.warn("room code draw failed", { status: 503, tries: CLAIM_TRIES });
     return json({ success: false, message: "no free room code, try again" }, 503, origin);
   }
 
