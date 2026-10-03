@@ -57,6 +57,7 @@ export const ROUND_OPTIONS = [3, 5, 8] as const;
 export const DEFAULT_ROUNDS = 5;
 
 export const MAX_CAST = 8;
+export const MIN_CAST = { players: 1, teams: 2 } as const;
 
 /* "Heard it too much" in pass-the-phone: each contestant's free skips per show.
    A skip after a stream error is always free. The room's vote share and skip
