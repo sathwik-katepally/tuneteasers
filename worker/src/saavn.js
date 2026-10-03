@@ -81,10 +81,16 @@ async function upstream(params){
     headers: { "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36", accept: "application/json" },
     signal: AbortSignal.timeout(8000),
   });
-  if (!r.ok) return { error: json({ success: false, message: `upstream ${r.status}` }, 502) };
+  if (!r.ok){
+    console.warn("saavn upstream failed", { call: params.__call, status: r.status });
+    return { error: json({ success: false, message: `upstream ${r.status}` }, 502) };
+  }
   // api.php answers with text/html and occasionally a non-JSON error page.
   try { return { j: JSON.parse(await r.text()) }; }
-  catch { return { error: json({ success: false, message: "upstream sent non-JSON" }, 502) }; }
+  catch {
+    console.warn("saavn upstream failed", { call: params.__call, status: r.status, body: "non-json" });
+    return { error: json({ success: false, message: "upstream sent non-JSON" }, 502) };
+  }
 }
 
 async function searchSongs(url){
@@ -122,7 +128,10 @@ export async function saavn(request, handler, ctx){
   const hit = await cache.match(cacheKey);
   if (hit) return hit;
   let res;
-  try { res = await handler(url); } catch (e) { res = json({ success: false, message: String(e?.message || e) }, 502); }
+  try { res = await handler(url); } catch (e) {
+    console.warn("saavn route failed", { path: url.pathname, error: String(e?.message || e).slice(0, 120) });
+    res = json({ success: false, message: String(e?.message || e) }, 502);
+  }
   if (res.status === 200 && res.headers.get("cache-control")) ctx.waitUntil(cache.put(cacheKey, res.clone()));
   return res;
 }

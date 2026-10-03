@@ -44,6 +44,12 @@ const LIMITS = {
 // mashing the buzzer stays well inside this; a script does not.
 const BUCKET = { size: 12, perSec: 6, strikes: 40 };
 
+// Only codes and sizes go in the log: never a token, a seat key, a title or a room code.
+function refuseSocket(ws, code, reason, fields = {}){
+  console.warn("room refused", { close: code, reason, ...fields });
+  ws.close(code, reason);
+}
+
 /* "Heard it too much" skips (docs/room-mode.md), from the Worker vars. */
 function skipRules(env){
   const share = Number(env.ROOM_SKIP_VOTE_SHARE);
@@ -112,7 +118,7 @@ export class Room extends Server {
       if (refuse){
         const pair = new WebSocketPair();
         pair[1].accept();
-        pair[1].close(...refuse);
+        refuseSocket(pair[1], ...refuse);
         return new Response(null, { status: 101, webSocket: pair[0] });
       }
     }
@@ -169,7 +175,7 @@ export class Room extends Server {
       this.room = null;
       return;
     }
-    for (const c of this.getConnections()) if (!c.state?.role && now - (c.state?.at || 0) >= HELLO_MS) c.close(4401, "no hello");
+    for (const c of this.getConnections()) if (!c.state?.role && now - (c.state?.at || 0) >= HELLO_MS) refuseSocket(c, 4401, "no hello");
     const song = r.song;
     if (song?.state === "answering" && song.deadline && now >= song.deadline - 50){
       this.judge(song.answering, "", false);
@@ -187,7 +193,7 @@ export class Room extends Server {
     b.at = now;
     this.buckets.set(conn.id, b);
     if (b.tokens < 1){
-      if (++b.strikes > BUCKET.strikes) conn.close(4429, "too many messages");
+      if (++b.strikes > BUCKET.strikes) refuseSocket(conn, 4429, "too many messages");
       return false;
     }
     b.tokens -= 1;
@@ -195,7 +201,7 @@ export class Room extends Server {
   }
 
   async onMessage(conn, raw){
-    if (!this.room){ conn.close(4404, "no such room"); return; }
+    if (!this.room){ refuseSocket(conn, 4404, "no such room"); return; }
     // Every frame is charged before anything else looks at it.
     if (!this.allow(conn)) return;
     const role = conn.state?.role;
@@ -203,7 +209,7 @@ export class Room extends Server {
     const max = role === "host" || hello === '{"t":"host"' ? LIMITS.hostMsg : hello === '{"t":"join"' ? LIMITS.joinMsg : LIMITS.playerMsg;
     const size = typeof raw === "string" ? raw.length : raw.byteLength ?? 0;
     // The app never sends a frame this big or a binary one, so the peer goes.
-    if (size > max || typeof raw !== "string") return conn.close(1009, "message too big");
+    if (size > max || typeof raw !== "string") return refuseSocket(conn, 1009, "message too big", { size, max });
     let m;
     try { m = JSON.parse(raw); } catch { return this.fail(conn, "bad-json"); }
     if (!m || typeof m !== "object" || typeof m.t !== "string") return this.fail(conn, "bad-message");
@@ -228,7 +234,7 @@ export class Room extends Server {
   }
 
   async helloHost(conn, m){
-    if (!TOKEN_RX.test(m.token || "") || (await hash(m.token)) !== this.room.hostHash) return conn.close(4403, "not the host");
+    if (!TOKEN_RX.test(m.token || "") || (await hash(m.token)) !== this.room.hostHash) return refuseSocket(conn, 4403, "not the host");
     conn.setState({ role: "host" });
     conn.send(JSON.stringify({ t: "welcome", role: "host", code: this.room.code }));
     conn.send(JSON.stringify(this.view(null)));
