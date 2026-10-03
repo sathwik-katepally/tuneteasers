@@ -6,8 +6,8 @@ Everything is optional; with no group, or with the Worker unreachable, the game 
 
 ## What syncs and what does not
 
-- Synced: every played song and every song skipped as heard too much (as its `songKey` and kind, `played` or `tired`) with a server timestamp, and each finished show (date, mode, difficulty, language mix, rounds, songs played, each player or team's name, members and score).
-- Not synced: the game in progress (it stays on the phone it started on), blocked artists, presentation settings, rosters.
+- Synced: every played song and every song skipped as heard too much (as its `songKey` and kind, `played` or `tired`) with a server timestamp, and each finished pass-the-phone show (date, mode, difficulty, language mix, rounds, songs played, each player or team's name, members and score).
+- Not synced: the game in progress (it stays on the phone it started on), blocked artists, presentation settings, rosters, and a buzz-in room's result (its played songs sync like any other, but the host records no show).
 - Never stored server-side: audio, stems, stream URLs or anything else from the song sources.
 
 ## Identity and security
