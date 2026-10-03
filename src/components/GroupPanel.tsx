@@ -55,7 +55,7 @@ export function GroupPanel({ invite, clearInvite, showPastGames }: Props){
   if (!group) return (
     <section className={s.panel} aria-label="Group">
       <span className={s.eyebrow}>More than one phone?</span>
-      <p className={s.text}>Put them in a group. No phone repeats a song another one played this week, and every finished show is kept for a year.</p>
+      <p className={s.text}>Put them in a group. No phone repeats a song another one played this week, and shows played on one phone are kept for a year.</p>
       <div className={s.row}>
         <button type="button" className="btn btn-ghost" onClick={() => go("join")}>Join one</button>
         <button type="button" className="btn btn-teal" onClick={() => go("create")}>Make a group</button>
@@ -182,7 +182,7 @@ function JoinForm({ invite: given, current, currentId, busy, error, onCancel, on
       <span className={s.eyebrow}>{invite ? "You're invited" : "Join a group"}</span>
       {invite ? (
         <p className={s.text}>
-          {preview.name ? <>Join <b className={s.inline}>{preview.name}</b>? This phone will skip songs the group played lately, and your finished shows land in its past shows.</>
+          {preview.name ? <>Join <b className={s.inline}>{preview.name}</b>? This phone will skip songs the group played lately, and shows played on one phone land in its past shows.</>
             : preview.error ? "This invite can't be used." : "Checking the invite…"}
         </p>
       ) : (
