@@ -1,7 +1,7 @@
 import { Fragment, useState } from "react";
 import { ChevronDown, Plus, X } from "lucide-react";
 import { ERAS } from "../lib/constants.js";
-import { CATEGORIES, DIFFICULTY, MAX_CAST, MAX_MEMBERS, NAME_MAX, ROOM_SONGS_PER_ROUND, ROUND_OPTIONS } from "../lib/config";
+import { CATEGORIES, DIFFICULTY, MAX_CAST, MAX_MEMBERS, MIN_CAST, NAME_MAX, ROOM_SONGS_PER_ROUND, ROUND_OPTIONS } from "../lib/config";
 import { cleanName, newId } from "../lib/save";
 import { Seg } from "../components/Seg";
 import { CategoryPicker } from "../components/CategoryPicker";
@@ -31,7 +31,6 @@ interface Props {
 }
 
 const ERA_ALL = "all";
-const MIN_CAST: Record<Mode, number> = { players: 1, teams: 2 };
 
 /* The one line that stands in for the settings most shows never change. */
 function summary(S: Settings){

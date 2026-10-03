@@ -196,10 +196,9 @@ export function useRoom(code: string, hello: object | (() => object) | null){
   const [heard, setHeard] = useState<RoomHeard | null>(null);
   const [link, setLink] = useState<Link>("connecting");
   const [error, setError] = useState<{ code: string; at: number } | null>(null);
-  const [gone, setGone] = useState<{ code: number; kicked: boolean } | null>(null);
+  const [gone, setGone] = useState<{ code: number } | null>(null);
   const helloRef = useRef(hello);
   helloRef.current = hello;
-  const kicked = useRef(false);
 
   const socket = usePartySocket({
     host: ROOM_ORIGIN.replace(/^https?:\/\//, ""),
@@ -221,17 +220,16 @@ export function useRoom(code: string, hello: object | (() => object) | null){
       if (m.t === "state") setView({ ...m, at: Date.now() });
       else if (m.t === "heard" && m.songs && typeof m.songs === "object") setHeard(m.songs);
       else if (m.t === "error") setError({ code: String(m.code), at: Date.now() });
-      else if (m.t === "kicked") kicked.current = true;
     },
     onClose(e){
       if (FINAL.has(e.code)){
-        setGone({ code: e.code, kicked: kicked.current });
+        setGone({ code: e.code });
         setLink("gone");
       } else setLink(l => (l === "gone" ? l : "retrying"));
     },
   });
 
-  useEffect(() => { setView(null); setHeard(null); setGone(null); setError(null); setLink("connecting"); kicked.current = false; }, [code]);
+  useEffect(() => { setView(null); setHeard(null); setGone(null); setError(null); setLink("connecting"); }, [code]);
 
   /* iOS suspends a page in the background, which is where a host goes to send
      the code, and can drop its socket without a close: it still looks open but
