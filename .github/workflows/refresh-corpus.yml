@@ -5,37 +5,25 @@ on:
     - cron: "0 2 * * 2"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
-      actions: write
     outputs:
       changed: ${{ steps.commit.outputs.changed }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ssh-key: ${{ secrets.DATA_DEPLOY_KEY }}
+          fetch-depth: 0
       - uses: actions/setup-node@v7
         with:
           node-version: 22
       - run: node scripts/build-corpus.mjs
       - id: commit
-        name: Commit if changed
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if git diff --quiet public/corpus.json; then
-            echo "Corpus unchanged"
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add public/corpus.json
-          git commit -m "Refresh song corpus"
-          scripts/land-bot-commit.sh
-          echo "changed=true" >> "$GITHUB_OUTPUT"
+        run: scripts/push-data-commit.sh "Refresh song corpus" public/corpus.json
 
   # A new corpus needs its snips index: hand over to the snips workflow, which
   # scores only the songs it has not seen and commits the result.
