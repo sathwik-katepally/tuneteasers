@@ -69,7 +69,7 @@ try {
 
   await page.route(u => u.host === DEAD_HOST, r => r.abort("connectionrefused"));
   let turns = 0, extended = false, hinted = false, resumed = false, deadStreams = 0, heard = null, deadSkip = null;
-  const expectMode = A.difficulty === "easy" ? ["plain"] : ["snip", "muffle", "plain"];
+  const expectMode = A.difficulty === "easy" ? ["plain"] : ["snip", "plain"];
   for (let guard = 0; guard < 80; guard++){
     const handover = page.getByRole("button", { name: /^It's with me|roll it$/ });
     const board = page.getByRole("button", { name: /On to round|Roll the credits/ });
