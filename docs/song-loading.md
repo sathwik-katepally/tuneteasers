@@ -1,6 +1,6 @@
 # Song loading
 
-`buildCrate(mix, eras, sound, difficulty, minSongs, cooldown, categories)` in `src/lib/crate.js` assembles the game queue; it returns `{ queue, source }` or `{ error: "load" | "thin" | "safe" }`.
+`buildCrate(mix, eras, sound, difficulty, minSongs, cooldown, categories)` in `src/lib/crate.ts` assembles the game queue; it returns `{ queue, source }` or `{ error: "load" | "thin" | "safe" }`.
 `difficulty` is `"easy" | "medium" | "hard" | "mixed"` (default `"mixed"`, also `settings.difficulty`).
 It maps to corpus tiers through `DIFFICULTY_TIERS` in `src/lib/constants.js` (easy → easy; medium → easy + medium; hard → medium + hard; mixed → all); when the mapped tiers hold fewer than 10 songs for the chosen languages and eras the crate widens to all tiers before reporting `thin`.
 The uncurated fallback tiers carry no tier and ignore it.
@@ -97,7 +97,7 @@ On resume, the remaining queue is checked against the current index again; stale
 A song's history has two kinds, each a localStorage map of normalized title → timestamp: `tt_played` for songs heard through to the reveal, and `tt_tired` for songs skipped as "Heard it too much" (docs/architecture.md, Skips).
 Each kind sits out for its own `COOLDOWN_DAYS` in `src/lib/config.ts`: 7 days after a play, 30 after a tired skip, because a song someone is sick of should stay away longer.
 Entries older than the longest cooldown are pruned; a stream-error skip records nothing.
-`cooldownOf(...histories)` in `src/lib/storage.js` turns histories (`{ played, tired }`, this device's from `loadHistory`, a group's, later a person's) into one map of song key → the time the song may come back, latest wins, and that map is `buildCrate`'s `cooldown`.
+`cooldownOf(...histories)` in `src/lib/storage.ts` turns histories (`{ played, tired }`, this device's from `loadHistory`, a group's, later a person's) into one map of song key → the time the song may come back, latest wins, and that map is `buildCrate`'s `cooldown`.
 In a group, `startGame` passes the group's history merged with the device's (`groupCooldown`), so songs any phone in the group played or skipped sit out too; see docs/group-sync.md.
 A buzz-in host also merges in every seated phone's history, which each phone brings to its seat, and passes `heardBy` (song key → how many of the people present heard it); see "No repeats" in docs/room-mode.md.
 Songs still cooling down are excluded from the crate when at least `COOLDOWN_MIN_FRESH` (15, in `src/lib/config.ts`) fresh songs remain.

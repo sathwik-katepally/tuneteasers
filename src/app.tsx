@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { isFirstVisit, loadSaved, save } from "./lib/save";
 import { DIFFICULTY, SKIPS_PER_PLAYER, hookOffset, ladderFor, pointsNow } from "./lib/config";
 import { playRung } from "./lib/ladder";
-import { markPlayed, loadBlocked, saveBlocked, normArtist, isBlocked } from "./lib/storage.js";
-import { buildCrate as buildCrateJs, refreshMusicQueue as refreshMusicQueueJs, withSameTierNext as withSameTierNextJs } from "./lib/crate.js";
+import { cooldownOf, loadHistory, markPlayed, loadBlocked, saveBlocked, normArtist, isBlocked, type Cooldown } from "./lib/storage";
+import { buildCrate, refreshMusicQueue, withSameTierNext } from "./lib/crate";
 import { engine, keepAwake } from "./lib/engine.js";
 import { log } from "./lib/log.js";
 import { displayTitle } from "./lib/utils.js";
@@ -23,12 +23,7 @@ import { Podium } from "./screens/Podium";
 import { Landing } from "./screens/Landing";
 import { PastGames } from "./screens/PastGames";
 import { GroupScreen } from "./screens/GroupScreen";
-import type { AppState, CastMember, Category, Difficulty, GameState, Mode, Phase, Play, RosterEntry, Settings, Track, Turn, Verdict } from "./types";
-
-type Crate = { error?: string; queue?: Track[]; source?: string };
-const buildCrate = buildCrateJs as (mix: string, eras: string[], sound: string, difficulty: Difficulty, minSongs: number, cooldown?: Record<string, number>, categories?: Category[]) => Promise<Crate>;
-const withSameTierNext = withSameTierNextJs as (queue: Track[], idx: number) => Track[] | null;
-const refreshMusicQueue = refreshMusicQueueJs as (queue: Track[]) => Promise<Track[]>;
+import type { AppState, CastMember, GameState, Mode, Phase, Play, RosterEntry, Settings, Track, Turn, Verdict } from "./types";
 
 const freshTurn = (): Turn => ({ rung: 0, span: { from: 0, to: 0 }, clipEndedAt: null, clipStartedAt: 0, playKey: 0, hints: 0 });
 const primaryArtistOf = (t: Track | null) => (t ? String(t.artist || "").split(",")[0].trim() : "");
@@ -61,6 +56,11 @@ export function App(){
   const [blocked, setBlocked] = useState<string[]>(loadBlocked);
   const groupSnap = useGroup();
   const startOnShow = useRef(0);
+  /* The cooldown the show's crate was built with (this phone's history, with the
+     group's when there is one), so a "Heard it too much" replacement prefers a
+     song nobody is sick of; a resumed show reads this phone's again. */
+  const own = useRef<Cooldown | null>(null);
+  const cooldownNow = () => (own.current ??= cooldownOf(loadHistory()));
 
   useEffect(() => { save(state); }, [state]);
   useEffect(() => {
@@ -116,10 +116,10 @@ export function App(){
     setLoading(true); setError("");
     const mode = cast ? g?.mode ?? S.mode : S.mode;
     const roster = cast ?? (mode === "teams" ? state.teams : state.players);
-    const cooldown = groupSnap.group ? await groupCooldown() : null;
-    const crate = await buildCrate(S.mix, S.eras, DIFFICULTY[S.difficulty].sound, S.difficulty, S.rounds * roster.length, cooldown ?? undefined, S.categories);
+    own.current = (groupSnap.group ? await groupCooldown() : null) ?? cooldownOf(loadHistory());
+    const crate = await buildCrate(S.mix, S.eras, DIFFICULTY[S.difficulty].sound, S.difficulty, S.rounds * roster.length, own.current, S.categories);
     setLoading(false);
-    if (crate.error || !crate.queue){
+    if ("error" in crate){
       setError(crate.error === "safe" ? "Not enough verified music-only clips for this show. Try Easy or fewer rounds, or widen your song picks."
         : crate.error === "thin"
         ? `Not enough songs match your picks. Try more eras${S.categories.length ? ", another kind of song" : ""}, or unblock a few artists.`
@@ -130,7 +130,7 @@ export function App(){
     const game: GameState = {
       id: randomId(),
       queue: crate.queue, trackIdx: 0, turn: 0, round: 1, totalRounds: S.rounds,
-      totalSongs: crate.queue.length, source: crate.source ?? "corpus",
+      totalSongs: crate.queue.length, source: crate.source,
       mode, difficulty: S.difficulty, mix: S.mix,
       cast: roster.map(r => ({ id: r.id, name: r.name, members: [...r.members], score: 0, skips: 0 })),
       history: [], finished: false,
@@ -258,7 +258,7 @@ export function App(){
   /* "Heard it too much": costs the contestant one of their skips, sits the
      song out for the longer tired cooldown, and brings a song from the same
      tier. The title goes up on screen so the room sees what was skipped. */
-  const heardItQueue = g && who && who.skips < SKIPS_PER_PLAYER ? withSameTierNext(g.queue, g.trackIdx) : null;
+  const heardItQueue = g && who && who.skips < SKIPS_PER_PLAYER ? withSameTierNext(g.queue, g.trackIdx, cooldownNow()) : null;
   function heardIt(){
     if (!g || !who || !track || !heardItQueue || verdict) return;
     engine.stop();
@@ -284,7 +284,7 @@ export function App(){
     const primary = primaryArtistOf(revealed);
     if (!primary) return;
     const list = loadBlocked();
-    const next = list.some((a: string) => normArtist(a) === normArtist(primary)) ? list : [...list, primary];
+    const next = list.some(a => normArtist(a) === normArtist(primary)) ? list : [...list, primary];
     saveBlocked(next);
     setBlocked(next);
     const set = new Set(next.map(normArtist));
@@ -297,7 +297,7 @@ export function App(){
     setState(st => ({ ...st, game: { ...gg, queue, totalSongs: queue.length, finished: gg.finished || ranOut } }));
   }
   function unblockArtist(name: string){
-    const next = loadBlocked().filter((a: string) => normArtist(a) !== normArtist(name));
+    const next = loadBlocked().filter(a => normArtist(a) !== normArtist(name));
     saveBlocked(next);
     setBlocked(next);
   }

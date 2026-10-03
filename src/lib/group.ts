@@ -7,7 +7,7 @@
 import { useSyncExternalStore } from "react";
 import { WORKER_API } from "./constants.js";
 import { songKey } from "./utils.js";
-import { HISTORY_MS, cooldownOf, loadHistory } from "./storage.js";
+import { HISTORY_MS, cooldownOf, loadHistory, type History } from "./storage";
 import type { GameState, PlayKind } from "../types";
 
 export interface Group {
@@ -35,7 +35,6 @@ export interface GroupResult {
 }
 
 type Round = { id: string; key: string; kind?: PlayKind };
-export interface History { played: Record<string, number>; tired: Record<string, number> }
 interface Outbox { groupId: string; rounds: Round[]; results: GroupResult[] }
 export type SyncState = "idle" | "syncing" | "offline" | "revoked";
 export interface GroupSnapshot { group: Group | null; pending: number; sync: SyncState }
@@ -139,12 +138,10 @@ async function call<T>(path: string, token: string | null, init: { method?: stri
   return body as T;
 }
 
-const deviceHistory = () => loadHistory() as History;
-
 /* The newest IMPORT_MAX songs of this phone's history, across both kinds. */
 function localHistory(): History {
   const since = Date.now() - HISTORY_MS;
-  const h = deviceHistory();
+  const h = loadHistory();
   const entries = (["played", "tired"] as const).flatMap(kind => Object.entries(h[kind]).map(([k, v]) => ({ kind, k, v })))
     .filter(e => e.k && e.v > since)
     .sort((a, b) => b.v - a.v)
@@ -311,7 +308,7 @@ export async function groupHistory(): Promise<History | null> {
    group's, or null when there is no group or it can't be reached. */
 export async function groupCooldown(): Promise<Record<string, number> | null> {
   const h = await groupHistory();
-  return h && (cooldownOf(deviceHistory(), h) as Record<string, number>);
+  return h && cooldownOf(loadHistory(), h);
 }
 
 export async function fetchResults(before?: number){

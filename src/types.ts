@@ -1,3 +1,5 @@
+export type Lang = "bolly" | "telugu";
+
 export interface Track {
   title: string;
   artist: string;
@@ -6,7 +8,7 @@ export interface Track {
   stream: string;
   duration: number;
   year: number;
-  lang: string;
+  lang: Lang;
   hook: boolean;
   sourceId?: string;
   snip?: { startSec: number; endSec: number; sourceId: string; method: string; indexBuilt: string };

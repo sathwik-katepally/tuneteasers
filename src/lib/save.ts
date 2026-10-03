@@ -3,7 +3,7 @@
    visit); an unfinished game is offered there as a Resume card. Saves from the pre-points version
    (tuneteasers_v6) are migrated once, then that key is dropped. */
 import { ERAS } from "./constants.js";
-import { sanitizeTrack } from "./storage.js";
+import { sanitizeTrack } from "./storage";
 import { isResultId, randomId } from "./group";
 import { CATEGORIES, DEFAULT_ROUNDS, LEGACY_SCORE_SCALE, MAX_CAST, MAX_MEMBERS, NAME_MAX, ROUND_OPTIONS } from "./config";
 import type { AppState, CastMember, Category, Difficulty, GameState, HistoryEntry, Mix, Mode, Play, RosterEntry, Settings, Track } from "../types";
