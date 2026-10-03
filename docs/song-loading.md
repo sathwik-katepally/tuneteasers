@@ -20,14 +20,14 @@ The fallback tiers carry no tags, so with categories set they never run: an unre
    Search jobs are (query, page) pairs from `SAAVN_QUERIES` x `SAAVN_PAGES` in `src/lib/constants.js` (~120 queries: singers, composers, stars, years, moods; ~3,000 unique songs after filters).
    Each game samples 7 random jobs per language, so consecutive games draw from different slices of the corpus.
    Years here are whatever Saavn reports for the copy it returned (compilation copies carry re-release years), which is why this tier is only a fallback.
-3. **Baked catalog** (`loadCatalog`) - `public/catalog.json`, ~700 iTunes tracks committed to the repo and served same-origin, so it cannot be rate-limited or CORS-blocked; refreshed weekly by CI because iTunes preview URLs rot.
-4. **Live iTunes search** (`loadFromItunes`) - last resort; deliberately throttled to few search terms because Apple rate-limits around 20 searches/min per IP (that rate limit caused the original "Couldn't load enough songs" production bug).
+3. **Baked catalog** (`loadCatalog`) - the last tier: `public/catalog.json`, ~700 iTunes preview clips fetched by `scripts/build-catalog.mjs`, committed to the repo and served same-origin, so it needs no third-party host and is what keeps the game playing with the Worker and the mirror unreachable; refreshed weekly by CI because iTunes preview URLs rot.
+   The client makes no live iTunes request; the catalog is the only thing it knows about iTunes.
 
 Each tier only runs if the pool still has fewer than 10 songs.
 The snips scorer (`scripts/build-snips.mjs`) scores corpus recordings by Saavn ID.
 Music-only draws only source IDs present in the current verified index; other tiers can contribute only if their exact ID has a valid index entry.
 Dedupe is by canonical title key (`songKey(title)` in `src/lib/utils.js`, which strips bracketed qualifiers, dash suffixes like `- From "Movie"`, and punctuation): each tier dedupes internally, later tiers are filtered against earlier ones, and the assembled pool gets a final dedupe pass (first occurrence wins, so full Saavn songs beat hook clips).
-Tracks from tiers 2 and 3 are 30-second mid-song "hook" clips and carry `hook: true`.
+Catalog tracks are 30-second mid-song "hook" clips and carry `hook: true`.
 
 ## The corpus (`public/corpus.json`)
 
@@ -75,7 +75,7 @@ Hook step, wedding, festival, sufi, patriotic and rain were measured and left ou
 ## Filters applied to every track
 
 - https-only stream URL, via `sanitizeTrack`.
-- Language must match the requested mix (Saavn `language` field, iTunes genre via `ITUNES_LANG_OK`).
+- Language must match the requested mix (Saavn `language` field; a catalog track's `lang` was set from the iTunes genre by `scripts/build-catalog.mjs`).
 - Year ≥ 2000, plus the user's era selection (`settings.eras`, decade buckets from `eraOf`); for corpus songs the year is the film's verified year.
 - `EXCLUDE_RX` drops remixes, covers, lofi, karaoke, instrumentals, background-score themes/OST/teasers, etc.
 - Saavn-search songs with a reported play count below `SAAVN_MIN_PLAYS` (1M) are dropped (mostly dubs and obscure album cuts); a missing count means unknown and is kept. The corpus applies its own floor (`minPlays` in the config) at build time.

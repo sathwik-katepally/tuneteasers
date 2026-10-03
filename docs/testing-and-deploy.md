@@ -97,7 +97,7 @@ The jobs that commit need `contents`, `pull-requests` and `actions: write`, and 
 
 `.github/workflows/refresh-catalog.yml` runs `scripts/build-catalog.mjs` weekly (Mon 03:00 UTC) and commits `public/catalog.json` if changed and lands it on main (see Landing data commits).
 The script must stay sequential with delays (iTunes rate limit) and refuses to write a catalog with fewer than 100 tracks.
-The script imports its search terms and `EXCLUDE_RX` from `src/lib/constants.js`, so it shares the page-side filters described in docs/song-loading.md.
+The script holds its own iTunes search terms and genre-to-language map, and imports `EXCLUDE_RX` from `src/lib/constants.js`, so it shares the page-side title filter described in docs/song-loading.md.
 
 ## Corpus refresh CI
 

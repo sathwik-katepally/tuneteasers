@@ -10,7 +10,7 @@ const server = await serve();
 const { browser, page, errors } = await open(A.profile);
 let exit = 0;
 try {
-  await page.route(/saavn|itunes\.apple|catalog\.json|snips\.json/, r => r.abort());
+  await page.route(/saavn|catalog\.json|snips\.json/, r => r.abort());
   await page.goto(server.url + "?debug=1");
   await page.locator(".dbg-panel").waitFor();
   await page.getByRole("button", { name: "close" }).click();

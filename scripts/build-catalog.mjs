@@ -3,7 +3,13 @@
 // Requests are sequential with a delay to stay under Apple's ~20 req/min limit.
 
 import { songKey } from "../src/lib/utils.js";
-import { ITUNES_TERMS as TERMS, ITUNES_LANG_OK as LANG_OK, EXCLUDE_RX } from "../src/lib/constants.js";
+import { EXCLUDE_RX } from "../src/lib/constants.js";
+
+const TERMS = {
+  bolly: ["Arijit Singh","Pritam songs","Shreya Ghoshal hindi","A R Rahman hindi","Amit Trivedi","Vishal Shekhar","Sonu Nigam hindi","Atif Aslam hindi","Jubin Nautiyal","Mohit Chauhan","Sachin Jigar","Badshah hindi"],
+  telugu: ["Sid Sriram telugu","Devi Sri Prasad hits","Thaman S telugu","Anirudh telugu songs","Mickey J Meyer telugu","Gopi Sundar telugu","M M Keeravani telugu","Armaan Malik telugu","Anurag Kulkarni","telugu hit songs","Kaala Bhairava","Mangli telugu"],
+};
+const LANG_OK = { bolly:["bollywood","hindi"], telugu:["telugu","tollywood"] };
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 

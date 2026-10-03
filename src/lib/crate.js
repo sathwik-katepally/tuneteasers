@@ -2,9 +2,8 @@
    Primary: the curated corpus (corpus.json, verified film songs with difficulty
    tiers), resolved to JioSaavn streams by id (full songs, snippets start at the intro).
    Fallback 1: raw JioSaavn search (unverified years, no tiers).
-   Fallback 2: catalog.json baked into the site (rebuilt weekly by CI, 30s hook clips).
-   Fallback 3: live iTunes search, throttled to stay under Apple's rate limit. */
-import { SAAVN_BASES, SAAVN_QUERIES, SAAVN_PAGES, SAAVN_MIN_PLAYS, CORPUS_DRAW, CORPUS_BATCH, DIFFICULTY_TIERS, ITUNES_TERMS, ITUNES_LANG_OK, EXCLUDE_RX, ERAS, eraOf, SNIP_ACCEPTED, SNIP_WINDOW_SEC, SNIP_MAX_AGE_MS } from "./constants.js";
+   Fallback 2: catalog.json baked into the site (rebuilt weekly by CI, 30s hook clips). */
+import { SAAVN_BASES, SAAVN_QUERIES, SAAVN_PAGES, SAAVN_MIN_PLAYS, CORPUS_DRAW, CORPUS_BATCH, DIFFICULTY_TIERS, EXCLUDE_RX, ERAS, eraOf, SNIP_ACCEPTED, SNIP_WINDOW_SEC, SNIP_MAX_AGE_MS } from "./constants.js";
 import { de, songKey, shuffle, safeUrl, displayTitle } from "./utils.js";
 import { sanitizeTrack, loadHistory, cooldownOf, loadBlocked, normArtist, isBlocked } from "./storage.js";
 import { log, ms } from "./log.js";
@@ -172,53 +171,6 @@ async function loadCatalog(langs){
   } catch(e){ return []; }
 }
 
-function jsonp(url){
-  return new Promise((resolve,reject)=>{
-    const cb = "cb_"+Math.random().toString(36).slice(2);
-    window[cb] = data => { resolve(data); cleanup(); };
-    const s = document.createElement("script");
-    s.src = url + "&callback=" + cb;
-    s.onerror = () => { reject(new Error("jsonp failed")); cleanup(); };
-    function cleanup(){ delete window[cb]; s.remove(); }
-    document.body.appendChild(s);
-    setTimeout(()=>{ if(window[cb]){ reject(new Error("timeout")); cleanup(); } }, 8000);
-  });
-}
-const itunesSearch = (term, limit) => {
-  const url = `https://itunes.apple.com/search?term=${encodeURIComponent(term)}&media=music&entity=song&country=IN&limit=${limit||40}`;
-  return fetch(url).then(r=>r.json()).catch(()=> jsonp(url));
-};
-
-async function loadFromItunes(langs){
-  const jobs = [];
-  // Keep the request count low: iTunes rate-limits around 20 searches/min per IP,
-  // and a failed attempt needs headroom for the user to retry within a minute.
-  for (const lang of langs) for (const t of shuffle(ITUNES_TERMS[lang]).slice(0, langs.length>1 ? 5 : 8)) jobs.push({t,lang});
-  const settled = await Promise.allSettled(jobs.map(j=>itunesSearch(j.t)));
-  const seen = new Set(); const pool = [];
-  settled.forEach((res, idx) => {
-    if (res.status!=="fulfilled" || !res.value || !res.value.results) return;
-    const lang = jobs[idx].lang;
-    for (const s of res.value.results){
-      if (!s.previewUrl || !s.trackName) continue;
-      if (EXCLUDE_RX.test(s.trackName)) continue;
-      const g = (s.primaryGenreName||"").toLowerCase();
-      if (!ITUNES_LANG_OK[lang].some(k=>g.includes(k))) continue;
-      const year = s.releaseDate ? new Date(s.releaseDate).getFullYear() : 0;
-      if (year < 2000) continue;
-      const key = songKey(s.trackName);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      pool.push(sanitizeTrack({
-        title:s.trackName, artist:s.artistName||"Unknown artist", album:s.collectionName||"",
-        art:s.artworkUrl100 ? s.artworkUrl100.replace("100x100","400x400") : null,
-        stream:s.previewUrl, duration:30, year, lang, hook:true,
-      }));
-    }
-  });
-  return pool.filter(Boolean);
-}
-
 /* The offline-scored source-bound index (see docs/audio.md). */
 let snipsCache = null;
 let snipsPending = null;
@@ -310,13 +262,6 @@ export async function buildCrate(mix, eras, sound, difficulty = "mixed", minSong
     tiers.catalog = backup.length;
     if (!pool.length) source = "catalog";
     pool = pool.concat(backup);
-  }
-  if (pool.length < minSongs && sound !== "inst"){
-    const keys = new Set(pool.map(key));
-    const live = (await loadFromItunes(langs)).filter(t=>!keys.has(key(t)));
-    tiers.live = live.length;
-    if (!pool.length) source = "live";
-    pool = pool.concat(live);
   }
   // Belt-and-braces dedupe of the whole pool: catalog.json itself can carry
   // near-duplicate titles, and per-tier dedupe can't see across sources.
