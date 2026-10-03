@@ -63,10 +63,6 @@ jobs:
               npm run e2e:categories &&
               npm run e2e:migrate -- --profile=phone &&
               npm run e2e:offline
-          - name: group sync
-            os: macos-latest
-            worker: true
-            run: npm run e2e:group
           - name: group edge cases
             os: ubuntu-latest
             browsers: chromium

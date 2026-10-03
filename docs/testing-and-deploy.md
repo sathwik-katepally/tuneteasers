@@ -47,7 +47,7 @@ Gotchas: screens cross-fade out through `AnimatePresence`, so after a click wait
 
 ### E2E in CI
 
-`.github/workflows/e2e.yml` runs the key suites on every pull request, one job per suite in parallel (about 3-5 minutes wall clock): a pass-the-phone game on each profile, safe-snips and the ladder on each profile, the buzz room against a local `wrangler dev`, and the landing and journeys suites.
+`.github/workflows/e2e.yml` runs the key suites on every pull request, on every push to main, nightly (02:30 UTC) and on demand, one job per suite in parallel (about 3-5 minutes wall clock): a pass-the-phone game on each profile, safe-snips and the ladder on each profile, the buzz room and the group sync against a local `wrangler dev`, and the landing and journeys suites.
 `.github/workflows/e2e-release.yml` runs the rest of the release matrix above on pushes to main, nightly (02:30 UTC) and on demand, and alerts through ntfy when it fails; category games play Easy there, since in Music-only the item and mass chips are too thin to pick.
 The shared steps (deps, build, Playwright browsers cached per version) are in `.github/actions/e2e-setup`.
 The suites play real songs from the corpus through the deployed Worker and the Saavn CDN; the song draw is random, so recorded responses would rarely match a run and are not used.

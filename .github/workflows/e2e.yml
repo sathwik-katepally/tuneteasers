@@ -67,6 +67,10 @@ jobs:
             browsers: webkit chromium
             worker: true
             run: npm run e2e:room && npm run e2e:room-background
+          - name: group sync
+            os: macos-latest
+            worker: true
+            run: npm run e2e:group
           - name: landing and journeys
             os: macos-latest
             run: >-
