@@ -88,12 +88,12 @@ Test locally with `npx wrangler d1 migrations apply DB --local && npx wrangler d
 
 ### Landing data commits
 
-main has a ruleset that requires a passing `verify` check, and it only counts a `verify` that a pull request started: a direct push is refused, and so is a merge relying on a `verify` dispatched on the branch, even on the same commit.
-The refresh workflows land their commit with `scripts/land-bot-commit.sh`: it rebases on main, pushes the commit to a `bot/data-<run>` branch and opens a PR.
-A PR opened with the workflow's `GITHUB_TOKEN` does start "Verify pull request", but GitHub parks the run as `action_required` until someone approves it, so the script approves it (the approve-run API), waits for it, squash-merges the PR, and dispatches `deploy.yml`, since a merge made with `GITHUB_TOKEN` starts no deploy.
-The PR's E2E run stays parked; it is not required, and the release matrix covers the data after the deploy.
-A PR whose `verify` fails stays open for a person to look at, and the workflow's alert fires.
-The jobs that commit need `contents`, `pull-requests` and `actions: write`, and the repo setting "Allow GitHub Actions to create and approve pull requests" must stay on; on any branch but main the script just pushes.
+main has a ruleset that requires a passing `verify` check, which only a pull request starts, so a push made with the workflow's `GITHUB_TOKEN` is refused (and would start no other workflow if it were not).
+The refresh workflows push with a deploy key instead: a write deploy key on the repo, whose private half is the repo secret `DATA_DEPLOY_KEY` (kept in Automic Vault as `TUNETEASERS_DATA_DEPLOY_KEY`) and which main's ruleset lists as a bypass actor (DeployKey).
+The jobs that commit check out with `actions/checkout@v7`, `ssh-key: ${{ secrets.DATA_DEPLOY_KEY }}` and `fetch-depth: 0`, then run `scripts/push-data-commit.sh <message> <paths...>`, which commits the changed files as github-actions[bot], rebases on the branch tip and pushes to the branch the run came from (three tries, in case another push lands in between).
+A push over the key is an ordinary push to main, so it starts `deploy.yml`, `e2e.yml` and `e2e-release.yml` by itself: the data is deployed and checked by the whole E2E matrix at once.
+A failed refresh leaves no branch or pull request behind, only the workflow's alert.
+The refresh workflows run with `permissions: contents: read`; only the `snips` job in `refresh-corpus.yml` keeps `actions: write`, to dispatch `refresh-snips.yml`.
 
 `.github/workflows/refresh-catalog.yml` runs `scripts/build-catalog.mjs` weekly (Mon 03:00 UTC) and commits `public/catalog.json` if changed and lands it on main (see Landing data commits).
 The script must stay sequential with delays (iTunes rate limit) and refuses to write a catalog with fewer than 100 tracks.
@@ -131,7 +131,7 @@ The client fails closed with a clear Music-only shortage if the index is missing
 
 ### Workflow failure alerts
 
-The production workflows (`deploy.yml`, including its Worker job, `refresh-catalog.yml`, `refresh-snips.yml`) end in an `alert` job that `needs` the other jobs and runs on `if: failure()` (for `refresh-snips.yml`, only on main).
+The production workflows (`deploy.yml`, `e2e.yml`, `e2e-release.yml`, `refresh-catalog.yml`, `refresh-corpus.yml`, `refresh-snips.yml`) end in an `alert` job that `needs` the other jobs and runs on `if: failure()` (`refresh-snips.yml` only on main, `e2e.yml` not on pull requests).
 It POSTs the run URL to `https://ntfy.sh/$NTFY_TOPIC` with the title `<repo>/<workflow> failed`.
 `failure()` is false for cancelled runs, so a deploy superseded by a newer push stays quiet.
 The topic is the shared ops topic (`~/.config/ops/secrets.env`, `OPS_NTFY_TOPIC`), set with `gh secret set NTFY_TOPIC --repo sathwik-katepally/tuneteasers --body <topic>`.

@@ -17,6 +17,9 @@ on:
         description: "Songs each runner scores at most (each also stops taking songs after 5 hours)"
         default: "300"
 
+permissions:
+  contents: read
+
 concurrency:
   group: refresh-snips-${{ github.ref }}
   cancel-in-progress: false
@@ -89,15 +92,13 @@ jobs:
     needs: [plan, score]
     if: ${{ !cancelled() && needs.plan.result == 'success' }}
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
-      actions: write
     steps:
       # The branch tip, not the commit that started this hours-long run.
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.ref_name }}
+          ssh-key: ${{ secrets.DATA_DEPLOY_KEY }}
+          fetch-depth: 0
       - uses: actions/setup-node@v7
         with:
           node-version: 22
@@ -111,19 +112,7 @@ jobs:
       - run: node scripts/build-snips.mjs
         env:
           SNIP_MERGE: shards
-      - name: Commit if changed
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if git diff --quiet public/snips.json scripts/voice-curves.json; then
-            echo "Snips unchanged"
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add public/snips.json scripts/voice-curves.json
-          git commit -m "Refresh snips index"
-          scripts/land-bot-commit.sh
+      - run: scripts/push-data-commit.sh "Refresh snips index" public/snips.json scripts/voice-curves.json
 
   # Phone alert on failure (ntfy, topic in the NTFY_TOPIC repo secret).
   # failure() is false for a cancelled run, so a superseded run stays quiet;
