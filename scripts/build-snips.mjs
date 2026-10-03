@@ -26,18 +26,14 @@
                      each): merge them into SNIP_OUT and SNIP_CURVES without
                      scoring anything; the size floor applies here
      SNIP_PLAN       print only "todo=<n>", the corpus songs still without
-                     curves (reads the files, no network), for sizing CI
-
-   Until curves cover SWITCH_COVERAGE of the corpus, the index it publishes
-   is still MusiCNN's v4 one, carried over with a fresh build time; from then
-   on it publishes the v5 index judged from the curves, and stays on it. */
+                     curves (reads the files, no network), for sizing CI */
 import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { songKey } from "../src/lib/utils.js";
-import { SAAVN_BASES, CORPUS_BATCH, SNIP_ACCEPTED, SNIP_LEGACY, SNIP_VOCAL_MAX_DB, SNIP_INDEX_V, SNIP_METHOD, SNIP_WINDOW_SEC } from "../src/lib/constants.js";
+import { SAAVN_BASES, CORPUS_BATCH, SNIP_ACCEPTED, SNIP_VOCAL_MAX_DB, SNIP_INDEX_V, SNIP_METHOD, SNIP_WINDOW_SEC } from "../src/lib/constants.js";
 
 const REPO = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const OUT = process.env.SNIP_OUT || path.join(REPO, "public/snips.json");
@@ -49,7 +45,6 @@ const BUDGET_MS = Math.max(1, parseFloat(process.env.SNIP_BUDGET_MIN) || 300) * 
 const [SHARD, SHARDS] = (process.env.SNIP_SHARD || "0/1").split("/").map(n => parseInt(n));
 const MERGE = process.env.SNIP_MERGE;
 const PLAN = !!process.env.SNIP_PLAN;
-const SWITCH_COVERAGE = 0.95;
 const MIN_ENTRIES = 80;  // refuse to write a final result thinner than this
 const PROGRESS_EVERY = 5;
 const SONG_TIMEOUT_MS = 40 * 60e3;
@@ -328,27 +323,13 @@ function writeSnips(v, entries, checked, corpusIds, { final }){
   return keys.length;
 }
 
-/* Writes the index the client should use now (see the header): the v5 one
-   judged from the curves once they cover the corpus, else the previous v4
-   index, carried over for the songs still in the corpus. */
-function publish(store, entries, checked, corpusIds, prev, { final, quiet = false }){
+function publish(store, entries, checked, corpusIds, { final, quiet = false }){
   const covered = [...corpusIds].filter(id => hasCurves(store, id)).length;
   const coverage = corpusIds.size ? covered / corpusIds.size : 0;
-  const switched = prev?.v === SNIP_INDEX_V || coverage >= SWITCH_COVERAGE;
   const log = quiet ? () => {} : console.log;
-  log(`curve coverage: ${covered}/${corpusIds.size} corpus songs (${Math.round(100 * coverage)}%, switch at ${100 * SWITCH_COVERAGE}%)`);
-  if (switched || prev?.v !== SNIP_LEGACY.v){
-    const n = writeSnips(SNIP_INDEX_V, entries, checked, corpusIds, { final });
-    log(`wrote ${OUT}: v${SNIP_INDEX_V} (${SNIP_METHOD}), ${n} entries`);
-    return;
-  }
-  const accept = SNIP_ACCEPTED[SNIP_LEGACY.v];
-  const legacy = Object.fromEntries(Object.entries(prev.snips).filter(([id, e]) =>
-    corpusIds.has(id) && e.sourceId === id && e.method === accept.method && accept.clean(e) &&
-    Number.isInteger(e.startSec) && e.startSec >= 0 && e.endSec - e.startSec === SNIP_WINDOW_SEC));
-  const legacyChecked = Object.fromEntries(Object.entries(prev.checked || {}).filter(([id]) => corpusIds.has(id)));
-  const n = writeSnips(SNIP_LEGACY.v, legacy, legacyChecked, corpusIds, { final });
-  log(`wrote ${OUT}: still v${SNIP_LEGACY.v} (${SNIP_LEGACY.method}), ${n} entries; v${SNIP_INDEX_V} would hold ${Object.keys(entries).length}`);
+  log(`curve coverage: ${covered}/${corpusIds.size} corpus songs (${Math.round(100 * coverage)}%)`);
+  const n = writeSnips(SNIP_INDEX_V, entries, checked, corpusIds, { final });
+  log(`wrote ${OUT}: v${SNIP_INDEX_V} (${SNIP_METHOD}), ${n} entries`);
 }
 
 /* Kept entries per language and corpus tier, and the share of scored
@@ -401,7 +382,7 @@ function merge(){
   const entries = {};
   judgeAll(corpusIds, store, entries, checked);
   console.log(`merging ${shards.length} shards`);
-  publish(store, entries, checked, corpusIds, prev, { final: true });
+  publish(store, entries, checked, corpusIds, { final: true });
   writeCurves(store);
   console.log(`${CURVES}: ${Object.keys(store.songs).length} songs with curves`);
   report(entries, checked);
@@ -462,7 +443,7 @@ function startExtractor(){
   const failures = [];
   let done = 0, kept = 0, sinceWrite = 0, py = null;
   const progress = () => {
-    publish(store, entries, checked, corpusIds, prev, { final: false, quiet: true });
+    publish(store, entries, checked, corpusIds, { final: false, quiet: true });
     writeCurves(store);
   };
   async function ask(job){
@@ -513,7 +494,7 @@ function startExtractor(){
   if (py) py.stop();
 
   console.log(`\n${kept} passed of ${done} scored in ${Math.round((Date.now() - t0) / 60000)}min`);
-  publish(store, entries, checked, corpusIds, prev, { final: SHARDS === 1 });
+  publish(store, entries, checked, corpusIds, { final: SHARDS === 1 });
   writeCurves(store);
   console.log(`${failures.length} failed after retry`);
   console.log(`${Object.keys(checked).length} source IDs rejected by ${CHECKED_METHOD}`);

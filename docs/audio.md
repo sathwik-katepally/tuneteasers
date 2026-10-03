@@ -24,7 +24,7 @@ The key and `sourceId` must both match the returned Saavn recording ID.
 `checked` records scored recordings that did not pass and never authorizes playback.
 The window length (`SNIP_WINDOW_SEC`, 12 seconds) and the accepted schema versions (`SNIP_ACCEPTED`) are shared constants in `src/lib/constants.js`, read by the scorer, the crate and the engine alike.
 Two versions authorize playback, each with its own method and check: v4 (`continuous-v4`, MusiCNN, `maxVoice` below 0.25) and v5 (`vocal-stem-v5`, separated vocal stems, `vocalDb` below `SNIP_VOCAL_MAX_DB`, -50 dBFS).
-The v4 index stays live while the scorer builds vocal-stem curves for the corpus; once they cover 95% of it, the scorer publishes v5 on its own and never goes back (see "How windows are judged" below).
+The index that ships is v5; v4 is the index the scorer carried over while it built the vocal-stem curves for the corpus, and it no longer writes one (see "How windows are judged" below).
 An index of any other version, an entry whose method is not its version's, an unmatched ID, an interval that is not exactly 12 seconds, an absent entry, or a build timestamp over 30 days old cannot authorize Music-only playback.
 The window must hold the whole Music-only clip ladder; `src/lib/config.ts` throws at load if that ladder outgrows it.
 A queued track keeps its window's method; a saved snip without an accepted method (every save before v5, and the 10- and 20-second releases) is dropped when it loads, and resuming a Music-only game rebinds its queue to the current index, or shows the shortage message.
