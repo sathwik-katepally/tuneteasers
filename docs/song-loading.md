@@ -1,8 +1,9 @@
 # Song loading
 
 `buildCrate(mix, eras, sound, difficulty, minSongs, cooldown, categories)` in `src/lib/crate.ts` assembles the game queue; it returns `{ queue, source }` or `{ error: "load" | "thin" | "safe" }`.
-`difficulty` is `"easy" | "medium" | "hard" | "mixed"` (default `"mixed"`, also `settings.difficulty`).
-It maps to corpus tiers through `DIFFICULTY_TIERS` in `src/lib/constants.js` (easy → easy; medium → easy + medium; hard → medium + hard; mixed → all); when the mapped tiers hold fewer than 10 songs for the chosen languages and eras the crate widens to all tiers before reporting `thin`.
+`difficulty` is `settings.difficulty`, one of `"easy" | "medium" | "hard"`; `buildCrate` also accepts `"mixed"` (every tier) as its own default, which no screen sends.
+It maps to corpus tiers through `DIFFICULTY_TIERS` in `src/lib/constants.js` (easy → easy; medium → easy + medium; hard → medium + hard; mixed → all); when the mapped tiers hold fewer than `minSongs` songs for the chosen languages and eras the crate widens to all tiers before reporting `thin`.
+`minSongs` is the caller's rounds times contestants (the code default is 10).
 The uncurated fallback tiers carry no tier and ignore it.
 `categories` is a list of corpus tags (`dance`, `romantic`, `sad`, `item`, `mass`; `[]` means every song): a corpus song passes when it carries any of them, and the difficulty widening above happens inside that set.
 The fallback tiers carry no tags, so with categories set they never run: an unreachable corpus returns `load` and too few tagged songs return `thin` (or `safe` in Music-only).
@@ -13,7 +14,7 @@ The fallback tiers carry no tags, so with categories set they never run: an unre
 1. **Curated corpus** (`loadFromCorpus`) - `public/corpus.json`, the verified film-song pool built offline by `scripts/build-corpus.mjs` (below).
    The crate filters it by language, era, difficulty tier and the device blocklist, orders fresh songs before ones still cooling down, draws `CORPUS_DRAW` candidates and resolves them to streams with one batch request per `CORPUS_BATCH` ids (`GET /songs?ids=`, served by our Worker and by any saavn.dev-compatible mirror in `SAAVN_BASES`).
    Tracks carry `album` = film, `year` = the film's verified year and `tier`.
-   If the corpus file is missing or the ids cannot be resolved (worker and mirror down), the tiers below take over; if the corpus loads but fewer than 10 songs match the filters, the crate returns `{ error: "thin" }` rather than playing unverified songs.
+   If the corpus file is missing or the ids cannot be resolved (worker and mirror down), the tiers below take over; if the corpus loads but fewer than `minSongs` songs match the filters, the crate returns `{ error: "thin" }` rather than playing unverified songs.
 2. **Saavn search** (`loadFromSaavn`) - JioSaavn search APIs listed in `SAAVN_BASES`; full songs, so snippets start at the intro.
    The first base is our own Cloudflare Worker (`worker/`, see docs/testing-and-deploy.md); the public nandanvarma mirror follows as a fallback.
    The first responding base is remembered for the session and tried first, but the others are still tried if it later fails.
@@ -23,7 +24,7 @@ The fallback tiers carry no tags, so with categories set they never run: an unre
 3. **Baked catalog** (`loadCatalog`) - the last tier: `public/catalog.json`, ~700 iTunes preview clips fetched by `scripts/build-catalog.mjs`, committed to the repo and served same-origin, so it needs no third-party host and is what keeps the game playing with the Worker and the mirror unreachable; refreshed weekly by CI because iTunes preview URLs rot.
    The client makes no live iTunes request; the catalog is the only thing it knows about iTunes.
 
-Each tier only runs if the pool still has fewer than 10 songs.
+Each tier only runs if the pool still has fewer than `minSongs` songs.
 The snips scorer (`scripts/build-snips.mjs`) scores corpus recordings by Saavn ID.
 Music-only draws only source IDs present in the current verified index; other tiers can contribute only if their exact ID has a valid index entry.
 Dedupe is by canonical title key (`songKey(title)` in `src/lib/utils.js`, which strips bracketed qualifiers, dash suffixes like `- From "Movie"`, and punctuation): each tier dedupes internally, later tiers are filtered against earlier ones, and the assembled pool gets a final dedupe pass (first occurrence wins, so full Saavn songs beat hook clips).

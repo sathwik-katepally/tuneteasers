@@ -32,12 +32,12 @@ Animation uses Motion through `LazyMotion` with the `domAnimation` feature set a
 Anything that loops (bulbs, equalizer, confetti, spotlights, reel) is plain CSS keyframes, and layout moves (the box-office reorder) are a small FLIP with the Web Animations API, so the heavier `domMax` features are not needed.
 `MotionConfig reducedMotion="user"` plus a global `prefers-reduced-motion` rule turn the motion off; screens that time things (countdown, curtain, board settle) shorten their timers too.
 On desktop (900px and up) the phone-width stage sits between curtains under the marquee; below that it is a single column.
-A `max-height: 760px` pass tightens spacing so every in-game screen fits a short phone without scrolling (the E2E harness checks this).
+A `max-height: 760px` pass tightens spacing so every in-game screen fits a short phone without scrolling (the E2E harness checks this); the landing has its own 700px and 620px passes, and the listening screen and marquee tighten under 420px and 360px wide.
 
 ## State model
 
 `App` holds one persisted `state` object: `{ screen, settings, players, teams, game }`.
-`settings` is `{ mix, eras, difficulty, categories, mode, rounds }`; `categories` lists the chosen song categories (`[]` is "Any", which is also what saves from before categories load as, and unknown ids are dropped); `players` and `teams` are the setup rosters (`{ id, name, members }`, members only used by teams).
+`settings` is `{ play, mix, eras, difficulty, categories, mode, rounds }`; `play` picks pass-the-phone or a buzz-in room (see Screens and phases); `categories` lists the chosen song categories (`[]` is "Any", which is also what saves from before categories load as, and unknown ids are dropped); `players` and `teams` are the setup rosters (`{ id, name, members }`, members only used by teams).
 `game` is `{ id, queue, trackIdx, turn, round, totalRounds, totalSongs, source, mode, difficulty, mix, cast, history, finished }` or null; `id` makes the finished show's group result idempotent.
 `cast` is a snapshot of the roster with a `score` and the "Heard it too much" `skips` used, taken at game start, so editing the roster on the home screen never disturbs a saved game.
 `history` holds one `{ id, song, points, round }` entry per judged turn; the box office derives each round's gains from it.
@@ -48,7 +48,7 @@ A page load lands on the home screen; an unfinished game shows a Resume/Discard 
 The one exception is a first visit, which opens the landing page instead (see Screens and phases).
 The marquee menu offers "Home, keep the game" (resumable) and "End game" (in-app two-step confirm, clears the game).
 
-Ephemeral per-turn state (`phase`, `turn`, the revealed track and `verdict`) is separate `useState` and intentionally not saved.
+Ephemeral per-turn state (`phase`, `turn`, the revealed track, `verdict`, the `steal`, the stream-error `note`, the `skipped` title shown on the next countdown and `boardRound`) is separate `useState` and intentionally not saved.
 Judging a turn updates the saved game in one step (score, history, next turn and track), so a reload can never award the same turn twice; the reveal screen keeps showing the judged track and name from the ephemeral `verdict`.
 
 ## Screens and phases
