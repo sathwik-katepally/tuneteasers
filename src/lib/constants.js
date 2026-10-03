@@ -4,9 +4,10 @@ export const SAAVN_BASES = [
   WORKER_API,
   "https://saavn-api.nandanvarma.com/api",
 ];
-/* Every (query, page) pair is one search job. The offline snips scorer runs
-   all of them; each game samples a few, so the list is deliberately broad
-   (singers, composers, stars, years, moods) to keep games from repeating. */
+/* Every (query, page) pair is one search job for the client's tier-2 fallback
+   search, used when corpus ids cannot be resolved (docs/song-loading.md).
+   Each game samples a few, so the list is deliberately broad (singers,
+   composers, stars, years, moods) to keep games from repeating. */
 export const SAAVN_QUERIES = {
   bolly: [
     "bollywood hits","hindi hit songs","best of bollywood","bollywood 2000s hits","hindi songs 2010s","hindi songs 2020s",
