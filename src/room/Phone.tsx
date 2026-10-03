@@ -201,7 +201,7 @@ function Buzzer({ view, send, online, error }: {
   useEffect(() => { setText(""); setSent(null); setPressed(null); }, [song?.n]);
   useEffect(() => { if (!answering){ setSent(null); if (document.activeElement === input.current) input.current?.blur(); } }, [answering]);
   useEffect(() => { if (answering) input.current?.focus(); }, [answering]);
-  useEffect(() => { if (error?.code === "not-your-turn") setSent(null); }, [error?.at]);
+  useEffect(() => { if (error?.code === "not-your-turn") setSent(null); }, [error?.at]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function buzz(){
     if (!open) return;
