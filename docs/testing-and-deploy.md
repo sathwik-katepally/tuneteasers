@@ -82,6 +82,8 @@ Successful responses are cached at the edge for 6 hours.
 Cloudflare Workers Builds deploys it on every push to main: the repo is connected to the Worker in the Cloudflare dashboard (Settings, Builds: root directory `worker`, production branch `main`, preview builds off, deploy command `npm run deploy`), so Cloudflare pulls the commit and runs the package's `deploy` script, which applies the D1 migrations (`wrangler d1 migrations apply DB --remote`) and then runs `wrangler deploy`.
 The API token (Workers and D1 edit) lives at Cloudflare, so CI holds no Cloudflare token.
 A failed build shows as a check run on the commit and in the Worker's build history in the dashboard; Cloudflare sends no alert for it, so when a Worker change does not show up, look there.
+When that panel says the project is disconnected from your Git account, the Cloudflare GitHub App's authorization has lapsed and pushes reach nothing; re-authorize it under https://github.com/settings/installations (this happened on 2026-10-03, minutes after connecting).
+Build watch paths are `worker/**` and `src/lib/**` (the Worker bundles `answer.js`, `constants.js` and `utils.js` from there), so a commit that touches neither starts no build.
 Do not deploy production by hand.
 Test locally with `npx wrangler d1 migrations apply DB --local && npx wrangler dev`, or deploy the preview copy with `--env preview`.
 
