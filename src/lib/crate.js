@@ -4,6 +4,7 @@
    Fallback 1: raw JioSaavn search (unverified years, no tiers).
    Fallback 2: catalog.json baked into the site (rebuilt weekly by CI, 30s hook clips). */
 import { SAAVN_BASES, SAAVN_QUERIES, SAAVN_PAGES, SAAVN_MIN_PLAYS, CORPUS_DRAW, CORPUS_BATCH, DIFFICULTY_TIERS, EXCLUDE_RX, ERAS, eraOf, SNIP_ACCEPTED, SNIP_WINDOW_SEC, SNIP_MAX_AGE_MS } from "./constants.js";
+import { COOLDOWN_MIN_FRESH } from "./config";
 import { de, songKey, shuffle, safeUrl, displayTitle } from "./utils.js";
 import { sanitizeTrack, loadHistory, cooldownOf, loadBlocked, normArtist, isBlocked } from "./storage.js";
 import { log, ms } from "./log.js";
@@ -286,7 +287,7 @@ export async function buildCrate(mix, eras, sound, difficulty = "mixed", minSong
   // Songs still cooling down (this phone, the group, a room's phones) sit out; when the fresh pool
   // runs thin, repeats come back after all fresh songs (splitCooldown).
   const { fresh, stale } = splitCooldown(pool, key, cooldown, heardBy);
-  let queue = fresh.length >= 15 ? shuffle(fresh) : shuffle(fresh).concat(stale);
+  let queue = fresh.length >= COOLDOWN_MIN_FRESH ? shuffle(fresh) : shuffle(fresh).concat(stale);
   // A full show's worth of verified tracks is required before the game starts.
   if (queue.length < minSongs) return { error:sound === "inst" ? "safe" : "thin" };
   return { queue, source };
