@@ -30,18 +30,6 @@
   box-shadow: var(--shadow-hard);
 }
 
-.eyebrow {
-  composes: eyebrow from global;
-}
-
-.display {
-  composes: display from global;
-}
-
-.center {
-  text-align: center;
-}
-
 .muted {
   color: var(--cream-dim);
 }
