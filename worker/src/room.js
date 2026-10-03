@@ -481,7 +481,7 @@ const HOST = {
     const p = r.players.find(x => x.id === m.id);
     if (!p) return SAME;
     r.players = r.players.filter(x => x !== p);
-    for (const c of this.getConnections()) if (c.state?.seat === p.id){ c.send(JSON.stringify({ t: "kicked" })); c.close(4403, "removed by host"); }
+    for (const c of this.getConnections()) if (c.state?.seat === p.id) c.close(4403, "removed by host");
   },
 };
 

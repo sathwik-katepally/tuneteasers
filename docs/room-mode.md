@@ -104,7 +104,7 @@ The first message must be a hello; anything else is refused until then, and a co
 | phone | `join { key, name, heard? }` | Takes a seat, or gets its seat back when the key is known; `heard` is the phone's songs sitting out, `{ key: hours }` (No repeats) |
 | phone | `buzz` / `answer { text }` / `leave` | |
 | phone | `vote { cue }` | "Heard it too much" for the current song; a majority skips it |
-| room | `welcome`, `state`, `error { code }`, `kicked` | `state` is the full view for that device, sent after every change |
+| room | `welcome`, `state`, `error { code }` | `state` is the full view for that device, sent after every change |
 | room | `heard { songs }` | Host only: every seat's songs merged, `{ key: [hours, seats] }` |
 
 `POST /api/rooms` (no body, so no CORS preflight) draws a free code and returns `{ code, host }`; only the SHA-256 of the host secret is stored.
