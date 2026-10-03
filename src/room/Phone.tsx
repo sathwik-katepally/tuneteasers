@@ -6,7 +6,7 @@ import { Stage } from "../components/Stage";
 import { Ticket } from "../components/Ticket";
 import { NAME_MAX } from "../lib/config";
 import { prepareTitles, suggest } from "../lib/answer.js";
-import { answerTitles } from "../lib/crate.js";
+import { answerTitles } from "../lib/crate";
 import { displayTitle } from "../lib/utils.js";
 import { cleanCode, dropSeat, heardPayload, isCode, lastName, loadSeat, newSeat, playerName, rememberName, setRoomUrl, useMsLeft,
   useRecordHeard, useRoom, type RoomView, type Seat } from "../lib/room";

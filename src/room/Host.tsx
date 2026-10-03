@@ -3,7 +3,7 @@ import { DIFFICULTY, ROOM_ANSWER_SECS, ROOM_GRACE_SECS, ROOM_SONGS_PER_ROUND, RO
   hookOffset, ladderFor } from "../lib/config";
 import { nearTitles } from "../lib/answer.js";
 import { playRung } from "../lib/ladder";
-import { answerTitles as answerTitlesJs, buildCrate as buildCrateJs, withFreshAt as withFreshAtJs, withSameTierNext as withSameTierNextJs } from "../lib/crate.js";
+import { answerTitles as answerTitlesJs, buildCrate as buildCrateJs, withFreshAt as withFreshAtJs, withSameTierNext as withSameTierNextJs } from "../lib/crate";
 import { engine, keepAwake } from "../lib/engine.js";
 import { cooldownOf, loadHistory, markPlayed } from "../lib/storage";
 import { displayTitle } from "../lib/utils.js";

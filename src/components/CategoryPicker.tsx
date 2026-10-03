@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { categoryCounts as categoryCountsJs } from "../lib/crate.js";
+import { categoryCounts as categoryCountsJs } from "../lib/crate";
 import { CATEGORIES, DIFFICULTY } from "../lib/config";
 import type { Category, Settings } from "../types";
 import s from "./CategoryPicker.module.css";
