@@ -109,7 +109,7 @@ export function skipLanding(){
   try { localStorage.setItem("tt_landing_seen", "1"); } catch {}
 }
 
-export const PROFILES = {
+const PROFILES = {
   phone: { type: webkit, context: { ...devices["iPhone 13"] } },
   desktop: { type: chromium, launch: { args: ["--autoplay-policy=no-user-gesture-required", ...MUTE_ARGS] }, context: { viewport: { width: 1440, height: 900 } } },
 };

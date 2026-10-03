@@ -17,7 +17,7 @@ export interface Group {
   owner?: string;
 }
 
-export interface ResultCast {
+interface ResultCast {
   name: string;
   score: number;
   members: string[];
@@ -36,7 +36,7 @@ export interface GroupResult {
 
 type Round = { id: string; key: string; kind?: PlayKind };
 interface Outbox { groupId: string; rounds: Round[]; results: GroupResult[] }
-export type SyncState = "idle" | "syncing" | "offline" | "revoked";
+type SyncState = "idle" | "syncing" | "offline" | "revoked";
 export interface GroupSnapshot { group: Group | null; pending: number; sync: SyncState }
 
 const LS_GROUP = "tt_group";
@@ -107,7 +107,6 @@ function emit(patch: Partial<GroupSnapshot>){
 }
 const subscribe = (l: () => void) => { listeners.add(l); return () => { listeners.delete(l); }; };
 export const useGroup = () => useSyncExternalStore(subscribe, () => snap);
-export const currentGroup = () => snap.group;
 
 export class GroupError extends Error {
   constructor(public status: number, message: string){ super(message); }
@@ -228,7 +227,7 @@ let flushing: Promise<FlushResult> | null = null;
    next try; a rejected entry (400/413) is dropped so it cannot block the rest.
    If the phone switched groups while a flush for the old one was in flight,
    the new group's queue is flushed as soon as that one settles. */
-export function flush(): Promise<FlushResult> {
+function flush(): Promise<FlushResult> {
   if (!flushing){
     const groupId = snap.group?.id;
     flushing = doFlush().finally(() => { flushing = null; });
@@ -285,7 +284,7 @@ async function send(request: () => Promise<unknown>, done: () => void){
 
 /* The group's history. Returns null with no group or when the group can't be
    reached in time, and the crate then falls back to this phone's history alone. */
-export async function groupHistory(): Promise<History | null> {
+async function groupHistory(): Promise<History | null> {
   const g = snap.group;
   if (!g) return null;
   // Only this call's flush says the Worker is down; an "offline" left by an

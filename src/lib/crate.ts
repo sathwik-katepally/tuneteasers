@@ -15,8 +15,8 @@ type Sound = "full" | "inst";
 type HeardBy = Record<string, number>;
 type Snip = NonNullable<Track["snip"]>;
 
-export type CrateError = "load" | "thin" | "safe";
-export type CrateSource = "corpus" | "saavn" | "catalog";
+type CrateError = "load" | "thin" | "safe";
+type CrateSource = "corpus" | "saavn" | "catalog";
 export type Crate = { queue: Track[]; source: CrateSource } | { error: CrateError };
 
 let saavnBase: string | null = null;

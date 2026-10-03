@@ -15,7 +15,7 @@ const FOLDS = [
   [/([a-z])\1+/g, "$1"],
 ];
 
-export function fold(s){
+function fold(s){
   let t = songKey(displayTitle(String(s || "")).normalize("NFKD").replace(/\p{M}/gu, ""));
   for (const [rx, to] of FOLDS) t = t.replace(rx, to);
   return t;

@@ -10,7 +10,7 @@ import { SNIP_WINDOW_SEC } from "./constants.js";
    inside a verified vocal-free snip window (SNIP_WINDOW_SEC), so its ladder
    stops at 12s; give it the third rung again once the index holds enough
    20s windows (a longer SNIP_WINDOW_SEC and a rescore, docs/audio.md). */
-export const CLIP_LADDERS = {
+const CLIP_LADDERS = {
   full: { segments: [5, 7, 8], points: [100, 60, 30] },
   inst: { segments: [5, 7], points: [100, 60] },
 } as const;
@@ -44,11 +44,11 @@ export const ladderFor = (plain: boolean): Ladder => LADDERS[plain ? "full" : "i
 
 export const SPEED_BONUS_MAX = 20;
 export const SPEED_BONUS_FADE_SECS = 13;
-export const POINTS_FLOOR = 10;
+const POINTS_FLOOR = 10;
 export const HINT_PENALTY = 20;
 /* Hints come one tap at a time, least telling first, each costing HINT_PENALTY.
    The film goes last because naming the film scores. */
-export const HINT_ORDER = ["year", "music", "singers", "film"] as const;
+const HINT_ORDER = ["year", "music", "singers", "film"] as const;
 /* A contestant can pass a song on round the table instead of giving up; whoever
    steals it scores this share of what it is worth then, never below the floor. */
 export const STEAL_SHARE = 0.5;
@@ -104,7 +104,7 @@ export const CATEGORIES: { id: Category; label: string }[] = [
 
 /* The bonus stays full while a clip is still playing and fades once the
    current rung's clip has finished, so waiting costs a little, never a lot. */
-export function speedBonus(clipEndedAt: number | null, now: number): number {
+function speedBonus(clipEndedAt: number | null, now: number): number {
   if (clipEndedAt === null) return SPEED_BONUS_MAX;
   const waited = Math.max(0, (now - clipEndedAt) / 1000);
   return Math.max(0, Math.round(SPEED_BONUS_MAX * (1 - waited / SPEED_BONUS_FADE_SECS)));
