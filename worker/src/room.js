@@ -14,7 +14,7 @@ import { isCorrect } from "../../src/lib/answer.js";
 import { ROOM_HEARD } from "../../src/lib/constants.js";
 import { songKey } from "../../src/lib/utils.js";
 
-export const CODE_ALPHABET = "BCDFGHJKLMNPQRSTVWXZ";
+const CODE_ALPHABET = "BCDFGHJKLMNPQRSTVWXZ";
 export const CODE_RX = /^[BCDFGHJKLMNPQRSTVWXZ]{4}$/;
 const KEY_RX = /^[A-Za-z0-9_-]{16,64}$/;
 const TOKEN_RX = /^[A-Za-z0-9_-]{22}$/;

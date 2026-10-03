@@ -26,7 +26,7 @@ function read(key: string): unknown {
 export const newId = () => Math.random().toString(36).slice(2, 10);
 export const cleanName = (v: unknown, fallback: string) => String(v ?? "").trim().slice(0, NAME_MAX) || fallback;
 
-export const DEFAULTS: AppState = {
+const DEFAULTS: AppState = {
   screen: "setup",
   settings: { play: "pass", mix: "both", eras: [...ERAS], difficulty: "medium", categories: [], mode: "players", rounds: DEFAULT_ROUNDS },
   players: [

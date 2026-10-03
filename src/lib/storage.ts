@@ -89,5 +89,5 @@ export function cooldownOf(...histories: (History | null)[]): Cooldown {
 export const normArtist = (s: string) => String(s||"").trim().toLowerCase();
 export const loadBlocked = (): string[] => { const l = lsGet(LS_BLOCKED); return Array.isArray(l) ? l.filter(x=>typeof x==="string" && x.trim()).slice(0,50) : []; };
 export const saveBlocked = (l: string[]) => lsSet(LS_BLOCKED, l.slice(0,50));
-export const trackArtists = (t: Pick<Track, "artist">) => String(t.artist||"").split(",").map(normArtist).filter(Boolean);
+const trackArtists = (t: Pick<Track, "artist">) => String(t.artist||"").split(",").map(normArtist).filter(Boolean);
 export const isBlocked = (t: Pick<Track, "artist">, set: Set<string>) => trackArtists(t).some(a=>set.has(a));

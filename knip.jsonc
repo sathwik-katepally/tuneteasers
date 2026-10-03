@@ -1,0 +1,10 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema-jsonc.json",
+  "workspaces": {
+    ".": {
+      // e2e/group-edge.mjs imports the client module through the Vite dev server URL.
+      "ignoreUnresolved": ["/src/lib/group.ts"]
+    },
+    "worker": {}
+  }
+}

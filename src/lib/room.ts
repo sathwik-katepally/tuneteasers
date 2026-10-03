@@ -11,16 +11,16 @@ import { songKey } from "./utils.js";
 import { randomId } from "./group";
 import type { Category, Difficulty, Mix, Track } from "../types";
 
-export const ROOM_ORIGIN = String(WORKER_API).replace(/\/api$/, "");
+const ROOM_ORIGIN = String(WORKER_API).replace(/\/api$/, "");
 const CODE_RX = /^[BCDFGHJKLMNPQRSTVWXZ]{4}$/;
 const LS_SEAT = "tt_room_seat";
 const LS_HOST = "tt_room_host";
 const LS_NAME = "tt_room_name";
 
-export type SongState = "cue" | "live" | "answering" | "missed" | "revealed" | "skipped";
-export interface RoomPlayer { id: string; name: string; score: number; online: boolean }
-export interface Guess { id: string; text: string; ok: boolean; timeout: boolean }
-export interface RoomAnswer { title: string; film: string; year: number; artist: string }
+type SongState = "cue" | "live" | "answering" | "missed" | "revealed" | "skipped";
+interface RoomPlayer { id: string; name: string; score: number; online: boolean }
+interface Guess { id: string; text: string; ok: boolean; timeout: boolean }
+interface RoomAnswer { title: string; film: string; year: number; artist: string }
 export interface RoomSong {
   n: number;
   /* This cue of song n; a re-cue after a skip gets a new one. */
@@ -40,9 +40,9 @@ export interface RoomSong {
   votes: string[];
   votesNeeded: number;
 }
-export interface RoomResult { n: number; title: string; winner: string | null; points: number }
+interface RoomResult { n: number; title: string; winner: string | null; points: number }
 /* A song skipped this show, by its song key; tired when this phone voted for the skip. */
-export interface RoomSkipped { key: string; tired: boolean }
+interface RoomSkipped { key: string; tired: boolean }
 export interface RoomView {
   phase: "lobby" | "show" | "over";
   code: string;
