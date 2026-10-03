@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
 import { Lightbulb, Play, Plus, RotateCcw } from "lucide-react";
+import { ClipStrip, useNow } from "../components/ClipStrip";
 import { Equalizer } from "../components/Equalizer";
 import { HINT_PENALTY, SPEED_BONUS_MAX, STEAL_SHARE, hintsFor, ladderFor, pointsNow } from "../lib/config";
 import type { Phase, Track, Turn } from "../types";
@@ -31,12 +31,7 @@ interface Props {
 const LINE: Partial<Record<Phase, string>> = { cueing: "Threading the film", playing: "Now playing", listened: "Clip over" };
 
 export function Playing({ name, track, plain, phase, turn, note, onPlay, onJudge, onHint, onSkip, stealing, passTo, onPass, skipsLeft, onHeardIt }: Props){
-  const [now, setNow] = useState(Date.now);
-  useEffect(() => {
-    const id = window.setInterval(() => setNow(Date.now()), 250);
-    return () => window.clearInterval(id);
-  }, []);
-
+  const now = useNow();
   const playing = phase === "playing";
   const cueing = phase === "cueing";
   const ladder = ladderFor(plain);
@@ -47,7 +42,6 @@ export function Playing({ name, track, plain, phase, turn, note, onPlay, onJudge
   const shown = hints.slice(0, turn.hints);
   const nextLen = turn.rung < ladder.last ? ladder.segments[turn.rung + 1] : null;
   const state = cueing ? "Loading" : playing ? `${left}s left` : phase === "blocked" ? "Paused" : "Guess, or hear more";
-  const inSpan = (i: number) => i <= turn.rung && ladder.start(i) >= from;
 
   return (
     <div className={sh.stage}>
@@ -73,28 +67,9 @@ export function Playing({ name, track, plain, phase, turn, note, onPlay, onJudge
         <Equalizer on={playing} />
       </div>
 
-      <div className={s.ladder}>
-        <div className={s.ladderHead}>
-          <span className={s.ladderLabel}>Clip length</span>
-          <span className={s.ladderState}>{state}</span>
-        </div>
-        <div className={s.strip} style={{ gridTemplateColumns: ladder.segments.map(sec => `${sec}fr`).join(" ") }}>
-          {ladder.segments.map((sec, i) => {
-            const heard = i < turn.rung || (i === turn.rung && !cueing);
-            const running = playing && inSpan(i);
-            return (
-              <div key={i} className={`${s.frame} ${heard && !running && !(cueing && inSpan(i)) ? s.frameDone : ""} ${i === turn.rung ? s.frameNow : ""} ${running ? s.frameLit : ""}`}>
-                {running && (
-                  <div key={turn.playKey} className={`${s.frameFill} ${s.frameRun}`}
-                    style={{ animationDuration: `${sec}s`, animationDelay: `${ladder.start(i) - from}s` }} />
-                )}
-                <span className={s.frameText}>{i ? "+" : ""}{sec}s · {ladder.points[i]}</span>
-              </div>
-            );
-          })}
-        </div>
+      <ClipStrip ladder={ladder} turn={turn} cueing={cueing} playing={playing} state={state}>
         <p className={s.caption}>{stealing ? `A steal scores ${STEAL_SHARE === 0.5 ? "half" : `${STEAL_SHARE * 100}%`} of this.` : `No rush. A quick answer adds up to ${SPEED_BONUS_MAX}.`}</p>
-      </div>
+      </ClipStrip>
 
       <div className={`${sh.actions} ${s.actions}`}>
         <div className={sh.row2}>

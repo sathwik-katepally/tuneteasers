@@ -4,7 +4,8 @@
 
 - `index.html` - static shell; React 19 renders all UI into `#root`.
 - `src/main.tsx` - entry point; loads the fonts (`@fontsource` Rozha One and Mukta), global styles, and renders `App` plus the debug overlay.
-- `src/app.tsx` - the state owner for pass-the-phone and the home screen, and the router into the buzz-in room owners (`screen: "host" | "buzzer"`).
+- `src/app.tsx` - the saved-state owner and the router: the persisted `state` and its save effect, the hash-link listener, the home screen and the screen switch, with the pass-the-phone turn in `usePassTheGame` and the buzz-in room owners behind `screen: "host" | "buzzer"`.
+- `src/game/usePassTheGame.ts` - the pass-the-phone turn engine: the per-turn state that is not saved (phase, clip, revealed track, verdict, steal) and every handler the game screens call, owning a turn the way `Host` owns a room.
 - `src/room/` - buzz-in rooms (docs/room-mode.md): `Host` (the host screen's state owner, with `Lobby` and `HostPlaying`) and `Phone` (a phone's join, buzzer and answer pad).
 - `src/types.ts` - shared types for saved state, tracks, turns and verdicts.
 - `src/lib/config.ts` - every gameplay number: clip ladder and its rung spans, points per rung, speed bonus, hint cost, round options, difficulty table, skips per contestant and the cooldown days; also the song category labels.
@@ -17,9 +18,9 @@
 - `src/lib/room.ts` - buzz-in room client: `createRoom`, the `#room=` link, `useRoom` (PartySocket), seat and host-show storage.
 - `src/lib/answer.js` - answer folding, matching and autocomplete, shared with the Worker.
 - `src/lib/engine.js` - the audio engine (songs and synthesised sound effects) and screen wake lock.
-- `src/lib/ladder.ts` - `playRung`, which plays a clip ladder rung through the engine.
+- `src/lib/ladder.ts` - `playRung`, which plays a clip ladder rung through the engine, and `useClipPlayer`, the turn record and play sequence (status, started/ended/failed bookkeeping, the stream-error note) that the pass-the-phone game and the room host share.
 - `src/styles/tokens.css`, `src/styles/global.css` - design tokens (colors, fonts, hard shadows) and the few global classes (`.btn*`, `.display`, `.eyebrow`, `.grain`, `.link`, the debug overlay).
-- `src/components/` - the cinema pieces, each with a CSS Module: `Theatre` (marquee, curtains, seat backs, the home and game menus, and an `aside` pinned beside the stage on wide screens), `Bulbs` (bulb rows and frames), `Ticket`, `Curtain`, `Stamp`, `SplitFlap`, `Seg` (segmented radio), `CategoryPicker` (the setup screen's song-category stubs), `Equalizer`, `Reel`, `GroupPanel` (the home-screen group card), `Qr`, `Stage` (the theatre plus the screen cross-fade, used by every state owner), and `DebugLog`.
+- `src/components/` - the cinema pieces, each with a CSS Module: `Theatre` (marquee, curtains, seat backs, the home and game menus, and an `aside` pinned beside the stage on wide screens), `Bulbs` (bulb rows and frames), `Ticket`, `Curtain`, `Stamp`, `SplitFlap`, `Seg` (segmented radio), `CategoryPicker` (the setup screen's song-category stubs), `ClipStrip` (the clip ladder as a film strip with the clip's progress, shared by `Playing` and `HostPlaying`), `Equalizer`, `Reel`, `GroupPanel` (the home-screen group card), `Qr`, `Stage` (the theatre plus the screen cross-fade, used by every state owner), and `DebugLog`.
 - `src/screens/` - one component and CSS Module per screen: `Landing`, `Setup`, `GroupScreen`, `Loading`, `Handover`, `Countdown`, `Playing`, `Reveal`, `Scoreboard`, `Podium`, `PastGames`.
 - `tsconfig.json` - strict UI type checking; `src/lib/constants.js`, `utils.js`, `answer.js`, `engine.js` and `log.js` stay JavaScript with `allowJs` and `checkJs` off.
 
@@ -48,7 +49,7 @@ A page load lands on the home screen; an unfinished game shows a Resume/Discard 
 The one exception is a first visit, which opens the landing page instead (see Screens and phases).
 The marquee menu offers "Home, keep the game" (resumable) and "End game" (in-app two-step confirm, clears the game).
 
-Ephemeral per-turn state (`phase`, `turn`, the revealed track, `verdict`, the `steal`, the stream-error `note`, the `skipped` title shown on the next countdown and `boardRound`) is separate `useState` and intentionally not saved.
+Ephemeral per-turn state (`phase`, `turn`, the revealed track, `verdict`, the `steal`, the stream-error `note`, the `skipped` title shown on the next countdown and `boardRound`) is separate `useState` in `usePassTheGame` and intentionally not saved.
 Judging a turn updates the saved game in one step (score, history, next turn and track), so a reload can never award the same turn twice; the reveal screen keeps showing the judged track and name from the ephemeral `verdict`.
 
 ## Screens and phases
@@ -83,7 +84,7 @@ On the setup screen "Any" is the empty selection and clears the others; each cat
 A chosen category that turns thin stays tappable so it can be turned off.
 Clip ladder: each turn starts with a 5s clip; "Hear 7s more" continues to 12s without replaying what was heard, and on Easy "Hear 8s more" goes on to 20s; Replay plays from the top to the current end (docs/audio.md).
 Music-only (Medium and Hard) stops at 12s because it may only play inside a verified 12-second vocal-free window.
-The ladders (`CLIP_LADDERS`, one per sound, and `ladderFor(plain)` with its `span`, `start` and `end`) are in `src/lib/config.ts` and the play call (`playRung`) in `src/lib/ladder.ts`, so any screen that runs a turn, the room host included, shares them.
+The ladders (`CLIP_LADDERS`, one per sound, and `ladderFor(plain)` with its `span`, `start` and `end`) are in `src/lib/config.ts` and the play call (`playRung`) with its turn bookkeeping (`useClipPlayer`) in `src/lib/ladder.ts`, so any screen that runs a turn, the room host included, shares them.
 Points: 100 / 60 / 30 by rung on Easy and 100 / 60 on Music-only, plus a speed bonus of up to 20 that stays full while a clip plays and fades over about 13s once it has ended, minus 20 for each hint taken, never below 10.
 Hints come one tap at a time, least telling first (`HINT_ORDER` and `hintsFor` in `src/lib/config.ts`): the year, the music director, the singers, then the film, which goes last because naming the film scores.
 A detail the song's record lacks is left out, so the link counts what that song has ("Hint 1 of 3, costs 20").
