@@ -70,7 +70,7 @@ Deletion runs from group writes, at most hourly per Worker isolate, because this
 
 ## Environments
 
-- Production: Worker `tuneteasers-saavn`, D1 `tuneteasers`, deployed by `.github/workflows/deploy.yml` on push to main (see docs/testing-and-deploy.md).
+- Production: Worker `tuneteasers-saavn`, D1 `tuneteasers`, deployed by Cloudflare Workers Builds on push to main (see docs/testing-and-deploy.md).
 - Preview: `--env preview`, Worker `tuneteasers-saavn-preview`, D1 `tuneteasers-preview`, deployed by hand for testing a branch:
   `cd worker && npx wrangler d1 migrations apply DB --env preview --remote && npx wrangler deploy --env preview`.
 - Local: `npx wrangler d1 migrations apply DB --local && npx wrangler dev`.

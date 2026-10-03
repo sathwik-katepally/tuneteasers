@@ -65,9 +65,8 @@ The older ad-hoc scripts in `/tmp/tt-e2e` (and the obsolete on-device pipeline s
 
 ## Deploy (GitHub Pages via Actions)
 
-`.github/workflows/deploy.yml` runs on every push to main: its `worker` job applies the D1 migrations (`wrangler d1 migrations apply DB --remote`) and deploys the Worker, then the `deploy` job checks TypeScript, builds with Vite, and deploys `dist/` to Pages; Pages is configured with `build_type=workflow`.
-The Worker goes first so the site never ships ahead of the API it calls; migrations must stay additive so the live site keeps working against the new schema.
-The `worker` job uses the repo secrets `CLOUDFLARE_API_TOKEN` (Workers and D1 edit) and `CLOUDFLARE_ACCOUNT_ID`, set from Automic Vault (`av inject +CLOUDFLARE_API_TOKEN -- sh -c 'printf %s "$CLOUDFLARE_API_TOKEN" | gh secret set CLOUDFLARE_API_TOKEN'`).
+`.github/workflows/deploy.yml` runs on every push to main: it checks TypeScript, builds with Vite, and deploys `dist/` to Pages; Pages is configured with `build_type=workflow`.
+The Worker deploys separately through Cloudflare Workers Builds (see Worker below), so nothing orders the two any more: a site change that needs a new Worker route ships in a PR after the route's PR has deployed, and migrations must stay additive so the live site keeps working against the new schema.
 `.github/workflows/verify.yml` runs the same typecheck and build on pull requests, plus a Worker `wrangler deploy --dry-run` and the migrations against a throwaway local D1.
 `.github/workflows/e2e.yml` runs the browser suites (see E2E in CI above).
 `vite.config.js` sets `base: "./"` so the build works under the `/tuneteasers/` project path.
@@ -81,7 +80,10 @@ It serves `GET /api/search/songs?query=&limit=&page=` (the fallback search tier)
 Responses use the saavn.dev shape (the subset the client reads), so any saavn.dev-compatible mirror can sit behind it in `SAAVN_BASES` as a fallback; the public mirror serves both routes, so the client keeps working when a new worker route is not deployed yet (the worker answers 404 and the client moves to the next base).
 Successful responses are cached at the edge for 6 hours.
 
-CI deploys it (see above); do not deploy production by hand.
+Cloudflare Workers Builds deploys it on every push to main: the repo is connected to the Worker in the Cloudflare dashboard (Settings, Builds: root directory `worker`, production branch `main`, preview builds off, deploy command `npm run deploy`), so Cloudflare pulls the commit and runs the package's `deploy` script, which applies the D1 migrations (`wrangler d1 migrations apply DB --remote`) and then runs `wrangler deploy`.
+The API token (Workers and D1 edit) lives at Cloudflare, so CI holds no Cloudflare token.
+A failed build shows as a check run on the commit and in the Worker's build history in the dashboard; Cloudflare sends no alert for it, so when a Worker change does not show up, look there.
+Do not deploy production by hand.
 Test locally with `npx wrangler d1 migrations apply DB --local && npx wrangler dev`, or deploy the preview copy with `--env preview`.
 
 ## Catalog refresh CI
