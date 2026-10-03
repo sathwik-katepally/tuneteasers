@@ -67,6 +67,8 @@ export const SKIPS_PER_PLAYER = 1;
    or skipped as heard too much. The group's PLAYED_TTL_DAYS (Worker var) must
    be at least the longest of these, or the group forgets a skip too early. */
 export const COOLDOWN_DAYS = { played: 7, tired: 30 } as const;
+// Below this many fresh songs, cooled-down ones come back after them; without it a device that has heard most of a small pool could not start a show until a cooldown ran out.
+export const COOLDOWN_MIN_FRESH = 15;
 
 /* Buzz-in rooms (docs/room-mode.md): the host screen plays, phones buzz. */
 export const ROOM_SONGS_PER_ROUND = 4;

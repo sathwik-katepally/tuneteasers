@@ -44,6 +44,7 @@ jobs:
               npm run e2e:game -- --profile=desktop --mix=bolly --difficulty=hard &&
               npm run e2e:game -- --profile=desktop --mix=telugu --difficulty=medium --rounds=5 &&
               npm run e2e:game -- --profile=desktop --no-worker &&
+              npm run e2e:game -- --profile=desktop --difficulty=easy --no-saavn &&
               npm run e2e:game -- --profile=desktop --categories=mass --difficulty=easy
           - name: ladder window at 0s phone
             os: macos-latest

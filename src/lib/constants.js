@@ -4,9 +4,10 @@ export const SAAVN_BASES = [
   WORKER_API,
   "https://saavn-api.nandanvarma.com/api",
 ];
-/* Every (query, page) pair is one search job. The offline snips scorer runs
-   all of them; each game samples a few, so the list is deliberately broad
-   (singers, composers, stars, years, moods) to keep games from repeating. */
+/* Every (query, page) pair is one search job for the client's tier-2 fallback
+   search, used when corpus ids cannot be resolved (docs/song-loading.md).
+   Each game samples a few, so the list is deliberately broad (singers,
+   composers, stars, years, moods) to keep games from repeating. */
 export const SAAVN_QUERIES = {
   bolly: [
     "bollywood hits","hindi hit songs","best of bollywood","bollywood 2000s hits","hindi songs 2010s","hindi songs 2020s",
@@ -55,11 +56,6 @@ export const DIFFICULTY_TIERS = {
    cuts nobody at a party will name. A missing count (0) means unknown, not
    unpopular, and is kept. */
 export const SAAVN_MIN_PLAYS = 1_000_000;
-export const ITUNES_TERMS = {
-  bolly: ["Arijit Singh","Pritam songs","Shreya Ghoshal hindi","A R Rahman hindi","Amit Trivedi","Vishal Shekhar","Sonu Nigam hindi","Atif Aslam hindi","Jubin Nautiyal","Mohit Chauhan","Sachin Jigar","Badshah hindi"],
-  telugu: ["Sid Sriram telugu","Devi Sri Prasad hits","Thaman S telugu","Anirudh telugu songs","Mickey J Meyer telugu","Gopi Sundar telugu","M M Keeravani telugu","Armaan Malik telugu","Anurag Kulkarni","telugu hit songs","Kaala Bhairava","Mangli telugu"],
-};
-export const ITUNES_LANG_OK = { bolly:["bollywood","hindi"], telugu:["telugu","tollywood"] };
 export const EXCLUDE_RX = /(remix|mashup|lo-?fi|slowed|reverb|medley|unplugged|acoustic|cover|karaoke|instrumental|\bbgm\b|jukebox|revisited|reprise|redux|\bclub\b|\bdj\b|mix\b|8d\b|sped up|lounge|\bversion\b|\btheme\b|\bost\b|teaser|prevue)/i;
 
 /* The snips.json contract shared by the offline scorer and the client: every
