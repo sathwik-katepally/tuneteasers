@@ -7,6 +7,7 @@ React 19 + TypeScript + Vite SPA, deployed by GitHub Actions to GitHub Pages at 
 
 - `npm run dev` - local dev server
 - `npm run typecheck` - strict TypeScript check of the React UI
+- `npm run lint` - oxlint over `src/`, only the two react-hooks rules (`react/rules-of-hooks`, `react/exhaustive-deps`)
 - `npm run build` - production build to `dist/`
 - `npm run e2e:game -- --profile=phone|desktop ...` (and `e2e:categories`, `e2e:ladder`, `e2e:migrate`, `e2e:autoplay`, `e2e:offline`, `e2e:snips`, `e2e:group`, `e2e:group-edge`, `e2e:room`, `e2e:room-norepeat`, `e2e:room-background`, `e2e:landing`, `e2e:journeys`) - Playwright E2E against `dist/`, one suite at a time per machine (a shared lock makes the next one wait); CI runs the key suites on every PR (`.github/workflows/e2e.yml`)
 - `npm run build:catalog` - regenerate `public/catalog.json` from iTunes (slow; sequential requests to respect Apple's ~20 req/min rate limit)
