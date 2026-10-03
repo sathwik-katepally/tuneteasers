@@ -11,9 +11,9 @@
 - `src/lib/save.ts` - the saved game: `loadSaved` (sanitize, migrate v6) and `save`.
 - `src/lib/constants.js` - search queries, language/era tables, exclusion regex.
 - `src/lib/utils.js` - pure helpers (`songKey`, `displayTitle`, `shuffle`, `safeUrl`, ...).
-- `src/lib/storage.js` - track sanitization, the song history behind the cooldown (`tt_played`, `tt_tired`, `cooldownOf`) and the blocked-artist store.
+- `src/lib/storage.ts` - track sanitization, the song history behind the cooldown (`tt_played`, `tt_tired`, `cooldownOf`) and the blocked-artist store.
 - `src/lib/group.ts` - optional group sync: the group invite, the write outbox, the group cooldown fetch and past results (docs/group-sync.md).
-- `src/lib/crate.js` - song loading (`buildCrate`) across the 3 source tiers, `withSameTierNext` (a skip's same-tier replacement), and `answerTitles` (the public title list a room phone autocompletes from).
+- `src/lib/crate.ts` - song loading (`buildCrate`) across the 3 source tiers, `withSameTierNext` (a skip's same-tier replacement), and `answerTitles` (the public title list a room phone autocompletes from).
 - `src/lib/room.ts` - buzz-in room client: `createRoom`, the `#room=` link, `useRoom` (PartySocket), seat and host-show storage.
 - `src/lib/answer.js` - answer folding, matching and autocomplete, shared with the Worker.
 - `src/lib/engine.js` - the audio engine (songs and synthesised sound effects) and screen wake lock.
@@ -21,7 +21,7 @@
 - `src/styles/tokens.css`, `src/styles/global.css` - design tokens (colors, fonts, hard shadows) and the few global classes (`.btn*`, `.display`, `.eyebrow`, `.grain`, `.link`, the debug overlay).
 - `src/components/` - the cinema pieces, each with a CSS Module: `Theatre` (marquee, curtains, seat backs, the home and game menus, and an `aside` pinned beside the stage on wide screens), `Bulbs` (bulb rows and frames), `Ticket`, `Curtain`, `Stamp`, `SplitFlap`, `Seg` (segmented radio), `CategoryPicker` (the setup screen's song-category stubs), `Equalizer`, `Reel`, `GroupPanel` (the home-screen group card), `Qr`, `Stage` (the theatre plus the screen cross-fade, used by every state owner), and `DebugLog`.
 - `src/screens/` - one component and CSS Module per screen: `Landing`, `Setup`, `GroupScreen`, `Loading`, `Handover`, `Countdown`, `Playing`, `Reveal`, `Scoreboard`, `Podium`, `PastGames`.
-- `tsconfig.json` - strict UI type checking; `src/lib/*.js` stays JavaScript with `allowJs` and `checkJs` off.
+- `tsconfig.json` - strict UI type checking; `src/lib/constants.js`, `utils.js`, `answer.js`, `engine.js` and `log.js` stay JavaScript with `allowJs` and `checkJs` off.
 
 ## Look and motion
 

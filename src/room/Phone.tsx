@@ -301,7 +301,7 @@ function useAnswerTitles(mix: RoomView["mix"]){
   const [list, setList] = useState<{ title: string; forms: string[] }[]>([]);
   useEffect(() => {
     let live = true;
-    (answerTitles as (m: string) => Promise<string[]>)(mix).then(t => { if (live) setList(prepareTitles(t)); }, () => {});
+    answerTitles(mix).then(t => { if (live) setList(prepareTitles(t)); }, () => {});
     return () => { live = false; };
   }, [mix]);
   return list;

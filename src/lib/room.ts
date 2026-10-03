@@ -129,7 +129,7 @@ export const saveHostShow = (s: HostShow | null) => (s ? lsSet(LS_HOST, s) : lsD
    phone's and the host's clocks never need to agree). */
 export function heardPayload(): Record<string, number> {
   const now = Date.now();
-  return Object.fromEntries(Object.entries(cooldownOf(loadHistory()) as Record<string, number>)
+  return Object.fromEntries(Object.entries(cooldownOf(loadHistory()))
     .filter(([k, at]) => at > now && k.length <= ROOM_HEARD.key)
     .sort((a, b) => b[1] - a[1])
     .slice(0, ROOM_HEARD.songs)

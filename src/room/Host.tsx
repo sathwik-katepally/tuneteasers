@@ -3,9 +3,9 @@ import { DIFFICULTY, ROOM_ANSWER_SECS, ROOM_GRACE_SECS, ROOM_SONGS_PER_ROUND, RO
   hookOffset, ladderFor } from "../lib/config";
 import { nearTitles } from "../lib/answer.js";
 import { playRung } from "../lib/ladder";
-import { answerTitles as answerTitlesJs, buildCrate as buildCrateJs, withFreshAt as withFreshAtJs, withSameTierNext as withSameTierNextJs } from "../lib/crate";
+import { answerTitles, buildCrate, withFreshAt, withSameTierNext } from "../lib/crate";
 import { engine, keepAwake } from "../lib/engine.js";
-import { cooldownOf, loadHistory, markPlayed } from "../lib/storage";
+import { cooldownOf, loadHistory, markPlayed, type Cooldown } from "../lib/storage";
 import { displayTitle } from "../lib/utils.js";
 import { log } from "../lib/log.js";
 import { groupCooldown, recordPlay } from "../lib/group";
@@ -18,14 +18,7 @@ import { Scoreboard } from "../screens/Scoreboard";
 import { Podium } from "../screens/Podium";
 import { JoinTag, Lobby, RoomTrouble } from "./Lobby";
 import { HostPlaying, type Audio } from "./HostPlaying";
-import type { Category, Difficulty, GameState, Settings, Track, Verdict } from "../types";
-
-type Crate = { error?: string; queue?: Track[] };
-type Cooldown = Record<string, number>;
-const buildCrate = buildCrateJs as (mix: string, eras: string[], sound: string, difficulty: Difficulty, minSongs: number, cooldown: Cooldown, categories: Category[], heardBy: Record<string, number>) => Promise<Crate>;
-const withSameTierNext = withSameTierNextJs as (queue: Track[], idx: number, cooldown: Cooldown) => Track[] | null;
-const withFreshAt = withFreshAtJs as (queue: Track[], idx: number, cooldown: Cooldown) => Track[];
-const answerTitles = answerTitlesJs as (mix: string) => Promise<string[]>;
+import type { GameState, Mix, Settings, Track, Verdict } from "../types";
 
 type Phase = "opening" | "lobby" | "loading" | "countdown" | "song" | "reveal" | "board" | "done" | "failed";
 interface Clip { rung: number; span: { from: number; to: number }; startedAt: number; endedAt: number | null; key: number; cut: boolean }
@@ -63,7 +56,7 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
      every seated phone's: those songs sit out. A phone that sat down after
      the crate was built is caught when the next song is picked. */
   const own = useRef<Cooldown | null>(null);
-  const cooldownNow = () => withRoomHeard(own.current ?? cooldownOf(loadHistory()) as Cooldown, live.current.heard).cooldown;
+  const cooldownNow = () => withRoomHeard(own.current ?? cooldownOf(loadHistory()), live.current.heard).cooldown;
   const freshCue = (s: HostShow): HostShow => ({ ...s, queue: withFreshAt(s.queue, s.idx, cooldownNow()) });
 
   useEffect(() => {
@@ -111,8 +104,8 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
   }, [view, show]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The public title list, for the near-miss titles sent with each song.
-  const pool = useRef<{ mix: string; titles: Promise<string[]> } | null>(null);
-  const titlePool = (mix: string) => {
+  const pool = useRef<{ mix: Mix; titles: Promise<string[]> } | null>(null);
+  const titlePool = (mix: Mix) => {
     if (pool.current?.mix !== mix) pool.current = { mix, titles: answerTitles(mix).catch(() => []) };
     return pool.current.titles;
   };
@@ -129,10 +122,10 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
     engine.ac();
     setPhase("loading");
     setError("");
-    own.current = (await groupCooldown()) ?? (cooldownOf(loadHistory()) as Cooldown);
+    own.current = (await groupCooldown()) ?? cooldownOf(loadHistory());
     const { cooldown, heardBy } = withRoomHeard(own.current, live.current.heard);
     const crate = await buildCrate(show.mix, show.eras, show.plain ? "full" : "inst", show.difficulty, show.total, cooldown, show.categories, heardBy);
-    if (crate.error || !crate.queue){
+    if ("error" in crate){
       setError(crate.error === "safe" ? "Not enough verified music-only clips for this show. Go back and pick Easy or fewer rounds."
         : crate.error === "thin" ? `Not enough songs match your picks. Go back and pick more eras${show.categories.length ? " or another kind of song" : ""}.`
         : "Couldn't load songs. Check the connection and try again.");

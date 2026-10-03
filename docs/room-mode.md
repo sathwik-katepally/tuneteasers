@@ -26,7 +26,7 @@ Autocomplete offers every known title in the show's languages; if she is right s
 - The host sends each song's title, film, year and singers to the room when its countdown starts; stream URLs never leave the host.
 - A phone's view carries the answer only once the song is revealed (`song.answer` is null before that), and the results list only holds revealed songs.
 - No title of the show reaches a phone before that song's reveal, in any frame, autocomplete included.
-  A phone builds its autocomplete itself from the site's public `corpus.json` and `catalog.json` for the show's languages (`answerTitles` in `src/lib/crate.js`; the room tells phones only the language mix).
+  A phone builds its autocomplete itself from the site's public `corpus.json` and `catalog.json` for the show's languages (`answerTitles` in `src/lib/crate.ts`; the room tells phones only the language mix).
   The list is the same for every show in those languages, so it says nothing about which songs are coming. Songs from the live-search tiers may be missing from it; those are typed in full.
 - Judging needs the titles that fold close to the answer (so a guess that is exactly another song is wrong even when it is a typo away). The host picks them from the same public list (`nearTitles`) and sends them with each `song`; the room keeps them for judging and never puts them in a view.
 - A phone's song history (below) goes to the room and on to the host only, merged with the other seats'; no phone ever receives another phone's history or the merged list.

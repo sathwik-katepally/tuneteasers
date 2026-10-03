@@ -1,11 +1,10 @@
 import { useEffect, useState } from "react";
-import { categoryCounts as categoryCountsJs } from "../lib/crate";
+import { categoryCounts } from "../lib/crate";
 import { CATEGORIES, DIFFICULTY } from "../lib/config";
 import type { Category, Settings } from "../types";
 import s from "./CategoryPicker.module.css";
 
-type Counts = Record<Category | "any", number>;
-const categoryCounts = categoryCountsJs as (mix: string, eras: string[], sound: string, difficulty: string, minSongs: number, categories: Category[]) => Promise<Counts | null>;
+type Counts = Record<string, number>;
 
 interface Props {
   settings: Settings;
