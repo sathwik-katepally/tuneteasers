@@ -1,8 +1,10 @@
 /* Plays one full show through the real UI against the real song sources and
    checks the scoring bookkeeping at the end.
    node e2e/game.mjs --profile=phone|desktop --mode=players|teams --mix=bolly|telugu|both
-     --difficulty=easy|medium|hard --rounds=3 [--categories=item,mass] [--reduced] [--no-worker] [--shots=dir] [--url=http://...]
+     --difficulty=easy|medium|hard --rounds=3 [--categories=item,mass] [--reduced] [--no-worker] [--no-saavn] [--shots=dir] [--url=http://...]
    --no-worker makes the project's Worker unreachable (songs then come from the mirror).
+   --no-saavn makes the Worker and every Saavn mirror unreachable and checks the show came
+     from the baked catalog (Easy only: catalog clips have no Music-only windows).
    --categories picks those song categories (corpus tags) and checks every queued song carries one.
    It also spends the first contestant's "Heard it too much" skip (budget, same
    tier, title on screen, same contestant, tired cooldown) and forces one dead
@@ -11,6 +13,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { serve, open, args, saved, moreSettings } from "./harness.mjs";
 import { displayTitle, songKey } from "../src/lib/utils.js";
+import { SAAVN_BASES } from "../src/lib/constants.js";
 import { CATEGORIES, HINT_PENALTY, SKIPS_PER_PLAYER, SPEED_BONUS_FADE_SECS, SPEED_BONUS_MAX } from "../src/lib/config.ts";
 
 const A = args({ profile: "phone", mode: "players", mix: "both", difficulty: "medium", rounds: "3" });
@@ -41,6 +44,10 @@ const DEAD_HOST = "dead-stream.invalid";
 let exit = 0;
 try {
   if (A["no-worker"] === "true") await page.route(u => u.host === "tuneteasers-saavn.sathwik-katepally.workers.dev", r => r.abort("connectionrefused"));
+  if (A["no-saavn"] === "true"){
+    const hosts = new Set(SAAVN_BASES.map(b => new URL(b).host));
+    await page.route(u => hosts.has(u.host), r => r.abort("connectionrefused"));
+  }
   await page.goto(url);
   await page.evaluate(() => localStorage.clear());
   await page.goto(url);
@@ -66,6 +73,10 @@ try {
   await shot("01-setup");
   await btn(/Start the show/).click();
   await shot("02-loading", 450);
+  if (A["no-saavn"] === "true"){
+    const crate = await page.waitForFunction(() => window.__ttLog.dump().findLast(e => e.tag === "crate")).then(h => h.jsonValue());
+    if (crate.source !== "catalog") fail(`no-saavn show drew from ${crate.source}, not the catalog`);
+  }
 
   await page.route(u => u.host === DEAD_HOST, r => r.abort("connectionrefused"));
   let turns = 0, extended = false, hinted = false, resumed = false, deadStreams = 0, heard = null, deadSkip = null;
