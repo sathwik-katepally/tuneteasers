@@ -69,14 +69,14 @@ try {
   });
 
   await check("an old group's in-flight upload leaves the new group's queue alone", async () => {
-    const a = await page.evaluate(async () => { await g.createGroup("Edge A", false); return g.currentGroup(); });
+    const a = await page.evaluate(async () => { await g.createGroup("Edge A", false); return JSON.parse(localStorage.getItem("tt_group")); });
     let held;
     const arrived = new Promise(r => { held = r; });
     net.held = held;
     net.holdRounds = true;
     await page.evaluate(() => g.recordPlay("edge old group song"));
     await arrived;
-    const b = await page.evaluate(async () => { await g.createGroup("Edge B", false); g.recordPlay("edge new group song"); return g.currentGroup(); });
+    const b = await page.evaluate(async () => { await g.createGroup("Edge B", false); g.recordPlay("edge new group song"); return JSON.parse(localStorage.getItem("tt_group")); });
     const before = await page.evaluate(() => JSON.parse(localStorage.getItem("tt_group_outbox")));
     expect(before.groupId === b.id && before.rounds.length === 1, "B's play was not queued");
     net.release();
