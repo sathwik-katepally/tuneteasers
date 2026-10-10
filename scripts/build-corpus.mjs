@@ -7,7 +7,9 @@
       found through playlist searches, plus the per-language charts.
    2. Verify each song is a Hindi/Telugu film song with the film's real year:
       the album name (cleaned) or a 'From "X"' clause must name a film in
-      Wikidata for the song's language. Compilation copies are resolved to the
+      Wikidata for the song's language, or, for an album marked as a dub
+      ("Coolie (Telugu)"), a film of any language: dubs stay in the pool with
+      the original film's year. Compilation copies are resolved to the
       original album copy through a title search (all copies of one song share
       one play count). Diacritics are folded and small spelling differences
       tolerated within the year window. Songs Saavn tags with a "starring"
@@ -150,8 +152,9 @@ const LANG_RX = LANG_NAMES.join("|");
 const FROM_RX = /[\(\[]\s*from\s+"([^"]+)"\s*[\)\]]|\s[-–—]\s*from\s+"([^"]+)"\s*$/i;
 const DUB_RX = new RegExp(`\\(\\s*(${LANG_RX})\\s*\\)|\\[\\s*(${LANG_RX})\\s*\\]|\\s[-–—]\\s*(${LANG_RX})\\s*$|\\b(${LANG_RX})\\s+(version|dubbed)\\b|\\bdubbed\\b`, "i");
 const OST_RX = /[\(\[]?\s*\b(original\s+(motion\s+picture\s+)?soundtrack|music\s+from\s+the\s+(motion\s+picture|film)|ost)\b\s*[\)\]]?/i;
-const COMPILATION_RX = /\b(hits|best of|top \d|top\b|collection|jukebox|love songs|romantic|dance|party|playlist|special|essentials|classics|evergreen|forever|celebrat|superhit|blockbuster|chartbuster|melodies|mix|rewind|vol\.?|volume|anthems|songs|favourites|favorites|20\d\d|\d0s|retro|non.?stop|the best|greatest|ultimate|trending|viral|mashup|remix)\b/i;
-const cleanTitle = s => de(s).replace(FROM_RX, "").replace(/\s+/g, " ").trim();
+const COMPILATION_RX = /\b(hits|best of|top \d|top\b|collection|jukebox|love songs|romantic|dance|party|playlist|special|essentials|classics|evergreen|forever|celebrat|superhit|blockbuster|chartbuster|melodies|mix|rewind|vol\.?|volume|anthems|songs|favourites|favorites|20\d\d|\d0s|retro|non.?stop|the best|greatest|ultimate|trending|viral|mashup|remix|vibes|chill)\b/i;
+// A language marker on the title ("Monica (Telugu)") names the copy, not the song.
+const cleanTitle = s => de(s).replace(FROM_RX, "").replace(DUB_RX, " ").replace(/\s+/g, " ").trim();
 const fromClause = s => { const m = de(s).match(FROM_RX); return m ? (m[1] || m[2]).trim() : null; };
 function cleanAlbum(album){
   let a = de(album);
@@ -228,16 +231,17 @@ const compilationAlbum = raw => COMPILATION_RX.test(cleanAlbum(raw.more_info?.al
 
 function makeMatcher(index){
   const tol = CFG.yearTolerance;
-  const lookup = (name, lang) => (index.byName.get(norm(name)) || []).filter(f => f.lang === lang);
+  const lookup = (name, lang) => (index.byName.get(norm(name)) || []).filter(f => !lang || f.lang === lang);
   const latest = hits => (hits.length ? hits.reduce((a, b) => (b.y > a.y ? b : a)) : null);
   return {
-    /* film of this language released within +-tol of year, exact name first, then fuzzy */
+    /* film of this language (any language when lang is null: a dub) released
+       within +-tol of year, exact name first, then fuzzy */
     exact(name, lang, year){
       const hits = lookup(name, lang).filter(f => Math.abs(f.y - year) <= tol);
       if (hits.length) return latest(hits);
       const k = norm(name), fuzzy = new Set();
-      for (let y = year - tol; y <= year + tol; y++)
-        for (const f of index.byLangYear.get(`${lang}/${y}`) || []) if (f.names.some(n => fuzzyEq(k, n))) fuzzy.add(f);
+      for (let y = year - tol; y <= year + tol; y++) for (const l of lang ? [lang] : LANG_NAMES)
+        for (const f of index.byLangYear.get(`${l}/${y}`) || []) if (f.names.some(n => fuzzyEq(k, n))) fuzzy.add(f);
       return fuzzy.size === 1 ? [...fuzzy][0] : null;
     },
     /* film of this language by name alone; the latest one not after the song copy */
@@ -290,8 +294,7 @@ async function classify(raw, M){
 
   const tryExact = copy => {
     for (const c of filmCandidates(copy.title, copy.more_info?.album)){
-      if (c.dub) continue;
-      const f = M.exact(c.name, lang, yearOf(copy));
+      const f = M.exact(c.name, c.dub ? null : lang, yearOf(copy));
       if (f) return verdict(copy, c.name, f, true);
     }
     return null;
@@ -317,9 +320,11 @@ async function classify(raw, M){
   }
   if (!v){
     // the name alone names a film of this language (a re-upload with a later year):
-    // trust Wikidata's year, so a re-released pre-2000 song gets its real year and drops
+    // trust Wikidata's year, so a re-released pre-2000 song gets its real year and drops.
+    // Never for a dub-marked album ("Coolie (Telugu)"): that took an older same-named
+    // film of this language and its year.
     for (const copy of copies) for (const c of filmCandidates(copy.title, copy.more_info?.album)){
-      if (!isFilmLike(c.name, title)) continue;
+      if (c.dub || !isFilmLike(c.name, title)) continue;
       const f = M.byName(c.name, lang, yearOf(copy));
       if (f){ v = verdict(copy, c.name, f, true); break; }
     }
