@@ -40,11 +40,13 @@ The rule is film songs only, with the film's real release year:
    Only songs whose Saavn `language` is hindi or telugu are kept; titles matching `EXCLUDE_RX` (remixes, lofi, unplugged, ...) are dropped.
 2. **Film match** - the album name is cleaned ("(Original Motion Picture Soundtrack)", language markers such as "- Telugu", `From "X"` clauses, brackets) and looked up in a Wikidata index of films by original language (labels and aliases, min publication year).
    A film of the song's language released within ±1 year of the copy's year verifies the song; the corpus stores Wikidata's canonical film label and year.
+   An album marked as a dub ("Coolie (Telugu)", a marker anywhere on the album name) matches a film of any language instead, and an unmarked copy whose album is exactly the name of a film of another language in that window counts as a dub too; a dub keeps the album's own name, the one its audience knows, with the original film's year.
+   Language markers on titles ("Monica (Telugu)") name the copy, not the song, and are dropped.
 3. **Canonical copy** - when the album is a compilation ("Best Of Arijit Singh"), the script searches the title and treats copies with the same language and a play count within 1% as the same recording (Saavn shares one counter across copies), then applies step 2 to each copy, oldest year first, and keeps the original album's song id.
    A compilation copy without a matching original album copy is rejected.
-   If only the name matches (a re-upload with a later year), Wikidata's year is taken anyway, which is what drops re-released pre-2000 songs.
-4. **Unverified fallback** - songs Saavn tags with a `starring` role whose film-like album has no dub marker and no same-named Wikidata film of another language within ±1 year are kept with `yearVerified: false` and the earliest year among the copies.
-   Everything else is rejected: singles, devotional and indie releases, dubs of Tamil/Kannada/Malayalam films, remixes, pre-2000 songs, and songs under the play-count floor.
+   If only the name matches (a re-upload with a later year), Wikidata's year is taken anyway, which is what drops re-released pre-2000 songs; never for a dub-marked album, which would take an older same-named film of the song's language.
+4. **Unverified fallback** - songs Saavn tags with a `starring` role whose film-like album has no dub marker and no same-named Wikidata film of another language within ±1 year are kept with `yearVerified: false` and the earliest year among the copies, unless any copy was released as a plain single (an album that is just the title; a film song's single names the film in a From clause), which is what keeps compilation re-uploads of singles ("Morning Chill Vibes") out.
+   Everything else is rejected: singles, devotional and indie releases, dubs whose original film is not found, remixes, pre-2000 songs, and songs under the play-count floor.
 5. **Difficulty** - within each language x decade (raw counts are not comparable: Hindi 2010s median ≈ 19M plays vs 2000s ≈ 6M) the score blends the play-count percentile (weight 0.8) with the editorial-playlist membership percentile (0.2).
    The top 30% by score is `easy`, the next 40% `medium`, the rest `hard` (cut-offs in the config, baked into the file's `tiers`).
 
