@@ -13,7 +13,8 @@ The fallback tiers carry no tags, so with categories set they never run: an unre
 
 1. **Curated corpus** (`loadFromCorpus`) - `public/corpus.json`, the verified film-song pool built offline by `scripts/build-corpus.mjs` (below).
    The crate filters it by language, era, difficulty tier and the device blocklist, orders fresh songs before ones still cooling down, draws `CORPUS_DRAW` candidates and resolves them to streams with one batch request per `CORPUS_BATCH` ids (`GET /songs?ids=`, served by our Worker and by any saavn.dev-compatible mirror in `SAAVN_BASES`).
-   Tracks carry `album` = film, `year` = the film's verified year and `tier`.
+   The draw is weighted by popularity (`DRAW_WEIGHT` in `src/lib/config.ts`): a song's chance is proportional to `(score + floor) ^ power`, with `score` its percentile within its language and decade, so the hits of a tier come up several times as often as its long tail without ever leaving it out; the final queue order is drawn the same way (`weightedShuffle`), and songs without a score (the fallback tiers) draw as if they sat in the middle.
+   Tracks carry `album` = film, `year` = the film's verified year, `tier` and `score`.
    If the corpus file is missing or the ids cannot be resolved (worker and mirror down), the tiers below take over; if the corpus loads but fewer than `minSongs` songs match the filters, the crate returns `{ error: "thin" }` rather than playing unverified songs.
 2. **Saavn search** (`loadFromSaavn`) - JioSaavn search APIs listed in `SAAVN_BASES`; full songs, so snippets start at the intro.
    The first base is our own Cloudflare Worker (`worker/`, see docs/testing-and-deploy.md); the public nandanvarma mirror follows as a fallback.
@@ -101,6 +102,6 @@ Entries older than the longest cooldown are pruned; a stream-error skip records 
 `cooldownOf(...histories)` in `src/lib/storage.ts` turns histories (`{ played, tired }`, this device's from `loadHistory`, a group's, later a person's) into one map of song key → the time the song may come back, latest wins, and that map is `buildCrate`'s `cooldown`.
 In a group, `startGame` passes the group's history merged with the device's (`groupCooldown`), so songs any phone in the group played or skipped sit out too; see docs/group-sync.md.
 A buzz-in host also merges in every seated phone's history, which each phone brings to its seat, and passes `heardBy` (song key → how many of the people present heard it); see "No repeats" in docs/room-mode.md.
-Songs still cooling down are excluded from the crate when at least `COOLDOWN_MIN_FRESH` (15, in `src/lib/config.ts`) fresh songs remain.
+Songs still cooling down are excluded from the crate when at least `COOLDOWN_MIN_FRESH` (15, in `src/lib/config.ts`) fresh songs remain and they cover the show (rounds x contestants).
 When fresh songs run low, they are appended AFTER all fresh ones, fewest people present first (`heardBy`, empty outside a room), then soonest-due, so repeats only appear when unavoidable.
 Old installs stored `tt_played` as a plain array; `loadHistory` migrates that format transparently.

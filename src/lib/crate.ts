@@ -4,7 +4,7 @@
    Fallback 1: raw JioSaavn search (unverified years, no tiers).
    Fallback 2: catalog.json baked into the site (rebuilt weekly by CI, 30s hook clips). */
 import { SAAVN_BASES, SAAVN_QUERIES, SAAVN_PAGES, SAAVN_MIN_PLAYS, CORPUS_DRAW, CORPUS_BATCH, DIFFICULTY_TIERS, EXCLUDE_RX, ERAS, eraOf, SNIP_ACCEPTED, SNIP_WINDOW_SEC, SNIP_MAX_AGE_MS } from "./constants.js";
-import { COOLDOWN_MIN_FRESH } from "./config";
+import { COOLDOWN_MIN_FRESH, DRAW_WEIGHT } from "./config";
 import { de, songKey, shuffle, safeUrl, displayTitle } from "./utils.js";
 import { sanitizeTrack, loadHistory, cooldownOf, loadBlocked, normArtist, isBlocked, type Cooldown } from "./storage";
 import { log, ms } from "./log.js";
@@ -130,7 +130,7 @@ async function loadFromCorpus(langs: Lang[], eras: string[], difficulty: Difficu
   const cands = difficultyCands(eligible, difficulty, safeIds, minSongs);
   if (cands.length < minSongs) return { status:"thin", pool:[] };
   const { fresh, stale } = splitCooldown(cands, s => songKey(s.title), cooldown, heardBy);
-  const draw: CorpusPick[] = shuffle(fresh).concat(stale).slice(0, Math.max(CORPUS_DRAW, minSongs * 2));
+  const draw: CorpusPick[] = weightedShuffle(fresh, s => s.score).concat(stale).slice(0, Math.max(CORPUS_DRAW, minSongs * 2));
   const batches: CorpusPick[][] = [];
   for (let i = 0; i < draw.length; i += CORPUS_BATCH) batches.push(draw.slice(i, i + CORPUS_BATCH));
   const results = await Promise.allSettled(batches.map(b => saavnFetch(`/songs?ids=${b.map(s=>s.id).join(",")}`)));
@@ -148,7 +148,7 @@ async function loadFromCorpus(langs: Lang[], eras: string[], difficulty: Difficu
     if (!stream) continue;
     pool.push(sanitizeTrack({
       title:s.title, artist:s.artist, album:s.film, art:pickArt(r.image), stream,
-      duration:parseInt(r.duration)||200, year:s.year, lang:s.lang, tier:s.tier,
+      duration:parseInt(r.duration)||200, year:s.year, lang:s.lang, tier:s.tier, score:s.score,
       music:(s.composers||[]).join(", "), sourceId:r.id === s.id ? s.id : "",
     }));
   }
@@ -246,6 +246,18 @@ export async function refreshMusicQueue(queue: Track[]): Promise<Track[]> {
   return queue.map(t => ({ ...t, snip:verifiedSnip(t, index) || undefined })).filter(t => t.snip);
 }
 
+/* A shuffle that favours the songs people know (DRAW_WEIGHT): each song's
+   chance of coming first is proportional to (score + floor) ^ power, with
+   score its popularity percentile within its language and decade. Songs
+   without a score (the fallback tiers) draw as if they sat in the middle.
+   (Each song gets the key random ^ (1 / weight); sorting by key is a
+   weighted draw without replacement.) */
+function weightedShuffle<T>(list: T[], scoreOf: (t: T) => number | undefined): T[] {
+  const { power, floor } = DRAW_WEIGHT;
+  const weight = (t: T) => ((scoreOf(t) ?? 0.5) + floor) ** power;
+  return list.map(t => ({ t, k: Math.random() ** (1 / weight(t)) })).sort((a, b) => b.k - a.k).map(x => x.t);
+}
+
 /* Songs still sitting out go after every fresh one; among them the ones the
    fewest people present have heard come first, then the soonest due. */
 function splitCooldown<T>(list: T[], keyOf: (t: T) => string, cooldown: Cooldown, heardBy: HeardBy): { fresh: T[]; stale: T[] } {
@@ -322,9 +334,10 @@ export async function buildCrate(mix: Mix, eras: string[], sound: Sound, difficu
   if (sound === "inst") pool = pool.filter(t => t.snip);
   if (pool.length < minSongs) return { error:sound === "inst" ? "safe" : "thin" };
   // Songs still cooling down (this phone, the group, a room's phones) sit out; when the fresh pool
-  // runs thin, repeats come back after all fresh songs (splitCooldown).
+  // runs thin, or can't fill the show on its own, repeats come back after all fresh songs (splitCooldown).
   const { fresh, stale } = splitCooldown(pool, key, cooldown, heardBy);
-  let queue: Track[] = fresh.length >= COOLDOWN_MIN_FRESH ? shuffle(fresh) : shuffle(fresh).concat(stale);
+  const drawn = weightedShuffle(fresh, t => t.score);
+  let queue: Track[] = fresh.length >= Math.max(COOLDOWN_MIN_FRESH, minSongs) ? drawn : drawn.concat(stale);
   // A full show's worth of verified tracks is required before the game starts.
   if (queue.length < minSongs) return { error:sound === "inst" ? "safe" : "thin" };
   return { queue, source };
