@@ -51,7 +51,7 @@ try {
   await page.goto(url);
   await page.evaluate(() => localStorage.clear());
   await page.goto(url);
-  await page.getByRole("radio", { name: A.mode === "teams" ? "Teams" : "Solo" }).click();
+  await page.getByRole("radio", { name: A.mode === "teams" ? "Teams" : "Players" }).click();
   await page.getByRole("radio", { name: { bolly: "Hindi", telugu: "Telugu", both: "Both" }[A.mix], exact: true }).click();
   await moreSettings(page);
   await page.getByRole("radio", { name: A.difficulty, exact: false }).click();
@@ -66,9 +66,8 @@ try {
     if (await chip.getAttribute("aria-pressed") !== "true") fail(`${label} did not select`);
   }
   if (A.mode === "teams"){
-    const add = btn("Member").first();
-    await add.click(); await page.keyboard.type("Priya"); await page.keyboard.press("Enter");
-    await btn("Member").first().click(); await page.keyboard.type("Rahul"); await page.keyboard.press("Enter");
+    const who = page.getByLabel("Who's on it").first();
+    await who.fill("Priya, Rahul"); await page.keyboard.press("Enter");
   } else {
     await btn("Add").click(); await page.keyboard.type("Anu"); await page.keyboard.press("Enter");
   }

@@ -34,8 +34,8 @@ const DEFAULTS: AppState = {
     { id: "p2", name: "Player 2", members: [] },
   ],
   teams: [
-    { id: "t1", name: "Balcony", members: [] },
-    { id: "t2", name: "Stalls", members: [] },
+    { id: "t1", name: "Team 1", members: [] },
+    { id: "t2", name: "Team 2", members: [] },
   ],
   game: null,
 };

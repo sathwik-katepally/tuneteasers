@@ -57,7 +57,8 @@ Judging a turn updates the saved game in one step (score, history, next turn and
 `screen` is one of `landing | setup | game | done | group | past | host | buzzer`; `landing` is the poster that explains the game, `done` is the podium, `group` the phone group screen (docs/group-sync.md), `past` the group's Past shows list, and `host` / `buzzer` hand the whole page to `src/room/Host.tsx` or `src/room/Phone.tsx`.
 `settings.play` (`pass | room`) picks the mode: the landing's two buttons ("Pass one phone", "Buzz in from every phone") set it on the way into setup, which keeps a compact switch; a `#room=` link opens `buzzer` directly.
 
-Setup is a quick setup, sized so a first run reads little and a returning player starts in one tap: the mode switch, the roster (pass-the-phone) and the languages are up front, and era, difficulty, song kinds, rounds and blocked artists fold behind one summary line ("All eras · Medium · any kind · 5 rounds", with Change).
+Setup is a quick setup, sized so a first run reads little and a returning player starts in one tap: the mode switch ("How you play"), the roster (pass-the-phone, as Players or Teams) and the languages are up front, and era, difficulty, song kinds, rounds and blocked artists fold behind one summary line ("All eras · Medium · any kind · 5 rounds", with Change).
+Players are name chips; a team is a card with its name as a plain text field and one "Who's on it" line of names (optional members, split on commas when the field is left), and "Add a team" adds a card named Team N straight away.
 The fold opens by itself when a show failed to load, since the picks caused it.
 Start and the "Got a code?" join link stick to the bottom edge, so Start never scrolls away on a phone.
 Everything is remembered in the save, so the next visit is one tap on Start.

@@ -54,7 +54,9 @@ export function Setup(p: Props){
   const add = (name: string) => setList([...list, { id: newId(), name, members: [] }]);
   const rename = (id: string, name: string) => setList(list.map(e => (e.id === id ? { ...e, name } : e)));
   const remove = (id: string) => setList(list.filter(e => e.id !== id));
-  const setMembers = (id: string, members: string[]) => setList(list.map(e => (e.id === id ? { ...e, members } : e)));
+  const patch = (id: string, changes: Partial<RosterEntry>) => setList(list.map(e => (e.id === id ? { ...e, ...changes } : e)));
+  // The next free "Team N", so a team removed from the middle never leaves two with one name.
+  const teamName = () => { let n = list.length + 1; while (list.some(e => e.name === `Team ${n}`)) n++; return `Team ${n}`; };
   const join = <button type="button" className={`link ${s.joinLink}`} onClick={p.joinRoom}>Got a code? Join a show</button>;
 
   return (
@@ -75,6 +77,7 @@ export function Setup(p: Props){
           </div>
 
           <div className={s.group}>
+            <span className={s.labelText}>How you play</span>
             <Seg<Play> label="How you play" tone="teal" value={S.play}
               options={[{ value: "pass", label: "Pass one phone" }, { value: "room", label: "Buzz in" }]}
               onChange={v => upSettings({ play: v })} />
@@ -84,10 +87,10 @@ export function Setup(p: Props){
           {!room && (
             <div className={s.group}>
               <div className={s.label}>
-                <span className={s.labelText}>{mode === "teams" ? "Teams" : "Who's in"}</span>
+                <span className={s.labelText}>Who's playing</span>
                 <div className={s.modeSeg}>
                   <Seg<Mode> label="Play as" tone="teal" value={mode}
-                    options={[{ value: "players", label: "Solo" }, { value: "teams", label: "Teams" }]}
+                    options={[{ value: "players", label: "Players" }, { value: "teams", label: "Teams" }]}
                     onChange={v => upSettings({ mode: v })} />
                 </div>
               </div>
@@ -101,24 +104,14 @@ export function Setup(p: Props){
                 </div>
               ) : (
                 <div className={s.teams}>
-                  {list.map(e => (
-                    <div key={e.id} className={s.team}>
-                      <NameChip name={e.name} canRemove={list.length > MIN_CAST.teams} strong
-                        onRename={n => rename(e.id, n)} onRemove={() => remove(e.id)} />
-                      <div className={s.members}>
-                        {e.members.map((mName, i) => (
-                          <NameChip key={i} name={mName} small canRemove
-                            onRename={n => setMembers(e.id, e.members.map((x, j) => (j === i ? n : x)))}
-                            onRemove={() => setMembers(e.id, e.members.filter((_, j) => j !== i))} />
-                        ))}
-                        {e.members.length < MAX_MEMBERS && (
-                          <AddChip small label="Member" placeholder="Name" onAdd={n => setMembers(e.id, [...e.members, n])} />
-                        )}
-                      </div>
-                    </div>
+                  {list.map((e, i) => (
+                    <TeamCard key={e.id} team={e} no={i + 1} canRemove={list.length > MIN_CAST.teams}
+                      onChange={changes => patch(e.id, changes)} onRemove={() => remove(e.id)} />
                   ))}
-                  {list.length < MAX_CAST && <AddChip label="Add team" placeholder="Team name" onAdd={add} />}
-                  <p className={s.hint}>Members are optional. Add them and the phone rotates through each team.</p>
+                  {list.length < MAX_CAST && (
+                    <button type="button" className={s.addTeam} onClick={() => add(teamName())}><Plus size={14} strokeWidth={3} /> Add a team</button>
+                  )}
+                  <p className={s.hint}>Name each team and, if you like, who's on it: the phone then goes round the team.</p>
                 </div>
               )}
             </div>
@@ -221,33 +214,63 @@ function RoomResumeCard({ show, onResume, onDiscard }: { show: HostShow; onResum
   );
 }
 
-function NameChip({ name, canRemove, onRename, onRemove, small, strong }: {
-  name: string; canRemove: boolean; onRename: (n: string) => void; onRemove: () => void; small?: boolean; strong?: boolean;
+/* A team's name is a plain text field, and who is on it one line of names,
+   typed freely and split on commas once the field is left (so a comma on its
+   way in is never lost). */
+function TeamCard({ team, no, canRemove, onChange, onRemove }: {
+  team: RosterEntry; no: number; canRemove: boolean; onChange: (changes: Partial<RosterEntry>) => void; onRemove: () => void;
 }){
+  const [who, setWho] = useState(team.members.join(", "));
+  const commitWho = () => {
+    const members = who.split(",").map(n => cleanName(n, "")).filter(Boolean).slice(0, MAX_MEMBERS);
+    onChange({ members });
+    setWho(members.join(", "));
+  };
+  return (
+    <div className={s.teamCard}>
+      <div className={s.teamHead}>
+        <span className={s.teamNo}>Team {no}</span>
+        <input className={s.teamName} value={team.name} maxLength={NAME_MAX} placeholder="Team name" aria-label={`Team ${no} name`}
+          onChange={e => onChange({ name: e.target.value })} onBlur={() => onChange({ name: cleanName(team.name, `Team ${no}`) })} />
+        {canRemove && (
+          <button type="button" className={s.teamX} aria-label={`Remove ${team.name}`} onClick={onRemove}>
+            <X size={16} strokeWidth={3} />
+          </button>
+        )}
+      </div>
+      <label className={s.teamWho}>
+        <span>Who's on it</span>
+        <input value={who} maxLength={(NAME_MAX + 2) * MAX_MEMBERS} placeholder="Names, optional" onChange={e => setWho(e.target.value)} onBlur={commitWho}
+          onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); }} />
+      </label>
+    </div>
+  );
+}
+
+function NameChip({ name, canRemove, onRename, onRemove }: { name: string; canRemove: boolean; onRename: (n: string) => void; onRemove: () => void }){
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(name);
-  const cls = `${s.chip} ${small ? s.chipSmall : ""} ${strong ? s.chipStrong : ""}`;
   if (editing){
     const commit = () => { onRename(cleanName(draft, name)); setEditing(false); };
     return (
-      <input autoFocus className={`${s.addInput} ${small ? s.chipSmall : ""}`} value={draft} maxLength={NAME_MAX} aria-label="Name"
+      <input autoFocus className={s.addInput} value={draft} maxLength={NAME_MAX} aria-label="Name"
         onChange={e => setDraft(e.target.value)} onBlur={commit}
         onKeyDown={e => { if (e.key === "Enter") commit(); if (e.key === "Escape") setEditing(false); }} />
     );
   }
   return (
-    <span className={cls}>
+    <span className={s.chip}>
       <button type="button" className={s.chipName} onClick={() => { setDraft(name); setEditing(true); }} aria-label={`Rename ${name}`}>{name}</button>
       {canRemove && (
         <button type="button" className={s.chipX} aria-label={`Remove ${name}`} onClick={onRemove}>
-          <X size={small ? 12 : 14} strokeWidth={3} />
+          <X size={14} strokeWidth={3} />
         </button>
       )}
     </span>
   );
 }
 
-function AddChip({ label, placeholder, onAdd, small }: { label: string; placeholder: string; onAdd: (n: string) => void; small?: boolean }){
+function AddChip({ label, placeholder, onAdd }: { label: string; placeholder: string; onAdd: (n: string) => void }){
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState("");
   const commit = () => {
@@ -256,13 +279,13 @@ function AddChip({ label, placeholder, onAdd, small }: { label: string; placehol
     setDraft(""); setAdding(false);
   };
   if (adding) return (
-    <input autoFocus className={`${s.addInput} ${small ? s.chipSmall : ""}`} placeholder={placeholder} value={draft} maxLength={NAME_MAX} aria-label={placeholder}
+    <input autoFocus className={s.addInput} placeholder={placeholder} value={draft} maxLength={NAME_MAX} aria-label={placeholder}
       onChange={e => setDraft(e.target.value)} onBlur={commit}
       onKeyDown={e => { if (e.key === "Enter") commit(); if (e.key === "Escape"){ setDraft(""); setAdding(false); } }} />
   );
   return (
-    <button type="button" className={`${s.add} ${small ? s.chipSmall : ""}`} onClick={() => setAdding(true)}>
-      <Plus size={small ? 12 : 14} strokeWidth={3} /> {label}
+    <button type="button" className={s.add} onClick={() => setAdding(true)}>
+      <Plus size={14} strokeWidth={3} /> {label}
     </button>
   );
 }
