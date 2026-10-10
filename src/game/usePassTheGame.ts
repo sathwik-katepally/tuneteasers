@@ -29,6 +29,9 @@ export function usePassTheGame(state: AppState, setState: Dispatch<SetStateActio
   const [blocked, setBlocked] = useState<string[]>(loadBlocked);
   const groupSnap = useGroup();
   const startOnShow = useRef(0);
+  // Read by timers: a countdown that ends after Home was tapped must not start a clip.
+  const screenNow = useRef(state.screen);
+  screenNow.current = state.screen;
   /* The cooldown the show's crate was built with (this phone's history, with the
      group's when there is one), so a "Heard it too much" replacement prefers a
      song nobody is sick of; a resumed show reads this phone's again. */
@@ -125,6 +128,7 @@ export function usePassTheGame(state: AppState, setState: Dispatch<SetStateActio
      bar start together. The timeout covers a fade that never reports back
      (a hidden tab pauses animation frames). */
   function startWhenShown(){
+    if (screenNow.current !== "game") return;
     setPhase("cueing");
     startOnShow.current = window.setTimeout(shown, 1500);
   }

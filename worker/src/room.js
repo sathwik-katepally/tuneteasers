@@ -247,6 +247,7 @@ export class Room extends Server {
     if (!KEY_RX.test(m.key || "")) return this.fail(conn, "bad-key");
     const keyHash = await hash(m.key);
     let p = r.players.find(x => x.keyHash === keyHash);
+    if (p?.left){ delete p.left; await this.save(); }
     if (!p){
       const name = clean(m.name, LIMITS.name);
       if (!name) return this.fail(conn, "name");
@@ -423,6 +424,8 @@ const HOST = {
     if (!MIXES.includes(m.mix)) return "bad-mix";
     if (!intIn(m.total, 1, LIMITS.songs) || !intIn(m.perRound, 1, LIMITS.songs)) return "bad-length";
     if (!intIn(m.answerSecs, ...LIMITS.answerSecs)) return "bad-rules";
+    // Whoever left on the final screen is not in the next show.
+    r.players = r.players.filter(p => !p.left);
     if (!r.players.length) return "no-players";
     r.phase = "show";
     r.mix = m.mix;
@@ -473,6 +476,8 @@ const HOST = {
   reveal(){
     const s = this.room.song;
     if (!s || s.state === "revealed" || s.state === "skipped") return SAME;
+    // A buzz that beat the host's reveal by a moment gets its answer heard.
+    if (s.state === "answering") return "busy";
     s.winner = null; s.won = 0;
     this.finishSong();
   },
@@ -524,6 +529,8 @@ const PLAYER = {
   leave(conn){
     const r = this.room, me = conn.state.seat;
     if (r.phase === "lobby") r.players = r.players.filter(p => p.id !== me);
+    // After the show the podium keeps the name; "Same crowd again" drops the seat.
+    else if (r.phase === "over"){ const p = r.players.find(x => x.id === me); if (p) p.left = true; }
     conn.setState({ at: Date.now() });
     conn.close(1000, "left");
   },

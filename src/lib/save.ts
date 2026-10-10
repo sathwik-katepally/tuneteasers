@@ -34,15 +34,17 @@ const DEFAULTS: AppState = {
     { id: "p2", name: "Player 2", members: [] },
   ],
   teams: [
-    { id: "t1", name: "Balcony", members: [] },
-    { id: "t2", name: "Stalls", members: [] },
+    { id: "t1", name: "Team 1", members: [] },
+    { id: "t2", name: "Team 2", members: [] },
   ],
   game: null,
 };
 
+/* The era control offers one era or all; a save with two (the v6 UI allowed it)
+   would show as All while filtering, so it loads as all. */
 function parseEras(v: unknown): string[] {
   const eras = ERAS.filter(e => arr(v).includes(e));
-  return eras.length ? eras : [...ERAS];
+  return eras.length === 1 ? eras : [...ERAS];
 }
 
 /* Any (every song) is the empty list, which is also what saves from before categories load as. */

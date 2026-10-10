@@ -29,6 +29,7 @@ export function sanitizeTrack(raw: unknown): Track | null {
     hook: !!t.hook, // true when the stream is a mid-song preview clip, not the intro
     ...(DIFFICULTIES.includes(t.tier) && t.tier !== "mixed" ? { tier: t.tier } : {}),
     ...(typeof t.sourceId === "string" && t.sourceId ? { sourceId: t.sourceId } : {}),
+    ...(Number.isFinite(parseFloat(t.score)) ? { score: Math.min(1, Math.max(0, parseFloat(t.score))) } : {}),
     ...(t.snip && t.sourceId === t.snip.sourceId && snipMethodOk(t.snip.method) && typeof t.snip.indexBuilt === "string" &&
       Number.isFinite(t.snip.startSec) && Number.isFinite(t.snip.endSec) &&
       t.snip.startSec >= 0 && t.snip.endSec - t.snip.startSec === SNIP_WINDOW_SEC

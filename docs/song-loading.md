@@ -13,7 +13,8 @@ The fallback tiers carry no tags, so with categories set they never run: an unre
 
 1. **Curated corpus** (`loadFromCorpus`) - `public/corpus.json`, the verified film-song pool built offline by `scripts/build-corpus.mjs` (below).
    The crate filters it by language, era, difficulty tier and the device blocklist, orders fresh songs before ones still cooling down, draws `CORPUS_DRAW` candidates and resolves them to streams with one batch request per `CORPUS_BATCH` ids (`GET /songs?ids=`, served by our Worker and by any saavn.dev-compatible mirror in `SAAVN_BASES`).
-   Tracks carry `album` = film, `year` = the film's verified year and `tier`.
+   The draw is weighted by popularity (`DRAW_WEIGHT` in `src/lib/config.ts`): a song's chance is proportional to `(score + floor) ^ power`, with `score` its percentile within its language and decade, so the hits of a tier come up several times as often as its long tail without ever leaving it out; the final queue order is drawn the same way (`weightedShuffle`), and songs without a score (the fallback tiers) draw as if they sat in the middle.
+   Tracks carry `album` = film, `year` = the film's verified year, `tier` and `score`.
    If the corpus file is missing or the ids cannot be resolved (worker and mirror down), the tiers below take over; if the corpus loads but fewer than `minSongs` songs match the filters, the crate returns `{ error: "thin" }` rather than playing unverified songs.
 2. **Saavn search** (`loadFromSaavn`) - JioSaavn search APIs listed in `SAAVN_BASES`; full songs, so snippets start at the intro.
    The first base is our own Cloudflare Worker (`worker/`, see docs/testing-and-deploy.md); the public nandanvarma mirror follows as a fallback.
@@ -39,11 +40,13 @@ The rule is film songs only, with the film's real release year:
    Only songs whose Saavn `language` is hindi or telugu are kept; titles matching `EXCLUDE_RX` (remixes, lofi, unplugged, ...) are dropped.
 2. **Film match** - the album name is cleaned ("(Original Motion Picture Soundtrack)", language markers such as "- Telugu", `From "X"` clauses, brackets) and looked up in a Wikidata index of films by original language (labels and aliases, min publication year).
    A film of the song's language released within ±1 year of the copy's year verifies the song; the corpus stores Wikidata's canonical film label and year.
+   An album marked as a dub ("Coolie (Telugu)", a marker anywhere on the album name) matches a film of any language instead, and an unmarked copy whose album is exactly the name of a film of another language in that window counts as a dub too; a dub keeps the album's own name, the one its audience knows, with the original film's year.
+   Language markers on titles ("Monica (Telugu)") name the copy, not the song, and are dropped.
 3. **Canonical copy** - when the album is a compilation ("Best Of Arijit Singh"), the script searches the title and treats copies with the same language and a play count within 1% as the same recording (Saavn shares one counter across copies), then applies step 2 to each copy, oldest year first, and keeps the original album's song id.
    A compilation copy without a matching original album copy is rejected.
-   If only the name matches (a re-upload with a later year), Wikidata's year is taken anyway, which is what drops re-released pre-2000 songs.
-4. **Unverified fallback** - songs Saavn tags with a `starring` role whose film-like album has no dub marker and no same-named Wikidata film of another language within ±1 year are kept with `yearVerified: false` and the earliest year among the copies.
-   Everything else is rejected: singles, devotional and indie releases, dubs of Tamil/Kannada/Malayalam films, remixes, pre-2000 songs, and songs under the play-count floor.
+   If only the name matches (a re-upload with a later year), Wikidata's year is taken anyway, which is what drops re-released pre-2000 songs; never for a dub-marked album, which would take an older same-named film of the song's language.
+4. **Unverified fallback** - songs Saavn tags with a `starring` role whose film-like album has no dub marker and no same-named Wikidata film of another language within ±1 year are kept with `yearVerified: false` and the earliest year among the copies, unless any copy was released as a plain single (an album that is just the title; a film song's single names the film in a From clause), which is what keeps compilation re-uploads of singles ("Morning Chill Vibes") out.
+   Everything else is rejected: singles, devotional and indie releases, dubs whose original film is not found, remixes, pre-2000 songs, and songs under the play-count floor.
 5. **Difficulty** - within each language x decade (raw counts are not comparable: Hindi 2010s median ≈ 19M plays vs 2000s ≈ 6M) the score blends the play-count percentile (weight 0.8) with the editorial-playlist membership percentile (0.2).
    The top 30% by score is `easy`, the next 40% `medium`, the rest `hard` (cut-offs in the config, baked into the file's `tiers`).
 
@@ -101,6 +104,6 @@ Entries older than the longest cooldown are pruned; a stream-error skip records 
 `cooldownOf(...histories)` in `src/lib/storage.ts` turns histories (`{ played, tired }`, this device's from `loadHistory`, a group's, later a person's) into one map of song key → the time the song may come back, latest wins, and that map is `buildCrate`'s `cooldown`.
 In a group, `startGame` passes the group's history merged with the device's (`groupCooldown`), so songs any phone in the group played or skipped sit out too; see docs/group-sync.md.
 A buzz-in host also merges in every seated phone's history, which each phone brings to its seat, and passes `heardBy` (song key → how many of the people present heard it); see "No repeats" in docs/room-mode.md.
-Songs still cooling down are excluded from the crate when at least `COOLDOWN_MIN_FRESH` (15, in `src/lib/config.ts`) fresh songs remain.
+Songs still cooling down are excluded from the crate when at least `COOLDOWN_MIN_FRESH` (15, in `src/lib/config.ts`) fresh songs remain and they cover the show (rounds x contestants).
 When fresh songs run low, they are appended AFTER all fresh ones, fewest people present first (`heardBy`, empty outside a room), then soonest-due, so repeats only appear when unavoidable.
 Old installs stored `tt_played` as a plain array; `loadHistory` migrates that format transparently.

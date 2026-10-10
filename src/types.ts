@@ -13,6 +13,8 @@ export interface Track {
   sourceId?: string;
   snip?: { startSec: number; endSec: number; sourceId: string; method: string; indexBuilt: string };
   tier?: string;
+  /* Popularity percentile within the song's language and decade (corpus songs only). */
+  score?: number;
   music?: string;
 }
 

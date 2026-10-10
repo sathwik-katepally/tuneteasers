@@ -110,7 +110,8 @@ export function App(){
         break;
       case "steal":
         key = `steal-${steal}`;
-        screen = <Handover game={g} holder="" steal={{ name: guesser!.name, from: who!.name, worth: game.stealWorth() }}
+        // A song goes round the table in turn order, so whoever passed it sits just before the stealer.
+        screen = <Handover game={g} holder="" steal={{ name: guesser!.name, from: g.cast[(steal! + g.cast.length - 1) % g.cast.length].name, worth: game.stealWorth() }}
           onPrime={() => {}} onHanded={game.stealHanded} />;
         break;
       case "countdown":

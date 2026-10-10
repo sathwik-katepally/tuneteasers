@@ -194,8 +194,10 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
      short means the room missed part of it, so the next play starts from the
      top of the window (the last rung just replays). */
   function carryOn(){
-    const { view: v, clip: c, phase: p } = live.current;
+    const { view: v, clip: c, phase: p, audio: a } = live.current;
     if (p !== "song" || !v?.song) return;
+    // A tap already started the next rung while the miss beat or the grace window was still running.
+    if (a === "cueing" || a === "playing") return;
     const s = v.song;
     if (s.state !== "live" && s.state !== "missed") return;
     const everyoneOut = v.players.length > 0 && v.players.every(pl => s.locked.includes(pl.id));
@@ -204,10 +206,35 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
     if (c.cut) return void playClip(c.rung, true);
     giveUp();
   }
+  /* The host's own tap: the next rung, or the whole window again on the last one. */
+  function more(){
+    const c = live.current.clip;
+    if (c.rung < ladder.last) playClip(c.rung + 1, c.cut);
+    else playClip(c.rung, true);
+  }
   function giveUp(){
     engine.stop();
     room.send({ t: "reveal" });
   }
+
+  /* `song` and `clip` are sent once; a link that was down at that moment
+     (a Wi-Fi blip in the countdown) never delivered them, and the room would
+     sit on the previous song with buzzers shut. On reopen, send what the
+     room is missing for the song that is playing. */
+  useEffect(() => {
+    if (room.link !== "open") return;
+    const { view: v, show: sh, track: t, clip: c, audio: a, phase: p } = live.current;
+    if (p !== "song" || !sh || !t) return;
+    const n = sh.songNo + 1;
+    const cued = v?.song?.n === n;
+    const heard = a === "playing" || a === "listened";
+    if (cued && (v!.song!.state !== "cue" || !heard)) return;
+    titlePool(sh.mix).then(titles => {
+      if (live.current.track !== t || live.current.phase !== "song") return;
+      if (!cued) room.send({ t: "song", n, title: t.title, film: t.album || "", year: t.year || 0, artist: t.artist || "", near: nearTitles(t.title, titles) });
+      if (heard) room.send({ t: "clip", rung: c.rung, points: ladder.points[c.rung] });
+    });
+  }, [room.link]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // React to the referee. Every buzz sits in the queue until it is judged,
   // then moves to guesses, so their sum only ever grows by one per buzz.
@@ -387,7 +414,7 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
       screen = view && show && track && (
         <HostPlaying view={view} song={view.song?.n === show.songNo + 1 ? view.song : null} songNo={show.songNo + 1} total={show.total} ladder={ladder} clip={clip} audio={audio}
           graceUntil={graceUntil} msLeft={msLeft} note={note} wrong={wrong} link={room.link}
-          onPlay={() => playClip(clip.rung, true)} onMore={carryOn} onReveal={giveUp} onSkip={skipSong}
+          onPlay={() => playClip(clip.rung, true)} onMore={more} onReveal={giveUp} onSkip={skipSong}
           onHeardIt={cue => room.send({ t: "skip", cue })} />
       );
   }

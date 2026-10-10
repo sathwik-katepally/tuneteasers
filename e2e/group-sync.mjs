@@ -61,7 +61,7 @@ async function groupScreen(page){
 const home = page => page.getByRole("button", { name: "Back", exact: true }).click();
 
 async function setupShow(page){
-  await page.getByRole("radio", { name: "Solo" }).click();
+  await page.getByRole("radio", { name: "Players" }).click();
   await moreSettings(page);
   await page.getByRole("radio", { name: "Easy", exact: true }).click();
   await page.getByRole("radio", { name: "3", exact: true }).click();

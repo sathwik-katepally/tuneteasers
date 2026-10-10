@@ -93,6 +93,7 @@
 
 .label {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
   justify-content: space-between;
   gap: 8px;
@@ -145,24 +146,6 @@
   color: var(--vermilion);
 }
 
-.chipSmall {
-  font-size: 13px;
-}
-
-.chipSmall .chipName {
-  padding: 2px 3px 2px 8px;
-}
-
-.chipStrong {
-  background: var(--ink);
-  color: var(--cream);
-  box-shadow: 2px 2px 0 var(--vermilion-deep);
-}
-
-.chipStrong .chipX {
-  color: var(--bulb);
-}
-
 .teams {
   display: flex;
   flex-direction: column;
@@ -170,20 +153,92 @@
   gap: 10px;
 }
 
-.team {
+/* A team is a card: its name is a plain text field, so renaming needs no
+   discovery, and who is on it is one line of names under it. */
+.teamCard {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
   gap: 6px;
   width: 100%;
+  padding: 10px 12px;
+  border: 2px solid var(--ink);
+  background: #fff8e8;
+  box-shadow: var(--shadow-hard-sm);
 }
 
-.members {
+.teamHead {
   display: flex;
-  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.teamNo {
+  composes: eyebrow from global;
+  flex: none;
+  color: var(--vermilion);
+}
+
+.teamName {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 6px;
+  font-weight: 700;
+  font-size: 18px;
+  border: 0;
+  border-bottom: 2px solid var(--ink);
+  background: transparent;
+  color: var(--ink);
+  outline: none;
+}
+
+.teamName:focus {
+  border-bottom-color: var(--teal);
+}
+
+.teamX {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  color: var(--vermilion);
+}
+
+.teamWho {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 14px;
+  color: #6b4a3a;
+}
+
+.teamWho input {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 6px;
+  font-size: 16px;
+  border: 0;
+  border-bottom: 1px dashed var(--cream-shade);
+  background: transparent;
+  color: var(--ink);
+  outline: none;
+}
+
+.teamWho input:focus {
+  border-bottom-color: var(--teal);
+}
+
+.addTeam {
+  display: inline-flex;
+  align-items: center;
   gap: 6px;
-  padding-left: 14px;
-  border-left: 2px solid var(--cream-shade);
+  min-height: 40px;
+  padding: 4px 12px;
+  font-weight: 700;
+  font-size: 14px;
+  border: 2px dashed var(--ink);
+  color: var(--teal);
 }
 
 .blockedChip {
@@ -254,8 +309,10 @@
   outline: none;
 }
 
+/* On the narrowest phones the switch drops under the label, still on the right. */
 .modeSeg {
   width: 150px;
+  margin-left: auto;
 }
 
 @media (min-width: 900px) {
