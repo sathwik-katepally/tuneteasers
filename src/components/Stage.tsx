@@ -17,7 +17,7 @@ export function Stage({ screenKey, meta, game, onHome, onEnd, onAbout, menu, asi
       <MotionConfig reducedMotion="user">
         <Theatre meta={meta} game={game} onHome={onHome} onEnd={onEnd} onAbout={onAbout} menu={menu} aside={aside} wide={wide}>
           <AnimatePresence mode="wait" initial={false}>
-            <m.div key={screenKey} className="screen" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.22 }}
+            <m.div key={screenKey} className="screen" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, pointerEvents: "none" }} transition={{ duration: 0.22 }}
               onAnimationComplete={onShown}>
               {children}
             </m.div>

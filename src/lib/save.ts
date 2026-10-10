@@ -40,9 +40,11 @@ const DEFAULTS: AppState = {
   game: null,
 };
 
+/* The era control offers one era or all; a save with two (the v6 UI allowed it)
+   would show as All while filtering, so it loads as all. */
 function parseEras(v: unknown): string[] {
   const eras = ERAS.filter(e => arr(v).includes(e));
-  return eras.length ? eras : [...ERAS];
+  return eras.length === 1 ? eras : [...ERAS];
 }
 
 /* Any (every song) is the empty list, which is also what saves from before categories load as. */
