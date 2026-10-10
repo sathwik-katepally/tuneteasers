@@ -93,6 +93,7 @@
 
 .label {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
   justify-content: space-between;
   gap: 8px;
@@ -308,8 +309,10 @@
   outline: none;
 }
 
+/* On the narrowest phones the switch drops under the label, still on the right. */
 .modeSeg {
   width: 150px;
+  margin-left: auto;
 }
 
 @media (min-width: 900px) {
