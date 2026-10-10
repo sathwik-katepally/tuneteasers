@@ -55,6 +55,8 @@ try {
   await page.getByRole("radio", { name: { bolly: "Hindi", telugu: "Telugu", both: "Both" }[A.mix], exact: true }).click();
   await moreSettings(page);
   await page.getByRole("radio", { name: A.difficulty, exact: false }).click();
+  // The category counts load a moment after the fold opens and push the rounds control down.
+  await page.getByRole("button", { name: /^Any, \d+ songs$/ }).waitFor();
   await page.getByRole("radio", { name: A.rounds, exact: true }).click();
   const categories = A.categories ? A.categories.split(",") : [];
   for (const id of categories){

@@ -312,10 +312,12 @@ try {
         if (m.song?.answer) shown.add(songKey(m.song.answer.title));
       }
       for (const k of others(p.label)) if (!shown.has(k) && f.data.includes(JSON.stringify(k))) fail(`${p.label} received another phone's song "${k}"`);
+      // A revealed song's film is public, and a title track shares its name with its film.
+      const data = JSON.stringify(m, (k, v) => (k === "film" ? "" : v));
       for (const t of queue){
         const k = songKey(t.title);
         if (shown.has(k)) continue;
-        if ([JSON.stringify(t.title), JSON.stringify(displayTitle(t.title)), JSON.stringify(k)].some(q => f.data.includes(q))) fail(`${p.label} saw "${t.title}" before its reveal`);
+        if ([JSON.stringify(t.title), JSON.stringify(displayTitle(t.title)), JSON.stringify(k)].some(q => data.includes(q))) fail(`${p.label} saw "${t.title}" before its reveal`);
       }
     }
   }
