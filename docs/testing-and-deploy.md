@@ -116,17 +116,17 @@ Run it locally with `CORPUS_CACHE=<dir>` to cache upstream responses across reru
 `.github/workflows/refresh-snips.yml` runs `scripts/build-snips.mjs` nightly (04:30 UTC; the weekly corpus refresh also dispatches it) and commits `public/snips.json` and `scripts/voice-curves.json` if changed and lands it on main.
 Its `plan` job counts the corpus songs without vocal-stem curves (`SNIP_PLAN=1`, no network) and starts one scoring runner per 35 of them, at most 40 and 20 at a time; a night with nothing to score skips scoring and only refreshes the index.
 Each runner scores its share (`SNIP_SHARD=i/n`, at most `limit` songs) and stops taking songs after 5 hours (`SNIP_BUDGET_MIN`), well inside GitHub's 6-hour job limit, so whatever it scored is kept; the rest wait for the next night.
-A `merge` job on the branch tip combines the shards' curves (`SNIP_MERGE=<dir>`), judges every corpus song from them, prints the curve coverage, the pass rate, entries per language/tier and the calibration, and commits.
-It publishes the v5 index judged from the curves; the v4 (MusiCNN) index it carried over with a fresh build time while the curves were still being built is history (docs/audio.md).
+A `merge` job on the branch tip combines the shards' curves (`SNIP_MERGE=<dir>`), judges every corpus song from them, prints the curve coverage, the pass rate and entries per language/tier, and commits.
+It publishes the v6 index judged from the curves; the v4 (MusiCNN) and v5 (two separators and Whisper) indexes are history (docs/audio.md).
 A failure alert pages only for runs on main; a runner that fails only leaves its songs for the next night.
-The scorer resolves corpus IDs to streams through the worker's batch endpoint (mirror fallback), then hands each song to `scripts/vocal-curve.py`, one long-lived Python process per runner (pinned in `scripts/requirements-snips.txt`: CPU PyTorch, `demucs`, `audio-separator`, `faster-whisper`; ffmpeg decodes), with the model weights (~2 GB) cached between runs under `~/.cache/tt-snips-models`.
-On a 4-core runner a song takes about 4 minutes (htdemucs about 1.7, Whisper about 2) plus about 3 minutes per RoFormer check, so a full corpus takes two or three nights and a week of new songs a few runners for an hour.
-RoFormer is too slow to run on whole songs there (about 30 minutes per song), which is why it only checks candidate windows.
+The scorer resolves corpus IDs to streams through the worker's batch endpoint (mirror fallback), then hands each song to `scripts/vocal-curve.py`, one long-lived Python process per runner (pinned in `scripts/requirements-snips.txt`: CPU PyTorch and `demucs`; ffmpeg decodes), with the htdemucs weights (~300 MB) cached between runs under `~/.cache/tt-snips-models`.
+On a 4-core runner a song takes about 2 minutes, so 1,200 new songs take 20 runners about two hours and a week of new songs a few runners for an hour.
 Only songs without curves are fetched, new corpus IDs first; every song with curves is judged from them on each run, so the scorer never rescans a recording.
-Changing a separator, the Whisper model or the measurement means new curve names in `scripts/build-snips.mjs` (`CURVE_METHOD` and its siblings) and a new index version: every song is scored again under them, and the old curves stay in the store.
+Changing the separator or the measurement means new curve names in `scripts/build-snips.mjs` (`CURVE_METHOD` and `MIX_METHOD`) and a new index version: every song is scored again under them, and the old curves stay in the store.
+Changing only the gate (the ceiling or the margins) is a judging change: bump the index version and method, and the next merge re-judges the corpus from the stored curves without scoring anything.
 The resolver tries both Saavn endpoints with short retries and fails with an endpoint summary after three empty corpus batches.
 It refuses to write fewer than 80 entries.
-The September 2026 switch from MusiCNN seeded the store with the curves of the 262 songs used to choose the separators (docs/audio.md has that comparison).
+The September 2026 switch from MusiCNN seeded the store with the curves of the 262 songs used to choose the separators, and the October 2026 switch to the v6 gate needed no scoring at all (docs/audio.md has both audits).
 Run it locally with `SNIP_PYTHON=<venv>/bin/python`; `SNIP_CORPUS=<file>` limits it to a corpus subset.
 The client fails closed with a clear Music-only shortage if the index is missing or inadequate.
 

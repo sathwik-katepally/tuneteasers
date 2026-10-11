@@ -62,21 +62,24 @@ export const EXCLUDE_RX = /(remix|mashup|lo-?fi|slowed|reverb|medley|unplugged|a
    Music-only interval is exactly SNIP_WINDOW_SEC long, which must hold the
    whole Music-only clip ladder (CLIP_LADDER in src/lib/config.ts), and was
    judged vocal-free by the detector its schema version names. Two versions
-   may authorize: MusiCNN's v4 index (every patch below 0.25 voice
-   probability) serves until the vocal-stem curves cover the corpus, and then
-   the scorer publishes v5 by itself (separated vocal stems below
-   SNIP_VOCAL_MAX_DB dBFS). Each entry must carry its version's method and
-   pass its version's check, and a saved snip must carry an accepted method.
-   Changing the window length or a detector means a new version and method,
-   so an index or a saved game from before can never authorize playback. */
-export const SNIP_INDEX_V = 5;
-export const SNIP_METHOD = "vocal-stem-v5";
+   may authorize, both measuring the separated vocal stem against
+   SNIP_VOCAL_MAX_DB dBFS: v6, the index the scorer publishes (the htdemucs
+   stem held under the ceiling over a lead-in and a tail), and v5, the
+   September 2026 gate (two separators and Whisper, no tail), kept so an
+   index the merge could not refresh still serves. Each entry must carry its
+   version's method and pass its version's check, and a saved snip must carry
+   an accepted method. Changing the window length or a detector means a new
+   version and method, so an index or a saved game from before can never
+   authorize playback. */
+export const SNIP_INDEX_V = 6;
+export const SNIP_METHOD = "vocal-stem-v6";
 export const SNIP_WINDOW_SEC = 12;
 export const SNIP_VOCAL_MAX_DB = -50;
-export const SNIP_LEGACY = { v: 4, method: "continuous-v4", maxVoice: 0.25 };
+export const SNIP_LEGACY = { v: 5, method: "vocal-stem-v5" };
+const stemClean = e => Number.isFinite(e.vocalDb) && e.vocalDb < SNIP_VOCAL_MAX_DB;
 export const SNIP_ACCEPTED = {
-  [SNIP_INDEX_V]: { method: SNIP_METHOD, clean: e => Number.isFinite(e.vocalDb) && e.vocalDb < SNIP_VOCAL_MAX_DB },
-  [SNIP_LEGACY.v]: { method: SNIP_LEGACY.method, clean: e => Number.isFinite(e.maxVoice) && e.maxVoice < SNIP_LEGACY.maxVoice },
+  [SNIP_INDEX_V]: { method: SNIP_METHOD, clean: stemClean },
+  [SNIP_LEGACY.v]: { method: SNIP_LEGACY.method, clean: stemClean },
 };
 export const snipMethodOk = m => Object.values(SNIP_ACCEPTED).some(a => a.method === m);
 export const SNIP_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
