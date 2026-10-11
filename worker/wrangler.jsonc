@@ -9,10 +9,7 @@
     "ALLOWED_ORIGINS": "https://sathwik-katepally.github.io",
     "RESULT_TTL_DAYS": "365",
     "PLAYED_TTL_DAYS": "30",
-    "GROUP_IDLE_TTL_DAYS": "365",
-    // A buzz-in song is skipped when more than this share of the seated players vote "Heard it".
-    "ROOM_SKIP_VOTE_SHARE": "0.5",
-    "ROOM_SKIPS_PER_SHOW": "3"
+    "GROUP_IDLE_TTL_DAYS": "365"
   },
   "d1_databases": [
     {
@@ -42,9 +39,7 @@
         "ALLOWED_ORIGINS": "https://sathwik-katepally.github.io",
         "RESULT_TTL_DAYS": "365",
         "PLAYED_TTL_DAYS": "30",
-        "GROUP_IDLE_TTL_DAYS": "365",
-        "ROOM_SKIP_VOTE_SHARE": "0.5",
-        "ROOM_SKIPS_PER_SHOW": "3"
+        "GROUP_IDLE_TTL_DAYS": "365"
       },
       "d1_databases": [
         {

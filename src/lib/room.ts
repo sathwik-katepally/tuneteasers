@@ -36,13 +36,11 @@ export interface RoomSong {
   winner: string | null;
   won: number;
   answer: RoomAnswer | null;
-  /* Seats that voted "Heard it" for this song, and how many votes skip it. */
+  /* Seats that voted to skip this song, and how many votes skip it (every phone in the room). */
   votes: string[];
   votesNeeded: number;
 }
 interface RoomResult { n: number; title: string; winner: string | null; points: number }
-/* A song skipped this show, by its song key; tired when this phone voted for the skip. */
-interface RoomSkipped { key: string; tired: boolean }
 export interface RoomView {
   phase: "lobby" | "show" | "over";
   code: string;
@@ -52,10 +50,9 @@ export interface RoomView {
   answerSecs: number;
   players: RoomPlayer[];
   results: RoomResult[];
-  skipped: RoomSkipped[];
   seq: number;
-  /* "Heard it too much" skips this show, and the room's cap. */
-  skips: { used: number; max: number };
+  /* Songs skipped this show (votes and host skips together). */
+  skips: number;
   song: RoomSong | null;
   me: string | null;
   // Local clock time the view arrived, so a countdown can run from msLeft.
@@ -153,23 +150,19 @@ export function withRoomHeard(own: Record<string, number>, heard: RoomHeard | nu
 }
 
 /* A phone keeps what it heard in the room in its own history, so the next
-   room (or pass-the-phone game) leaves it out: every revealed song as
-   played, a skipped one as tired when this phone voted for the skip. Once
-   per page load, song and kind is enough (recording again only moves the
-   time), but per kind: a song skipped as played in one show and voted out
-   in a later one must still become tired. */
+   room (or pass-the-phone game) leaves it out: every revealed song, once per
+   page load (recording again only moves the time). A skipped song is never
+   in the view, and records nothing. */
 export function useRecordHeard(view: RoomView | null){
   const done = useRef(new Set<string>());
   useEffect(() => {
     if (!view) return;
-    const record = (title: string, kind: "played" | "tired") => {
-      const id = `${kind}:${songKey(title)}`;
-      if (done.current.has(id)) return;
-      done.current.add(id);
-      markPlayed(title, kind);
-    };
-    for (const r of view.results) record(r.title, "played");
-    for (const x of view.skipped || []) record(x.key, x.tired ? "tired" : "played");
+    for (const r of view.results){
+      const key = songKey(r.title);
+      if (done.current.has(key)) continue;
+      done.current.add(key);
+      markPlayed(r.title);
+    }
   }, [view?.seq]); // eslint-disable-line react-hooks/exhaustive-deps
 }
 

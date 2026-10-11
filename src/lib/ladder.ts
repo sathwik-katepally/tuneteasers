@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { engine } from "./engine.js";
 import { log } from "./log.js";
-import { hookOffset, ladderFor } from "./config";
+import { LADDER, hookOffset } from "./config";
 import type { Track, Turn } from "../types";
 
 type ClipCallbacks = { onStart?: () => void; onEnd?: () => void; onErr?: () => void; onBlocked?: () => void };
@@ -13,7 +13,7 @@ export type ClipResult = "snip" | "plain" | "failed" | "superseded";
    fires once audio is actually flowing. Callers treat "superseded" as "do
    nothing" and "failed" as "this clip can't play" (onErr is not called). */
 async function playRung(track: Track, plain: boolean, rung: number, replay: boolean, cb: ClipCallbacks): Promise<ClipResult> {
-  const { from, to } = ladderFor(plain).span(rung, replay);
+  const { from, to } = LADDER.span(rung, replay);
   if (plain){
     engine.playElement(track.stream, hookOffset(track) + from, to - from, cb);
     return "plain";
@@ -53,7 +53,7 @@ export function useClipPlayer(owner: ClipOwner){
     const { track, plain, setStatus, onStarted, onEnded } = live.current;
     if (!track) return;
     engine.ac();
-    const span = ladderFor(plain).span(rung, replay);
+    const span = LADDER.span(rung, replay);
     setNote("");
     setTurn(t => ({ ...t, rung, span, clipEndedAt: replay ? t.clipEndedAt : null, cut: false }));
     const started = () => {

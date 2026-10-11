@@ -84,7 +84,7 @@ function ResultRow({ r }: { r: GroupResult }){
       <div className={s.resultHead}>
         <span className={s.date}>{when(r.finishedAt)}</span>
         <span className={s.settings}>
-          {r.mode === "teams" ? "Teams" : "Solo"} · {DIFFICULTY[r.difficulty]?.label ?? r.difficulty} · {MIX[r.mix] ?? r.mix} · {r.rounds} rounds
+          {r.mode === "teams" ? "Teams" : "Solo"} · {r.difficulty === "hard" ? "Hard" : DIFFICULTY[r.difficulty].label} · {MIX[r.mix] ?? r.mix} · {r.rounds} rounds
         </span>
       </div>
       <ol className={s.standings}>

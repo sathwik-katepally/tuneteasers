@@ -12,7 +12,6 @@
 import { Server } from "partyserver";
 import { isCorrect } from "../../src/lib/answer.js";
 import { ROOM_HEARD } from "../../src/lib/constants.js";
-import { songKey } from "../../src/lib/utils.js";
 
 const CODE_ALPHABET = "BCDFGHJKLMNPQRSTVWXZ";
 export const CODE_RX = /^[BCDFGHJKLMNPQRSTVWXZ]{4}$/;
@@ -49,18 +48,6 @@ function refuseSocket(ws, code, reason, fields = {}){
   console.warn("room refused", { close: code, reason, ...fields });
   ws.close(code, reason);
 }
-
-/* "Heard it too much" skips (docs/room-mode.md), from the Worker vars. */
-function skipRules(env){
-  const share = Number(env.ROOM_SKIP_VOTE_SHARE);
-  const max = Number(env.ROOM_SKIPS_PER_SHOW);
-  return {
-    share: share > 0 && share < 1 ? share : 0.5,
-    max: Number.isInteger(max) && max >= 0 ? max : 3,
-  };
-}
-// Votes needed to skip: strictly more than `share` of the seated players.
-const votesNeeded = (seated, share) => Math.floor(seated * share) + 1;
 
 // A handler returns SAME when the message changed nothing (a late or repeated
 // buzz), so a mashed button does not rewrite storage or fan out a state.
@@ -135,7 +122,7 @@ export class Room extends Server {
     this.room = {
       code, hostHash, createdAt: Date.now(), touchedAt: Date.now(),
       phase: "lobby", players: [], rules: { answerSecs: 15 },
-      mix: "both", total: 0, perRound: 1, song: null, results: [], skipped: [], seq: 0, skips: 0, cues: 0,
+      mix: "both", total: 0, perRound: 1, song: null, results: [], seq: 0, skips: 0, cues: 0,
     };
     await this.save();
     return true;
@@ -271,7 +258,7 @@ export class Room extends Server {
 
   /* For the host only: every seated phone's heard songs merged, as
      { key: [hours until it may come back, how many seats heard it] }.
-     Seated means with a seat, online or not, as for skip votes. */
+     Seated means with a seat, online or not. */
   async heard(){
     const r = this.room, now = Date.now();
     const got = r.players.length ? await this.ctx.storage.get(r.players.map(p => heardKey(p.id))) : new Map();
@@ -308,12 +295,17 @@ export class Room extends Server {
     return on;
   }
 
+  /* Votes that skip a song: every seated player who is online, so a phone
+     that dropped off cannot hold the song for the rest; never below one. */
+  votesNeeded(){
+    return Math.max(1, this.online().size);
+  }
+
   /* What one connection may see. The answer is only in it once revealed. */
   view(seat){
     const r = this.room;
     const on = this.online();
     const s = r.song;
-    const rules = skipRules(this.env);
     return {
       t: "state",
       phase: r.phase,
@@ -324,16 +316,15 @@ export class Room extends Server {
       answerSecs: r.rules.answerSecs,
       players: r.players.map(p => ({ id: p.id, name: p.name, score: p.score, online: on.has(p.id) })),
       results: r.results,
-      skipped: (r.skipped || []).map(x => ({ key: x.key, tired: x.voters.includes(seat) })),
       seq: r.seq,
-      skips: { used: r.skips || 0, max: rules.max },
+      skips: r.skips || 0,
       song: s && {
         n: s.n, cue: s.cue ?? 0, rung: s.rung, points: s.points, state: s.state,
         queue: s.queue.map(q => q.id), locked: s.locked, answering: s.answering,
         msLeft: s.deadline ? Math.max(0, s.deadline - Date.now()) : null,
         guesses: s.guesses, winner: s.winner, won: s.won,
         answer: s.state === "revealed" ? s.answer : null,
-        votes: s.votes || [], votesNeeded: votesNeeded(r.players.length, rules.share),
+        votes: s.votes || [], votesNeeded: this.votesNeeded(),
       },
       me: seat,
     };
@@ -381,15 +372,12 @@ export class Room extends Server {
     }
   }
 
-  /* "Heard it too much": song n is dropped without a result or a reveal and
-     the host re-cues n with another song. The title stays in this object;
-     phones get only its song key, after the skip (the big screen shows the
-     title then anyway), to keep it out of their own next crates: as tired
-     for those who voted, as played for everyone else. */
+  /* A skip: song n is dropped without a result or a reveal and the host
+     re-cues n with another song. The title stays in this object; phones
+     never learn it (the big screen shows it), and nobody records the song. */
   skipSong(){
     const r = this.room, s = r.song;
     r.skips = (r.skips || 0) + 1;
-    (r.skipped ||= []).push({ key: songKey(s.answer.title), voters: s.votes || [] });
     r.song = { n: s.n, cue: s.cue, rung: -1, points: 0, state: "skipped", answer: null,
       queue: [], locked: [], answering: null, deadline: null, guesses: [], winner: null, won: 0, near: [], votes: [] };
     r.seq++;
@@ -399,10 +387,9 @@ export class Room extends Server {
      until anyone buzzes. `cue` names the song a vote or skip was meant for,
      so one that arrives after a re-cue can't skip the replacement. */
   canSkip(cue){
-    const r = this.room, s = r.song;
+    const s = this.room.song;
     if (!s || cue !== s.cue) return "stale";
     if (s.state !== "live" || s.queue.length || s.guesses.length) return "not-now";
-    if ((r.skips || 0) >= skipRules(this.env).max) return "no-skips";
     return null;
   }
 
@@ -434,7 +421,6 @@ const HOST = {
     r.rules = { answerSecs: m.answerSecs };
     r.song = null;
     r.results = [];
-    r.skipped = [];
     r.skips = 0;
     for (const p of r.players) p.score = 0;
     r.seq++;
@@ -467,7 +453,7 @@ const HOST = {
     s.points = m.points;
     s.state = "live";
   },
-  /* The host skips straight away, no vote needed; it still counts toward the cap. */
+  /* The host skips straight away, no vote needed. */
   skip(conn, m){
     const err = this.canSkip(m.cue);
     if (err) return err;
@@ -507,7 +493,8 @@ const PLAYER = {
     r.seq++;
     if (s.state !== "answering") this.nextAnswerer();
   },
-  /* "Heard it too much". Only the tally and who voted are in a view. */
+  /* A skip vote: the song goes once every phone in the room has voted. Only
+     the tally and who voted are in a view. */
   vote(conn, m){
     const r = this.room, s = r.song, me = conn.state.seat;
     if (this.canSkip(m.cue)) return SAME;
@@ -515,7 +502,7 @@ const PLAYER = {
     if (s.votes.includes(me)) return SAME;
     s.votes.push(me);
     r.seq++;
-    if (s.votes.length >= votesNeeded(r.players.length, skipRules(this.env).share)) this.skipSong();
+    if (s.votes.length >= this.votesNeeded()) this.skipSong();
   },
   answer(conn, m){
     const r = this.room, s = r.song, me = conn.state.seat;

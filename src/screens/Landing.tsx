@@ -1,14 +1,13 @@
 import { useEffect } from "react";
 import { LazyMotion, MotionConfig, domAnimation } from "motion/react";
 import * as m from "motion/react-m";
-import { ladderFor } from "../lib/config";
+import { LADDER } from "../lib/config";
 import { markLandingSeen } from "../lib/save";
 import type { Play } from "../types";
 import s from "./Landing.module.css";
 
-/* Easy's ladder: the first clip, then each "Hear more" step. */
-const EASY = ladderFor(true);
-const LADDER = EASY.segments.map((secs, i) => ({ label: i === 0 ? `${secs}s` : `+${secs}s`, points: EASY.points[i] }));
+/* The clip ladder: the first clip, then each "Hear more" step. */
+const RUNGS = LADDER.segments.map((secs, i) => ({ label: i === 0 ? `${secs}s` : `+${secs}s`, points: LADDER.points[i] }));
 
 const rise = (i: number) => ({
   initial: { y: 28, opacity: 0 },
@@ -41,7 +40,7 @@ export function Landing({ onStart, onJoin }: { onStart: (play: Play) => void; on
               <m.div {...rise(4)}>
                 <p className={s.label}>The less you hear, the more it's worth</p>
                 <ol className={s.ladder}>
-                  {LADDER.map(r => (
+                  {RUNGS.map(r => (
                     <li key={r.label} className={s.rung}>
                       <span className={s.secs}>{r.label}</span>
                       <span className={s.pts}>{r.points} pts</span>

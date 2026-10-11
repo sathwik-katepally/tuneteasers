@@ -129,10 +129,9 @@ export function App(){
         break;
       default:
         key = "playing";
-        screen = <Playing name={guesser!.name} track={track!} plain={plain} phase={phase} turn={turn} note={game.note} stealing={steal !== null}
+        screen = <Playing name={guesser!.name} track={track!} phase={phase} turn={turn} note={game.note} stealing={steal !== null}
           onPlay={game.playClip} onJudge={game.revealAndScore} onHint={game.hint} onSkip={game.skipSong}
-          passTo={game.passTo?.name} onPass={game.passSong}
-          skipsLeft={game.skipsLeft} onHeardIt={game.heardIt} />;
+          passTo={game.passTo?.name} onPass={game.passSong} />;
     }
   }
 

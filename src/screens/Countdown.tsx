@@ -5,7 +5,7 @@ import { BulbFrame } from "../components/Bulbs";
 import s from "./Countdown.module.css";
 import sh from "./shared.module.css";
 
-/* skipped: the title of a song just skipped as heard too much, shown so the room sees it. */
+/* skipped: the title of a song just skipped, shown so the room sees it. */
 export function Countdown({ onTick, onDone, skipped = "" }: { onTick: (n: number) => void; onDone: () => void; skipped?: string }){
   const reduce = useReducedMotion();
   const [n, setN] = useState(3);
@@ -42,7 +42,7 @@ export function Countdown({ onTick, onDone, skipped = "" }: { onTick: (n: number
             </m.div>
           )}
         </AnimatePresence>
-        <p className={s.label}>{skipped ? "Another one, same level" : "Ears on"}</p>
+        <p className={s.label}>{skipped ? "Another one" : "Ears on"}</p>
       </div>
     </div>
   );
