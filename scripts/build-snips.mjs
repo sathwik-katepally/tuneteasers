@@ -1,14 +1,11 @@
 #!/usr/bin/env node
 /* Build public/snips.json from current Saavn IDs in the curated corpus.
    scripts/vocal-curve.py separates each recording's vocal stem once with
-   htdemucs and transcribes it with Whisper. The stem's loudness, the mix's
-   loudness and the recognised words are kept as curves in
+   htdemucs. The stem's loudness and the mix's loudness are kept as curves in
    scripts/voice-curves.json, so windows of any length come from them without
-   fetching the song again. The best candidate windows are then separated
-   again with Mel-Band RoFormer, and a SNIP_WINDOW_SEC interval is accepted
-   only if both vocal stems stay near silent from a lead-in before it to its
-   end and Whisper heard no word near it in either (gate() below,
-   docs/audio.md).
+   fetching the song again. A SNIP_WINDOW_SEC interval is accepted only if
+   the vocal stem stays near silent from a lead-in before it to a tail after
+   it (gate() below, docs/audio.md).
 
    Run: node scripts/build-snips.mjs   (CI: .github/workflows/refresh-snips.yml)
    Needs python3 with scripts/requirements-snips.txt, and ffmpeg.
@@ -51,43 +48,26 @@ const SONG_TIMEOUT_MS = 40 * 60e3;
 
 /* The curves that decide windows, one stored series each. Bump a name when
    its model or extraction changes: every song is then scored again, and the
-   old curves stay in the store beside the new ones (as MusiCNN's do).
-   The RoFormer curves are partial: only the candidate windows it was asked
-   to confirm are measured, and every other patch holds the byte 255 (+27.5
-   dBFS), so an unmeasured stretch can never pass. */
+   old curves stay in the store beside the new ones (as MusiCNN's and the v5
+   gate's Whisper and RoFormer curves do). */
 const CURVE_METHOD = "htdemucs-vocal-db-v1";
-const WORDS_METHOD = "htdemucs-whisper-turbo-words-v1";
 const MIX_METHOD = "mix-db-v1";
-const CONFIRM_METHOD = "melband-kim-vocal-db-v1";
-const CONFIRM_WORDS = "melband-kim-whisper-turbo-words-v1";
 const LEVEL = "dBFS, loudest 0.1s RMS in each patch";
-const WORDS = "highest probability of a word Whisper large-v3-turbo (faster-whisper, int8) recognised in the stem, over the patch";
 const DETECTORS = {
   [CURVE_METHOD]: { model: "htdemucs (Demucs v4) vocal stem, whole song", unit: LEVEL },
-  [WORDS_METHOD]: { model: "Whisper on the htdemucs vocal stem, whole song", unit: WORDS },
   [MIX_METHOD]: { model: "the decoded stream itself", unit: LEVEL },
-  [CONFIRM_METHOD]: { model: "Mel-Band RoFormer vocals (Kimberley Jensen, audio-separator) on candidate windows only; 255 = not measured", unit: LEVEL },
-  [CONFIRM_WORDS]: { model: "Whisper on the Mel-Band RoFormer vocal stem of the same candidate windows", unit: WORDS },
 };
 const HOP = 0.5, BLOCKS = 5; // curve patches: 0.5s, each the loudest of five 0.1s blocks
 const DB = { lo: -100, step: 0.5 };
-const UNMEASURED = 255;
 
-/* The window gate. The numbers come from the September 2026 calibration on
-   262 songs (docs/audio.md), and the merge prints them again from the whole
-   corpus on every run (calibration()):
-   - both vocal stems stay below the song's limit from LEAD_SEC before the
-     window to its end. The limit is min(SNIP_VOCAL_MAX_DB, the song's own
-     singing level - SONG_DROP_DB); the singing level is the median htdemucs
-     stem level over patches holding a word Whisper is sure of (SURE_P), when
-     the song has at least SURE_WORDS of them. 99.7% of the loudest patches of
-     such sure words sat above -51 dBFS and within 38 dB of their song's level.
-   - Whisper recognised no word (WORD_P) within WORD_PAD_SEC of that span in
-     either stem. A word only counts where its stem is at least WORD_FLOOR_DB:
-     over a silent stem Whisper invents words (mostly "झाल"), and a separator
-     that missed a voice is the other separator's job to catch.
-   Each song gets up to CONFIRMS RoFormer checks, cleanest candidate first. */
-const GATE = { LEAD_SEC: 2, SONG_DROP_DB: 38, WORD_P: 0.5, WORD_PAD_SEC: 1, WORD_FLOOR_DB: -60, SURE_P: 0.8, SURE_WORDS: 10, CONFIRMS: 3 };
+/* The window gate: the vocal stem stays below SNIP_VOCAL_MAX_DB from LEAD_SEC
+   before the window to TAIL_SEC after it. The lead-in keeps a vocal tail out
+   of the first seconds; the tail keeps a soft vocal onset out of the last
+   ones, which htdemucs registers about two seconds after a listener hears it
+   (the October 2026 listening audit, docs/audio.md). The ceiling comes from
+   the September 2026 calibration on 262 songs: 99.7% of recognisable singing
+   peaked above -51 dBFS. */
+const GATE = { LEAD_SEC: 2, TAIL_SEC: 2 };
 const CHECKED_METHOD = `${SNIP_METHOD}/${SNIP_VOCAL_MAX_DB}`;
 
 /* -- corpus songs -> stream URLs (the same batch endpoint the client uses) -- */
@@ -187,19 +167,11 @@ const values = c => {
   const q = Buffer.from(c.q, "base64");
   return Float64Array.from(q, v => (c.scale ? v / c.scale : c.lo + v * c.step));
 };
-const scored = (store, id) => [CURVE_METHOD, WORDS_METHOD, MIX_METHOD].every(m => store.songs[id]?.[m]);
-const hasCurves = (store, id) => scored(store, id) && !!store.songs[id][CONFIRM_METHOD];
+const hasCurves = (store, id) => [CURVE_METHOD, MIX_METHOD].every(m => store.songs[id]?.[m]);
 
 const patches = (blocks, n) => Array.from({ length: n }, (_, k) => Math.max(...blocks.slice(k * BLOCKS, k * BLOCKS + BLOCKS)));
 const dbq = v => Math.min(255, Math.max(0, Math.ceil((v - DB.lo) / DB.step)));
-const pq = p => Math.min(255, Math.ceil(p * 255));
 const b64 = a => Buffer.from(a).toString("base64");
-function wordPatches(words, n, from = 0){
-  const w = new Array(n).fill(0);
-  for (const [a, b, p] of words)
-    for (let k = Math.max(0, Math.floor(a / HOP)); k < n && k * HOP < b; k++) if (k * HOP >= from) w[k] = Math.max(w[k], p);
-  return w;
-}
 
 function addSongCurves(store, id, r){
   const n = Math.floor(r.stem.length / BLOCKS);
@@ -208,104 +180,29 @@ function addSongCurves(store, id, r){
   store.songs[id] = {
     ...store.songs[id],
     [CURVE_METHOD]: { ...base, ...DB, q: b64(patches(r.stem, n).map(dbq)) },
-    [WORDS_METHOD]: { ...base, scale:255, q: b64(wordPatches(r.words, n).map(pq)) },
     [MIX_METHOD]: { ...base, ...DB, q: b64(patches(r.mix, n).map(dbq)) },
   };
 }
 
-/* Folds a RoFormer answer for [r.from, ...) into the song's partial curves;
-   patches outside it keep what earlier checks measured. */
-function addConfirm(store, id, r){
-  const song = store.songs[id], ref = song[CURVE_METHOD];
-  const n = Buffer.from(ref.q, "base64").length, base = { hopSec:HOP, patchSec:HOP, dur:ref.dur };
-  const lv = song[CONFIRM_METHOD] ? [...Buffer.from(song[CONFIRM_METHOD].q, "base64")] : new Array(n).fill(UNMEASURED);
-  const wd = song[CONFIRM_WORDS] ? [...Buffer.from(song[CONFIRM_WORDS].q, "base64")] : new Array(n).fill(0);
-  if (r){
-    const k0 = Math.round(r.from / HOP), m = Math.floor(r.stem.length / BLOCKS);
-    const got = patches(r.stem, m), w = wordPatches(r.words, n, r.from);
-    for (let i = 0; i < m && k0 + i < n; i++){ lv[k0 + i] = dbq(got[i]); wd[k0 + i] = pq(w[k0 + i]); }
-  }
-  Object.assign(store.detectors, DETECTORS);
-  store.songs[id] = { ...song, [CONFIRM_METHOD]: { ...base, ...DB, q: b64(lv) }, [CONFIRM_WORDS]: { ...base, scale:255, q: b64(wd) } };
-}
-
-/* The song's limit (see GATE) and its whole-second windows of `secs` that
-   pass, cleanest first (ties to the earlier start). With `confirmed` false
-   the RoFormer curves are ignored: that lists the candidates to check. */
-function windows(curves, { confirmed = true, secs = SNIP_WINDOW_SEC } = {}){
-  const cv = curves?.[CURVE_METHOD], cw = curves?.[WORDS_METHOD];
-  if (!cv || !cw) return { limit: null, list: [] };
-  const voc = values(cv), n = voc.length, S = cv.hopSec, P = cv.patchSec;
-  const heard = (w, st) => w.map((p, k) => (st[k] >= GATE.WORD_FLOOR_DB ? p : 0));
-  let level = voc, words = heard(values(cw), voc);
-  const sureW = values(cw);
-  const sure = [...voc].filter((v, k) => sureW[k] >= GATE.SURE_P && v >= GATE.WORD_FLOOR_DB).sort((a, b) => a - b);
-  const sing = sure.length >= GATE.SURE_WORDS ? sure[Math.floor(sure.length / 2)] : null;
-  const limit = Math.min(SNIP_VOCAL_MAX_DB, sing === null ? Infinity : sing - GATE.SONG_DROP_DB);
-  if (confirmed){
-    const rv = curves[CONFIRM_METHOD], rw = curves[CONFIRM_WORDS];
-    if (!rv || !rw) return { limit, list: [] };
-    const rlv = values(rv), rwd = heard(values(rw), rlv);
-    level = voc.map((v, k) => Math.max(v, rlv[k] ?? Infinity));
-    words = words.map((p, k) => Math.max(p, rwd[k] ?? 1));
-  }
+/* The whole-second windows of `secs` whose stem stays under the ceiling from
+   the lead-in to the tail, cleanest first (ties to the earlier start). A tail
+   past the end of the recording counts as silent. */
+function windows(curves, { secs = SNIP_WINDOW_SEC } = {}){
+  const cv = curves?.[CURVE_METHOD];
+  if (!cv) return [];
+  const level = values(cv), n = level.length, S = cv.hopSec, P = cv.patchSec;
   const span = (a, b) => [Math.max(0, Math.floor((a - P) / S) + 1), Math.min(n - 1, Math.ceil(b / S) - 1)];  // patches overlapping [a, b)
   const list = [];
   for (let t = 0; t + secs + 1 <= Math.floor(cv.dur) && Math.ceil((t + secs) / S) <= n; t++){
-    const [k0, k1] = span(t - GATE.LEAD_SEC, t + secs);
-    const [w0, w1] = span(t - GATE.LEAD_SEC - GATE.WORD_PAD_SEC, t + secs + GATE.WORD_PAD_SEC);
-    let m = -Infinity, said = false;
+    const [k0, k1] = span(t - GATE.LEAD_SEC, t + secs + GATE.TAIL_SEC);
+    let m = -Infinity;
     for (let k = k0; k <= k1; k++) if (level[k] > m) m = level[k];
-    for (let k = w0; k <= w1; k++) if (words[k] >= GATE.WORD_P){ said = true; break; }
-    if (!said && m < limit) list.push({ startSec:t, endSec:t + secs, vocalDb:m, limitDb:limit });
+    if (m < SNIP_VOCAL_MAX_DB) list.push({ startSec:t, endSec:t + secs, vocalDb:m, limitDb:SNIP_VOCAL_MAX_DB });
   }
   list.sort((a, b) => a.vocalDb - b.vocalDb || a.startSec - b.startSec);
-  return { limit, list };
+  return list;
 }
-const gate = curves => windows(curves).list[0] || null;
-
-/* The stretch a RoFormer check separates for a candidate: everything the
-   gate reads for it. */
-const confirmSpan = w => ({ from: Math.max(0, w.startSec - GATE.LEAD_SEC - GATE.WORD_PAD_SEC), to: w.endSec + GATE.WORD_PAD_SEC });
-function nextCandidate(curves){
-  const measured = curves[CONFIRM_METHOD] ? Buffer.from(curves[CONFIRM_METHOD].q, "base64") : null;
-  return windows(curves, { confirmed: false }).list.find(w => {
-    const { from, to } = confirmSpan(w);
-    if (!measured) return true;
-    for (let k = Math.floor(from / HOP); k < Math.ceil(to / HOP) && k < measured.length; k++) if (measured[k] === UNMEASURED) return true;
-    return false;
-  }) || null;
-}
-
-/* Every quiet stretch of recognised singing in the corpus, as the gate's
-   own numbers see it: the loudest htdemucs patch of each run of sure-word
-   patches, absolute and against its song's singing level. The share of
-   those runs a limit would let through is how loose it is. */
-function calibration(store, ids){
-  const abs = [], rel = [];
-  let songs = 0;
-  for (const id of ids){
-    const c = store.songs[id];
-    if (!c?.[CURVE_METHOD] || !c[WORDS_METHOD]) continue;
-    const voc = values(c[CURVE_METHOD]), w = values(c[WORDS_METHOD]);
-    const sure = voc.map((v, k) => w[k] >= GATE.SURE_P && v >= GATE.WORD_FLOOR_DB);
-    const lv = [...voc].filter((_, k) => sure[k]).sort((a, b) => a - b);
-    if (lv.length < GATE.SURE_WORDS) continue;
-    const sing = lv[Math.floor(lv.length / 2)];
-    songs++;
-    for (let k = 0; k < voc.length; k++){
-      if (!sure[k]) continue;
-      let j = k, pk = -Infinity;
-      while (j < voc.length && sure[j]) pk = Math.max(pk, voc[j++]);
-      abs.push(pk); rel.push(pk - sing); k = j;
-    }
-  }
-  if (!abs.length) return;
-  const q = (a, p) => [...a].sort((x, y) => x - y)[Math.floor(p * (a.length - 1))];
-  const share = (a, lim) => a.filter(v => v < lim).length / a.length;
-  console.log(`calibration: ${abs.length} runs of sure words in ${songs} songs; 0.3% quantile ${q(abs, 0.003).toFixed(1)} dBFS and ${q(rel, 0.003).toFixed(1)} dB from the song's level`);
-  console.log(`  runs quieter than the ceiling ${SNIP_VOCAL_MAX_DB} dBFS: ${(100 * share(abs, SNIP_VOCAL_MAX_DB)).toFixed(2)}%, more than ${GATE.SONG_DROP_DB} dB under their song: ${(100 * share(rel, -GATE.SONG_DROP_DB)).toFixed(2)}%`);
-}
+const gate = curves => windows(curves)[0] || null;
 
 function writeSnips(v, entries, checked, corpusIds, { final }){
   const keys = Object.keys(entries).sort();
@@ -386,7 +283,6 @@ function merge(){
   writeCurves(store);
   console.log(`${CURVES}: ${Object.keys(store.songs).length} songs with curves`);
   report(entries, checked);
-  calibration(store, corpusIds);
 }
 
 function plan(){
@@ -447,7 +343,7 @@ function startExtractor(){
     writeCurves(store);
   };
   async function ask(job){
-    if (!py){ py = startExtractor(); const r = await py.ready(); console.log(`extractor ready: ${r.separators.join(" + ")}, whisper ${r.whisper}`); }
+    if (!py){ py = startExtractor(); const r = await py.ready(); console.log(`extractor ready: ${r.separator}`); }
     let r;
     try { r = await py.run(job); }
     catch (e){ py.stop(); py = null; r = { error: e.message }; }
@@ -455,28 +351,14 @@ function startExtractor(){
     return r;
   }
   async function score(s){
-    const t = Date.now(), job = { id:s.id, url:s.stream, lang:s.lang };
-    if (!scored(store, s.id)){
-      const r = await ask({ op:"song", ...job });
-      if (r.error) return `FAIL ${s.title.slice(0, 40)} :: ${r.error.slice(0, 120)}`;
-      addSongCurves(store, s.id, r);
-    }
-    let checks = 0, c;
-    while (checks < GATE.CONFIRMS && !gate(store.songs[s.id]) && (c = nextCandidate(store.songs[s.id]))){
-      const r = await ask({ op:"confirm", ...job, ...confirmSpan(c) });
-      if (r.error){
-        // Retried from scratch next time rather than judged half-checked.
-        delete store.songs[s.id][CONFIRM_METHOD]; delete store.songs[s.id][CONFIRM_WORDS];
-        return `FAIL ${s.title.slice(0, 40)} (confirm) :: ${r.error.slice(0, 120)}`;
-      }
-      addConfirm(store, s.id, r);
-      checks++;
-    }
-    if (!store.songs[s.id][CONFIRM_METHOD]) addConfirm(store, s.id, null);
+    const t = Date.now();
+    const r = await ask({ id:s.id, url:s.stream });
+    if (r.error) return `FAIL ${s.title.slice(0, 40)} :: ${r.error.slice(0, 120)}`;
+    addSongCurves(store, s.id, r);
     judgeAll([s.id], store, entries, checked);
     const w = entries[s.id];
     if (w) kept++;
-    return `${s.lang} ${w ? `vocal=${w.vocalDb}dB (limit ${w.limitDb}) start=${w.startSec}s` : "no clean window"} after ${checks} RoFormer checks, dur=${Math.round(store.songs[s.id][CURVE_METHOD].dur)}s ${Math.round((Date.now() - t) / 1000)}s  ${s.title.slice(0, 40)}`;
+    return `${s.lang} ${w ? `vocal=${w.vocalDb}dB start=${w.startSec}s` : "no clean window"}, dur=${Math.round(store.songs[s.id][CURVE_METHOD].dur)}s ${Math.round((Date.now() - t) / 1000)}s  ${s.title.slice(0, 40)}`;
   }
 
   for (const [pass, list] of [["", todo], ["retry ", null]]){
@@ -499,5 +381,4 @@ function startExtractor(){
   console.log(`${failures.length} failed after retry`);
   console.log(`${Object.keys(checked).length} source IDs rejected by ${CHECKED_METHOD}`);
   report(entries, checked);
-  calibration(store, corpusIds);
 })().catch(e => { console.error("build-snips failed:", e); process.exit(1); });

@@ -18,13 +18,13 @@ The game does not call these directly: `playRung(track, plain, rung, replay, cb)
 
 `public/snips.json` is built offline in CI (see docs/testing-and-deploy.md) and fetched same-origin, no-cache, once per crate build:
 
-    { "v": 5, "built": "...", "snips": { "<Saavn ID>": { "sourceId": "<Saavn ID>", "startSec": 78, "endSec": 90, "vocalDb": -63.5, "limitDb": -50, "method": "vocal-stem-v5" } }, "checked": { "<rejected Saavn ID>": "vocal-stem-v5/-50" }, "corpusIds": [...] }
+    { "v": 6, "built": "...", "snips": { "<Saavn ID>": { "sourceId": "<Saavn ID>", "startSec": 78, "endSec": 90, "vocalDb": -63.5, "limitDb": -50, "method": "vocal-stem-v6" } }, "checked": { "<rejected Saavn ID>": "vocal-stem-v6/-50" }, "corpusIds": [...] }
 
 The key and `sourceId` must both match the returned Saavn recording ID.
 `checked` records scored recordings that did not pass and never authorizes playback.
 The window length (`SNIP_WINDOW_SEC`, 12 seconds) and the accepted schema versions (`SNIP_ACCEPTED`) are shared constants in `src/lib/constants.js`, read by the scorer, the crate and the engine alike.
-Two versions authorize playback, each with its own method and check: v4 (`continuous-v4`, MusiCNN, `maxVoice` below 0.25) and v5 (`vocal-stem-v5`, separated vocal stems, `vocalDb` below `SNIP_VOCAL_MAX_DB`, -50 dBFS).
-The index that ships is v5; v4 is the index the scorer carried over while it built the vocal-stem curves for the corpus, and it no longer writes one (see "How windows are judged" below).
+Two versions authorize playback, each with its own method and the same check (`vocalDb` below `SNIP_VOCAL_MAX_DB`, -50 dBFS): v6 (`vocal-stem-v6`, the htdemucs stem held under the ceiling over a lead-in and a tail) and v5 (`vocal-stem-v5`, the September 2026 gate with a second separator and Whisper, no tail).
+The index that ships is v6; v5 stays accepted so an index the merge could not refresh still serves, and the scorer no longer writes one (see "How windows are judged" below).
 An index of any other version, an entry whose method is not its version's, an unmatched ID, an interval that is not exactly 12 seconds, an absent entry, or a build timestamp over 30 days old cannot authorize Music-only playback.
 The window must hold the whole Music-only clip ladder; `src/lib/config.ts` throws at load if that ladder outgrows it.
 A queued track keeps its window's method; a saved snip without an accepted method (every save before v5, and the 10- and 20-second releases) is dropped when it loads, and resuming a Music-only game rebinds its queue to the current index, or shows the shortage message.
@@ -33,23 +33,17 @@ When the index is missing or too few safe tracks remain, the player sees a short
 
 ## How windows are judged
 
-MusiCNN, the v4 detector, labels whole tracks as vocal or instrumental; it never saw Indian film music, lets vocal tails into windows and reads flute, strings and shehnai as voice.
-v5 separates the vocal stem instead and measures how loud it is.
-`scripts/vocal-curve.py` decodes each song once, separates its vocal stem with htdemucs, and measures the stem and the mix every 0.1s; Whisper (large-v3-turbo) then transcribes the stem.
-The scorer keeps three curves per song in `scripts/voice-curves.json`, one byte per 0.5s patch: the stem level (the loudest 0.1s in the patch), the mix level, and the highest probability of any word Whisper heard over the patch.
-The best candidate windows are then separated again with Mel-Band RoFormer, a second separator of a different design, over the window and its margins only, and Whisper transcribes that stem too; up to three candidates per song, cleanest first.
-A whole-second 12-second window passes only if:
-
-- both vocal stems stay below the song's limit from 2 seconds before the window to its end (the lead-in stops a vocal tail from leaking into the first seconds);
-- the limit is -50 dBFS, or 38 dB below the song's own singing level if that is lower, where the singing level is the median htdemucs stem level over patches holding a word Whisper is sure of (probability 0.8 or more);
-- neither Whisper heard a word (probability 0.5 or more) within a second of that span, counting only words over a stem louder than -60 dBFS.
-
-The scorer picks the passing window with the quietest stems.
-The numbers were calibrated without listening, from the songs' own sung regions: across 262 songs, 99.7% of the stretches Whisper was sure were sung peaked above -51 dBFS and within 38 dB of their song's singing level, so both limits sit below nearly all recognisable singing.
-The word floor is there because over a silent stem Whisper invents words (mostly "झाल"); a voice one separator missed is the other separator's to catch.
-Every merge prints the same calibration for the whole corpus (the share of sure-sung stretches the limits would let through).
-Curves are self-describing (hop, patch length, and either `lo`/`step` in dBFS or a probability `scale`), rounded up so a stored level is never quieter than measured, and kept per Saavn ID and per detector name; MusiCNN's `musicnn-voice-dense-v1` curves stay beside them.
-The RoFormer curves are partial: patches it never measured hold 255 (+27.5 dBFS), so they can never pass.
+MusiCNN, the v4 detector, labelled whole tracks as vocal or instrumental; it never saw Indian film music, let vocal tails into windows and read flute, strings and shehnai as voice.
+v5 separated the vocal stem instead and measured how loud it is, with Whisper and a second separator (Mel-Band RoFormer) as extra checks.
+v6 keeps the stem measurement and drops the extra checks.
+`scripts/vocal-curve.py` decodes each song once, separates its vocal stem with htdemucs, and measures the stem and the mix every 0.1s.
+The scorer keeps two curves per song in `scripts/voice-curves.json`, one byte per 0.5s patch: the stem level (the loudest 0.1s in the patch) and the mix level.
+A whole-second 12-second window passes only if the stem stays below -50 dBFS from 2 seconds before the window to 2 seconds after it; the scorer picks the passing window with the quietest stem.
+The lead-in stops a vocal tail from leaking into the first seconds; the tail stops a soft vocal onset from leaking into the last ones, because htdemucs registers such an onset about two seconds after a listener hears it.
+The ceiling comes from the September 2026 calibration: across 262 songs, 99.7% of the stretches Whisper was sure were sung peaked above -51 dBFS.
+The extra v5 checks went after the October 2026 listening audit: Gemini listened to 108 windows (24 sung, 12 shipped, 12 faint, and 60 that htdemucs called clean and RoFormer rejected) and heard no voice in 54 of the 60, naming sitar, guitar, violin, flute and synth instead; of the 6 it called voiced, most were onsets in the window's last seconds, which the tail now covers.
+RoFormer rejected 214 corpus songs that way and Whisper's word check another 60, and a third separator (MDX-Net) read -17 to -46 dBFS on windows that shipped, so neither was a reliable second opinion on this music.
+Curves are self-describing (hop, patch length, and either `lo`/`step` in dBFS or a probability `scale`), rounded up so a stored level is never quieter than measured, and kept per Saavn ID and per detector name; the v5 Whisper and RoFormer curves and MusiCNN's `musicnn-voice-dense-v1` curves stay beside them, unused.
 A later change of window length is judged from the stored curves, but any window outside what RoFormer measured then fails until that song is scored again.
 
 ## The clip ladder
@@ -77,11 +71,11 @@ The engine stops a clip at a media time, not after a wall-clock delay: a timer r
 
 ## What verification can and cannot say
 
-Two separators and a speech recogniser agreeing that a window is quiet is strong evidence, not proof.
-Separators can leave a soft voice in the accompaniment, both can miss the same unusual timbre (a heavily processed chorus, a wordless hum), and Whisper cannot hear lyrics a separator removed.
-The design leans on rejection: a window needs both stems below the limit, and any doubt (a missed RoFormer check, an unmeasured patch, a word over an audible stem) rejects it.
-Each entry's `sourceId`, exact start and end, `vocalDb` (the loudest patch of either stem over the lead-in and window) and `limitDb` make every decision auditable against the stored curves and the live recording.
-To audit automatically, separate `[startSec - 3, endSec + 1]` of the HTTPS `downloadUrl` again (htdemucs, RoFormer, or another separator), measure the stem and run a lyric or singing tagger on it; there is no manual review step.
+A separator reading a window as silent is strong evidence, not proof.
+A separator can leave a soft voice in the accompaniment or miss an unusual timbre (a heavily processed chorus, a wordless hum), and it registers a soft onset late, which is what the tail margin is for.
+The design leans on rejection: a window needs the stem under the ceiling over the lead-in, the window and the tail, and nothing else can let it through.
+Each entry's `sourceId`, exact start and end, `vocalDb` (the loudest stem patch over that span) and `limitDb` make every decision auditable against the stored curves and the live recording.
+To audit automatically, separate `[startSec - 2, endSec + 2]` of the HTTPS `downloadUrl` again and measure the stem, or cut the window as a clip and ask an audio-capable model whether any voice occurs in it, as the October 2026 audit did; there is no manual review step.
 
 ## Buffering and the stall guard
 
