@@ -244,7 +244,7 @@ try {
   const meenaId = idOf("Meena");
   heard.host = null;
   await meena.page.reload();
-  await until("Meena back with her songs", () => latest.host.players.find(p => p.id === meenaId)?.online && H()[key1] && H()[key2] && H()["zz meena 000"]);
+  await until("Meena back with her songs", () => latest.host.players.find(p => p.id === meenaId)?.online && H()[key1] && H()["zz meena 000"]);
   if (latest.host.players.length !== 3 || idOf("Meena") !== meenaId) fail("Meena's reload took a new seat");
   // Offline, her seat still counts: a fresh host socket gets her songs.
   await meena.page.goto(url + "seed.html");
@@ -253,7 +253,7 @@ try {
   await check.send({ t: "host", token: (await hostShow(host)).host });
   const offline = check.got.find(m => m.t === "heard")?.songs || {};
   check.ws.close();
-  if (!offline["zz meena 000"] || !offline[key2]) fail("an offline seat's songs left the room");
+  if (!offline["zz meena 000"] || !offline[key1]) fail("an offline seat's songs left the room");
   await meena.page.goto(url + "#room=" + code);
   await until("Meena online", () => latest.host.players.find(p => p.id === meenaId)?.online);
 
@@ -285,13 +285,14 @@ try {
   host2 = await device("host", "host2");
   const code2 = await openRoom(host2);
   for (const p of phones) await join(p, code2);
-  await until("room 2 has the phones' songs", () => heard.host2?.[key1] && heard.host2[key2] && seeds.asha.every(k => heard.host2[k]));
-  await until("song 1 heard by all three seats", () => heard.host2[key1][1] === 3 && heard.host2[key2][1] === 3, 5000);
+  await until("room 2 has the phones' songs", () => heard.host2?.[key1] && seeds.asha.every(k => heard.host2[k]));
+  await until("song 1 heard by all three seats", () => heard.host2[key1][1] === 3, 5000);
+  if (heard.host2[key2]) fail("the skipped song reached room 2 through a phone's history");
   const show2 = await start(host2, 3);
   const q2 = new Set(show2.queue.map(t => songKey(t.title)));
-  const back = [...results1, key2, ...seeds.asha, ...seeds.ravi].filter(k => q2.has(k));
+  const back = [...results1, ...seeds.asha, ...seeds.ravi].filter(k => q2.has(k));
   if (back.length) fail(`room 2 repeats ${back.length} songs: ${back.slice(0, 5)}`);
-  console.log(`room 2 ${code2}: crate of ${show2.queue.length}, none of room 1's ${results1.length + 1} songs or the seeds`);
+  console.log(`room 2 ${code2}: crate of ${show2.queue.length}, none of room 1's ${results1.length} songs or the seeds`);
 
   // Secrecy, over every frame each phone received in both rooms.
   const queue = [...queue1, ...show2.queue];
