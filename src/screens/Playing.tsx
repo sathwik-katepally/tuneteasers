@@ -1,7 +1,7 @@
 import { Lightbulb, Play, Plus, RotateCcw } from "lucide-react";
 import { ClipStrip, useNow } from "../components/ClipStrip";
 import { Equalizer } from "../components/Equalizer";
-import { HINT_PENALTY, SPEED_BONUS_MAX, STEAL_SHARE, hintsFor, ladderFor, pointsNow } from "../lib/config";
+import { HINT_PENALTY, LADDER, SPEED_BONUS_MAX, STEAL_SHARE, hintsFor, pointsNow } from "../lib/config";
 import type { Phase, Track, Turn } from "../types";
 import s from "./Playing.module.css";
 import sh from "./shared.module.css";
@@ -9,32 +9,28 @@ import sh from "./shared.module.css";
 interface Props {
   name: string;
   track: Track;
-  plain: boolean;
   phase: Phase;
   turn: Turn;
   note: string;
   onPlay: (rung: number, replay?: boolean) => void;
   onJudge: (result: "correct" | "wrong") => void;
   onHint: () => void;
+  /* Skip this song: free, for any reason; the same contestant gets the next one. */
   onSkip: () => void;
   /* Someone else is guessing a song passed on to them, for part of its points. */
   stealing: boolean;
   /* Who a pass would go to; absent once it has been round the table. */
   passTo?: string;
   onPass: () => void;
-  /* "Heard it too much": this contestant's skips left, and the skip itself
-     (absent when no song of the same tier is left to replace this one). */
-  skipsLeft: number;
-  onHeardIt?: () => void;
 }
 
 const LINE: Partial<Record<Phase, string>> = { cueing: "Threading the film", playing: "Now playing", listened: "Clip over" };
 
-export function Playing({ name, track, plain, phase, turn, note, onPlay, onJudge, onHint, onSkip, stealing, passTo, onPass, skipsLeft, onHeardIt }: Props){
+export function Playing({ name, track, phase, turn, note, onPlay, onJudge, onHint, onSkip, stealing, passTo, onPass }: Props){
   const now = useNow();
   const playing = phase === "playing";
   const cueing = phase === "cueing";
-  const ladder = ladderFor(plain);
+  const ladder = LADDER;
   const { from, to } = turn.span;
   const left = Math.max(0, Math.ceil(to - from - (now - turn.clipStartedAt) / 1000));
   const worth = pointsNow(ladder, turn.rung, turn.clipEndedAt, turn.hints, now, stealing);
@@ -91,13 +87,9 @@ export function Playing({ name, track, plain, phase, turn, note, onPlay, onJudge
           <button type="button" className={s.link} onClick={onHint} disabled={turn.hints >= hints.length}>
             <Lightbulb size={15} strokeWidth={2.5} /> {turn.hints >= hints.length ? "No more hints" : `Hint ${turn.hints + 1} of ${hints.length}, costs ${HINT_PENALTY}`}
           </button>
-          {note.includes("Skip it") ? <button type="button" className={s.link} onClick={onSkip}>Skip this song</button>
-            : stealing ? passTo && <button type="button" className={s.link} onClick={() => onJudge("wrong")} disabled={cueing}>Nobody knows it</button>
-            : (onHeardIt || !skipsLeft) && (
-              <button type="button" className={`${s.link} ${s.heard}`} onClick={onHeardIt} disabled={!skipsLeft || cueing}>
-                <span className={s.heardText}>Heard it<span className={s.heardMore}> too much</span></span> <span className={s.stub}>{skipsLeft ? `${skipsLeft} left` : "Used"}</span>
-              </button>
-            )}
+          {stealing && !note.includes("Skip it")
+            ? passTo && <button type="button" className={s.link} onClick={() => onJudge("wrong")} disabled={cueing}>Nobody knows it</button>
+            : <button type="button" className={s.link} onClick={onSkip} disabled={cueing}>Skip this song</button>}
         </div>
       </div>
     </div>

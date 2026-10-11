@@ -1,20 +1,20 @@
 /* Plays one full show through the real UI against the real song sources and
    checks the scoring bookkeeping at the end.
    node e2e/game.mjs --profile=phone|desktop --mode=players|teams --mix=bolly|telugu|both
-     --difficulty=easy|medium|hard --rounds=3 [--categories=item,mass] [--reduced] [--no-worker] [--no-saavn] [--shots=dir] [--url=http://...]
+     --difficulty=easy|medium --rounds=3 [--categories=item,mass] [--reduced] [--no-worker] [--no-saavn] [--shots=dir] [--url=http://...]
    --no-worker makes the project's Worker unreachable (songs then come from the mirror).
    --no-saavn makes the Worker and every Saavn mirror unreachable and checks the show came
      from the baked catalog (Easy only: catalog clips have no Music-only windows).
    --categories picks those song categories (corpus tags) and checks every queued song carries one.
-   It also spends the first contestant's "Heard it too much" skip (budget, same
-   tier, title on screen, same contestant, tired cooldown) and forces one dead
-   stream to check the stream-error skip stays free and records nothing. */
+   It also has the first contestant skip a song (title on screen, same
+   contestant, nothing recorded, offered again) and forces one dead stream to
+   check the skip after a stream error moves on the same way and records nothing. */
 import fs from "node:fs";
 import path from "node:path";
 import { serve, open, args, saved, moreSettings } from "./harness.mjs";
 import { displayTitle, songKey } from "../src/lib/utils.js";
 import { SAAVN_BASES } from "../src/lib/constants.js";
-import { CATEGORIES, HINT_PENALTY, SKIPS_PER_PLAYER, SPEED_BONUS_FADE_SECS, SPEED_BONUS_MAX } from "../src/lib/config.ts";
+import { CATEGORIES, HINT_PENALTY, SPEED_BONUS_FADE_SECS, SPEED_BONUS_MAX } from "../src/lib/config.ts";
 
 const A = args({ profile: "phone", mode: "players", mix: "both", difficulty: "medium", rounds: "3" });
 const shotsDir = A.shots && A.shots !== "true" ? A.shots : null;
@@ -35,10 +35,7 @@ async function shot(name, settle = 400){
 }
 const btn = name => page.getByRole("button", { name });
 const fail = msg => { throw new Error(msg); };
-const songHistory = () => page.evaluate(() => ({
-  played: JSON.parse(localStorage.getItem("tt_played") || "{}"),
-  tired: JSON.parse(localStorage.getItem("tt_tired") || "{}"),
-}));
+const songHistory = () => page.evaluate(() => JSON.parse(localStorage.getItem("tt_played") || "{}"));
 const DEAD_HOST = "dead-stream.invalid";
 
 let exit = 0;
@@ -115,7 +112,7 @@ try {
     await shot("04-countdown", 900);
     const know = btn("I know this one");
     await know.waitFor();
-    const heardBtn = btn(/^Heard it too much/);
+    const skipBtn = btn("Skip this song");
     const awaitClip = async () => {
       // A dead stream is real life on Saavn: the game says so and offers Skip.
       for (let tries = 0; ; tries++){
@@ -126,17 +123,15 @@ try {
         ]);
         if (!(await dead.isVisible())) break;
         if (tries === 2) fail("three dead streams in a row");
-        if (await heardBtn.count()) fail("Heard it too much offered next to a stream-error skip");
         deadStreams++;
         await page.evaluate(() => { window.__ttLastMode = null; });
         const before = (await saved(page)).game;
-        await btn("Skip this song").click();
-        await page.getByText("Ears on").waitFor();
+        await skipBtn.click();
+        await page.getByText("Another one").waitFor();
         if (deadSkip && !deadSkip.checked && before.queue[before.trackIdx].stream === deadSkip.track.stream){
           const g = (await saved(page)).game, h = await songHistory(), k = songKey(deadSkip.track.title);
           if (g.trackIdx !== deadSkip.g.trackIdx + 1 || g.turn !== deadSkip.g.turn) fail("error skip moved the turn");
-          if (g.cast[g.turn].skips !== deadSkip.g.cast[g.turn].skips) fail("error skip spent a Heard-it skip");
-          if (h.played[k] !== deadSkip.history.played[k] || h.tired[k]) fail("error skip put the dead song on cooldown");
+          if (h[k] !== deadSkip.history[k]) fail("error skip put the dead song on cooldown");
           deadSkip.checked = true;
         }
       }
@@ -146,37 +141,35 @@ try {
     const mode = await page.evaluate(() => window.__ttLastMode);
     if (!expectMode.includes(mode)) fail(`turn ${turns}: mode ${mode} not in ${expectMode}`);
     await shot("05-playing", 1200);
+    // Playback is requested before the clip is flowing, and the link stays disabled while it loads.
+    const skipReady = () => page.waitForFunction(() => [...document.querySelectorAll("button")].some(b => b.textContent === "Skip this song" && !b.disabled), null, { timeout: 25000 }).catch(() => {});
     if (turns < 2){
-      await heardBtn.waitFor();
-      // Playback is requested before the clip is flowing, and the link stays disabled while it loads.
-      await page.waitForFunction(() => [...document.querySelectorAll("button")].some(b => b.textContent.startsWith("Heard it") && !b.disabled), null, { timeout: 25000 }).catch(() => {});
-      const label = await heardBtn.textContent();
-      if (!label.includes(`${SKIPS_PER_PLAYER} left`) || await heardBtn.isDisabled()) fail(`turn ${turns}: fresh contestant's skip reads "${label}"`);
+      await skipBtn.waitFor();
+      await skipReady();
+      if (await skipBtn.isDisabled()) fail(`turn ${turns}: skip not offered to a fresh contestant`);
     }
     if (turns === 0){
-      // "Heard it too much": the title goes up, a same-tier song comes in, same contestant.
+      // Skip: the title goes up, the next song comes in, same contestant, nothing recorded.
       const before = (await saved(page)).game;
       const track = before.queue[before.trackIdx];
-      heard = { title: track.title, tier: track.tier ?? null, who: before.cast[before.turn].id };
+      heard = { title: track.title, who: before.cast[before.turn].id };
       await page.evaluate(() => { window.__ttLastMode = null; });
-      await heardBtn.click();
+      await skipBtn.click();
       await page.getByText("Skipped", { exact: true }).waitFor();
       if ((await page.getByText(displayTitle(track.title), { exact: true }).count()) !== 1) fail("skipped title not on screen");
       await shot("04b-skipped", 250);
       const g = (await saved(page)).game;
-      const next = g.queue[g.trackIdx];
       if (g.trackIdx !== before.trackIdx + 1) fail("skip did not move to a new song");
       if (g.turn !== before.turn || g.cast[g.turn].id !== heard.who) fail("skip handed the turn on");
-      if ((next.tier ?? null) !== heard.tier) fail(`replacement tier ${next.tier} != skipped ${heard.tier}`);
-      if (g.cast[g.turn].skips !== 1) fail("skip not counted against the contestant");
       if (g.history.length !== before.history.length) fail("skip scored a turn");
       const h = await songHistory(), k = songKey(track.title);
-      if (!(Date.now() - h.tired[k] < 60e3)) fail("skipped song not on the tired cooldown");
-      if (h.played[k]) fail("skipped song also marked played");
+      if (h[k]) fail("skipped song recorded as played");
+      if (await page.evaluate(() => localStorage.getItem("tt_tired"))) fail("skip wrote the old tired history");
       await awaitClip();
-      await heardBtn.waitFor();
-      if (!(await heardBtn.isDisabled()) || !(await heardBtn.textContent()).includes("Used")) fail("second skip still offered");
-      await shot("05d-skip-used", 200);
+      await skipBtn.waitFor();
+      await skipReady();
+      if (await skipBtn.isDisabled()) fail("second skip not offered");
+      await shot("05d-skip-again", 200);
     }
     if (!extended){
       await page.getByText("Guess, or hear more").waitFor({ timeout: 20000 });
@@ -236,7 +229,7 @@ try {
         if (!taken.has("06-steal-handover")) await shot("06-steal-handover", 900);
         await page.getByRole("button", { name: new RegExp(`^(It's with me|We're), ${next.name}|^We're ${next.name}, we'll take it$`) }).click();
         await page.getByText(`${next.name} is stealing`).waitFor();
-        if (await heardBtn.count()) fail("Heard it too much offered to a stealer");
+        if (await skipBtn.count() && !(await page.getByText(/Skip it to try another/).count())) fail("skip offered to a stealer");
         const stolen = (await saved(page)).game;
         if (stolen.trackIdx !== g0.trackIdx || stolen.turn !== g0.turn) fail("a pass moved the song or the turn");
         scorer = next;
@@ -289,7 +282,7 @@ try {
   if (errors.length) fail("page errors: " + errors.join(" | "));
   if (overflow.length) fail("screens scroll at this size: " + overflow.join(", "));
   if (!resumed) fail("home/resume path not exercised");
-  if (!heard) fail("Heard it too much not exercised");
+  if (!heard) fail("skip not exercised");
   if (g.history.some(h => h.song === displayTitle(heard.title))) fail("skipped song was played later in the show");
   if (categories.length){
     const corpus = JSON.parse(fs.readFileSync(new URL("../dist/corpus.json", import.meta.url), "utf8"));

@@ -12,13 +12,12 @@ export interface Track {
   hook: boolean;
   sourceId?: string;
   snip?: { startSec: number; endSec: number; sourceId: string; method: string; indexBuilt: string };
-  tier?: string;
   /* Popularity percentile within the song's language and decade (corpus songs only). */
   score?: number;
   music?: string;
 }
 
-export type Difficulty = "easy" | "medium" | "hard";
+export type Difficulty = "easy" | "medium";
 export type Mode = "players" | "teams";
 export type Mix = "bolly" | "telugu" | "both";
 export type Category = "dance" | "romantic" | "sad" | "item" | "mass";
@@ -42,12 +41,7 @@ export interface RosterEntry {
 
 export interface CastMember extends RosterEntry {
   score: number;
-  /* "Heard it too much" skips used this show. */
-  skips: number;
 }
-
-/* How a song left the stage: heard through to the reveal, or skipped as heard too much. */
-export type PlayKind = "played" | "tired";
 
 export interface HistoryEntry {
   id: string;

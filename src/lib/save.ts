@@ -57,7 +57,7 @@ function parseSettings(raw: Raw): Settings {
     play: oneOf<Play>(raw.play, ["pass", "room"], "pass"),
     mix: oneOf<Mix>(raw.mix, ["bolly", "telugu", "both"], "both"),
     eras: parseEras(raw.eras),
-    difficulty: oneOf<Difficulty>(raw.difficulty, ["easy", "medium", "hard"], "medium"),
+    difficulty: oneOf<Difficulty>(raw.difficulty, ["easy", "medium"], "medium"),
     categories: parseCategories(raw.categories),
     mode: oneOf<Mode>(raw.mode, ["players", "teams"], "players"),
     rounds: (ROUND_OPTIONS as readonly number[]).includes(raw.rounds as number) ? raw.rounds as number : DEFAULT_ROUNDS,
@@ -92,7 +92,7 @@ function parseGame(raw: Raw, mode: Mode, difficulty: Difficulty, mix: Mix): Game
   const q = parseQueue(raw);
   if (!q) return null;
   const cast: CastMember[] = parseRoster(raw.cast, [], "c").map((c, i) => ({
-    ...c, score: Math.max(0, int(obj(arr(raw.cast)[i]).score, 0)), skips: Math.max(0, int(obj(arr(raw.cast)[i]).skips, 0)),
+    ...c, score: Math.max(0, int(obj(arr(raw.cast)[i]).score, 0)),
   }));
   if (!cast.length || raw.finished === true) return null;
   const ids = new Set(cast.map(c => c.id));
@@ -110,7 +110,7 @@ function parseGame(raw: Raw, mode: Mode, difficulty: Difficulty, mix: Mix): Game
     totalSongs: q.queue.length,
     source: sourceOf(raw.source),
     mode: oneOf<Mode>(raw.mode, ["players", "teams"], mode),
-    difficulty: oneOf<Difficulty>(raw.difficulty, ["easy", "medium", "hard"], difficulty),
+    difficulty: oneOf<Difficulty>(raw.difficulty, ["easy", "medium"], difficulty),
     mix: oneOf<Mix>(raw.mix, ["bolly", "telugu", "both"], mix),
     cast,
     history,
@@ -132,7 +132,7 @@ function migrateLegacy(raw: Raw): AppState {
   const q = parseQueue(g);
   if (q && oldPlayers.length){
     const cast = players.map((p, i) => ({
-      ...p, score: Math.max(0, Math.round((parseFloat(String(oldPlayers[i].score)) || 0) * LEGACY_SCORE_SCALE)), skips: 0,
+      ...p, score: Math.max(0, Math.round((parseFloat(String(oldPlayers[i].score)) || 0) * LEGACY_SCORE_SCALE)),
     }));
     const round = Math.max(1, int(g.round, 1));
     game = {

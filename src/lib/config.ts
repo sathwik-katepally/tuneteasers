@@ -2,18 +2,14 @@ import type { Category, Difficulty, Track } from "../types";
 import { SNIP_WINDOW_SEC } from "./constants.js";
 
 /* Every gameplay number lives here: the clip ladder, what each rung pays,
-   the speed bonus, the hint cost, the show length, skips and cooldowns. */
+   the speed bonus, the hint cost, the show length, the popularity cut and
+   the cooldown. */
 
 /* Each rung plays the next stretch of one continuous clip window: the first
-   5s, then "Hear more" carries on for 7s, then 8s. Easy keeps the vocals and
-   plays from the song's hook, so its window is free. Music-only plays only
-   inside a verified vocal-free snip window (SNIP_WINDOW_SEC), so its ladder
-   stops at 12s; give it the third rung again once the index holds enough
-   20s windows (a longer SNIP_WINDOW_SEC and a rescore, docs/audio.md). */
-const CLIP_LADDERS = {
-  full: { segments: [5, 7, 8], points: [100, 60, 30] },
-  inst: { segments: [5, 7], points: [100, 60] },
-} as const;
+   5s, then "Hear more" carries on for 7s. Easy keeps the vocals and plays
+   from the song's hook; Music-only plays only inside a verified vocal-free
+   snip window (SNIP_WINDOW_SEC), which the whole ladder has to fit. */
+const CLIP_LADDER = { segments: [5, 7], points: [100, 60] } as const;
 
 export interface Ladder {
   segments: readonly number[];
@@ -35,12 +31,9 @@ function ladder({ segments, points }: { segments: readonly number[]; points: rea
   return { segments, points, last, start, end, span: (rung, replay) => ({ from: replay ? 0 : start(rung), to: end(rung) }) };
 }
 
-const LADDERS = { full: ladder(CLIP_LADDERS.full), inst: ladder(CLIP_LADDERS.inst) };
-if (LADDERS.inst.end(LADDERS.inst.last) > SNIP_WINDOW_SEC)
-  throw new Error(`music-only clip ladder (${LADDERS.inst.end(LADDERS.inst.last)}s) is longer than a verified snip window (${SNIP_WINDOW_SEC}s)`);
-
-/* plain: the song plays as-is (Easy); otherwise it is Music-only. */
-export const ladderFor = (plain: boolean): Ladder => LADDERS[plain ? "full" : "inst"];
+export const LADDER = ladder(CLIP_LADDER);
+if (LADDER.end(LADDER.last) > SNIP_WINDOW_SEC)
+  throw new Error(`clip ladder (${LADDER.end(LADDER.last)}s) is longer than a verified snip window (${SNIP_WINDOW_SEC}s)`);
 
 export const SPEED_BONUS_MAX = 20;
 export const SPEED_BONUS_FADE_SECS = 13;
@@ -59,15 +52,10 @@ export const DEFAULT_ROUNDS = 5;
 export const MAX_CAST = 8;
 export const MIN_CAST = { players: 1, teams: 2 } as const;
 
-/* "Heard it too much" in pass-the-phone: each contestant's free skips per show.
-   A skip after a stream error is always free. The room's vote share and skip
-   cap are Worker vars (worker/wrangler.jsonc), since the room enforces them. */
-export const SKIPS_PER_PLAYER = 1;
-
-/* How long a song sits out of new crates, by how it last left: played through,
-   or skipped as heard too much. The group's PLAYED_TTL_DAYS (Worker var) must
-   be at least the longest of these, or the group forgets a skip too early. */
-export const COOLDOWN_DAYS = { played: 7, tired: 30 } as const;
+/* How long a song sits out of new crates after it played through to the
+   reveal. A skip records nothing. The group's PLAYED_TTL_DAYS (Worker var)
+   must be at least this, or the group forgets a play too early. */
+export const COOLDOWN_DAYS = 7;
 // Below this many fresh songs (or fewer than the show needs), cooled-down ones come back after them; without it a device that has heard most of a small pool could not start a show until a cooldown ran out.
 export const COOLDOWN_MIN_FRESH = 15;
 
@@ -77,6 +65,14 @@ export const COOLDOWN_MIN_FRESH = 15;
    power 0 is a plain shuffle; at 2 a song at the top comes up about 6 times
    as often as one at the 30th percentile. */
 export const DRAW_WEIGHT = { power: 2, floor: 0.1 } as const;
+
+/* Both levels draw only the songs people know: a corpus song is in when its
+   popularity percentile within its language and decade (score, 0 to 1) is at
+   least this, so the top half. When the chosen languages, eras and categories
+   leave fewer popular songs than the show needs, the crate widens to every
+   song before reporting thin (not in Music-only, whose shortage the user has
+   to see). */
+export const POPULAR_MIN_SCORE = 0.5;
 
 /* Buzz-in rooms (docs/room-mode.md): the host screen plays, phones buzz. */
 export const ROOM_SONGS_PER_ROUND = 4;
@@ -95,8 +91,7 @@ export const LEGACY_SCORE_SCALE = 100;
 
 export const DIFFICULTY: Record<Difficulty, { label: string; sound: "full" | "inst"; note: string }> = {
   easy: { label: "Easy", sound: "full", note: "Big hits with the singing left in. Good for a mixed crowd." },
-  medium: { label: "Medium", sound: "inst", note: "A wider mix of hits, music only. Name it from the tune." },
-  hard: { label: "Hard", sound: "inst", note: "Deeper album cuts, music only. For the ones who know every soundtrack." },
+  medium: { label: "Medium", sound: "inst", note: "The same hits, music only. Name it from the tune." },
 };
 
 /* Song categories on the setup screen, in display order. The ids are the

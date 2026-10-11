@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
-import { DIFFICULTY, SKIPS_PER_PLAYER, hookOffset, ladderFor, pointsNow } from "../lib/config";
+import { DIFFICULTY, LADDER, hookOffset, pointsNow } from "../lib/config";
 import { useClipPlayer } from "../lib/ladder";
-import { cooldownOf, loadHistory, markPlayed, loadBlocked, saveBlocked, normArtist, isBlocked, type Cooldown } from "../lib/storage";
-import { buildCrate, refreshMusicQueue, withSameTierNext } from "../lib/crate";
+import { cooldownOf, loadHistory, markPlayed, loadBlocked, saveBlocked, normArtist, isBlocked } from "../lib/storage";
+import { buildCrate, refreshMusicQueue } from "../lib/crate";
 import { engine, keepAwake } from "../lib/engine.js";
 import { log } from "../lib/log.js";
 import { displayTitle } from "../lib/utils.js";
@@ -24,7 +24,7 @@ export function usePassTheGame(state: AppState, setState: Dispatch<SetStateActio
   const [boardRound, setBoardRound] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  // The title of a song just skipped as heard too much, shown on the next countdown.
+  // The title of a song just skipped, shown on the next countdown.
   const [skipped, setSkipped] = useState("");
   const [blocked, setBlocked] = useState<string[]>(loadBlocked);
   const groupSnap = useGroup();
@@ -32,11 +32,6 @@ export function usePassTheGame(state: AppState, setState: Dispatch<SetStateActio
   // Read by timers: a countdown that ends after Home was tapped must not start a clip.
   const screenNow = useRef(state.screen);
   screenNow.current = state.screen;
-  /* The cooldown the show's crate was built with (this phone's history, with the
-     group's when there is one), so a "Heard it too much" replacement prefers a
-     song nobody is sick of; a resumed show reads this phone's again. */
-  const own = useRef<Cooldown | null>(null);
-  const cooldownNow = () => (own.current ??= cooldownOf(loadHistory()));
 
   useEffect(() => {
     const on = state.screen === "game";
@@ -79,8 +74,8 @@ export function usePassTheGame(state: AppState, setState: Dispatch<SetStateActio
     setLoading(true); setError("");
     const mode = cast ? g?.mode ?? S.mode : S.mode;
     const roster = cast ?? (mode === "teams" ? state.teams : state.players);
-    own.current = (groupSnap.group ? await groupCooldown() : null) ?? cooldownOf(loadHistory());
-    const crate = await buildCrate(S.mix, S.eras, DIFFICULTY[S.difficulty].sound, S.difficulty, S.rounds * roster.length, own.current, S.categories);
+    const cooldown = (groupSnap.group ? await groupCooldown() : null) ?? cooldownOf(loadHistory());
+    const crate = await buildCrate(S.mix, S.eras, DIFFICULTY[S.difficulty].sound, S.rounds * roster.length, cooldown, S.categories);
     setLoading(false);
     if ("error" in crate){
       setError(crate.error === "safe" ? "Not enough verified music-only clips for this show. Try Easy or fewer rounds, or widen your song picks."
@@ -95,7 +90,7 @@ export function usePassTheGame(state: AppState, setState: Dispatch<SetStateActio
       queue: crate.queue, trackIdx: 0, turn: 0, round: 1, totalRounds: S.rounds,
       totalSongs: crate.queue.length, source: crate.source,
       mode, difficulty: S.difficulty, mix: S.mix,
-      cast: roster.map(r => ({ id: r.id, name: r.name, members: [...r.members], score: 0, skips: 0 })),
+      cast: roster.map(r => ({ id: r.id, name: r.name, members: [...r.members], score: 0 })),
       history: [], finished: false,
     };
     resetTurn();
@@ -140,7 +135,7 @@ export function usePassTheGame(state: AppState, setState: Dispatch<SetStateActio
 
   function revealAndScore(result: "correct" | "wrong"){
     if (!g || !who || !guesser || !track || verdict || phase === "reveal") return;
-    const points = result === "correct" ? pointsNow(ladderFor(plain), turn.rung, turn.clipEndedAt, turn.hints, Date.now(), steal !== null) : 0;
+    const points = result === "correct" ? pointsNow(LADDER, turn.rung, turn.clipEndedAt, turn.hints, Date.now(), steal !== null) : 0;
     const scorer = result === "correct" ? guesser : who;
     engine.stop();
     setNote("");
@@ -182,7 +177,7 @@ export function usePassTheGame(state: AppState, setState: Dispatch<SetStateActio
     setTurn(t => ({ ...t, clipEndedAt: Date.now() }));
     setPhase("listened");
   }
-  const stealWorth = () => pointsNow(ladderFor(plain), turn.rung, Date.now(), turn.hints, Date.now(), true);
+  const stealWorth = () => pointsNow(LADDER, turn.rung, Date.now(), turn.hints, Date.now(), true);
 
   function passOn(){
     engine.stop();
@@ -191,10 +186,12 @@ export function usePassTheGame(state: AppState, setState: Dispatch<SetStateActio
     setPhase(toBoard ? "board" : "handover");
   }
 
-  /* After a stream error: free, and the song goes on no cooldown, since it
-     was never heard and may stream fine next time. */
+  /* Skip: free and unlimited, for any reason (heard it to death, a dead
+     stream). The same contestant gets the next queued song, the title goes up
+     on the countdown so the room sees what was skipped, and nothing is
+     recorded: a skipped song was not heard through, so it stays in play. */
   function skipSong(){
-    if (!g || !track) return;
+    if (!g || !track || verdict) return;
     engine.stop();
     const trackIdx = g.trackIdx + 1;
     if (trackIdx >= g.queue.length){
@@ -206,24 +203,8 @@ export function usePassTheGame(state: AppState, setState: Dispatch<SetStateActio
     }
     log("skip", { title: String(track.title).slice(0, 28) });
     primeCurrent(g.queue[trackIdx]);
-    setState(st => ({ ...st, game: { ...g, trackIdx } }));
-    setPhase("countdown");
-  }
-
-  /* "Heard it too much": costs the contestant one of their skips, sits the
-     song out for the longer tired cooldown, and brings a song from the same
-     tier. The title goes up on screen so the room sees what was skipped. */
-  const heardItQueue = g && who && who.skips < SKIPS_PER_PLAYER ? withSameTierNext(g.queue, g.trackIdx, cooldownNow()) : null;
-  function heardIt(){
-    if (!g || !who || !track || !heardItQueue || verdict) return;
-    engine.stop();
-    markPlayed(track.title, "tired");
-    recordPlay(track.title, "tired");
-    log("skip", { tired: true, title: String(track.title).slice(0, 28) });
-    const trackIdx = g.trackIdx + 1;
-    primeCurrent(heardItQueue[trackIdx]);
     setSkipped(displayTitle(track.title));
-    setState(st => ({ ...st, game: { ...g, queue: heardItQueue, trackIdx, cast: g.cast.map((c, i) => (i === g.turn ? { ...c, skips: c.skips + 1 } : c)) } }));
+    setState(st => ({ ...st, game: { ...g, trackIdx } }));
     setPhase("countdown");
   }
 
@@ -273,14 +254,13 @@ export function usePassTheGame(state: AppState, setState: Dispatch<SetStateActio
   const holder = who && who.members.length && g ? who.members[(g.round - 1) % who.members.length] : "";
   const primaryArtist = primaryArtistOf(revealed);
   const artistBlocked = !!primaryArtist && blocked.some(a => normArtist(a) === normArtist(primaryArtist));
-  const skipsLeft = who ? Math.max(0, SKIPS_PER_PLAYER - who.skips) : 0;
 
   return {
     phase, turn, revealed, verdict, steal, boardRound, note, skipped, loading, error, blocked,
-    track, who, guesser, passTo, plain, holder, primaryArtist, artistBlocked, skipsLeft,
+    track, who, guesser, passTo, plain, holder, primaryArtist, artistBlocked,
     startGame, resumeGame, primeCurrent, handed: () => setPhase("countdown"), startWhenShown, shown,
     playClip, hint: () => setTurn(t => ({ ...t, hints: t.hints + 1 })), revealAndScore,
-    passSong, stealHanded, stealWorth, passOn, skipSong, heardIt: heardItQueue ? heardIt : undefined,
+    passSong, stealHanded, stealWorth, passOn, skipSong,
     leaveBoard, blockArtist, unblockArtist, goHome, endGame,
   };
 }

@@ -8,7 +8,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { serve, open, args, moreSettings } from "./harness.mjs";
-import { ladderFor } from "../src/lib/config.ts";
+import { LADDER } from "../src/lib/config.ts";
 
 const A = args({ profile: "phone" });
 const server = await serve();
@@ -57,7 +57,7 @@ try {
 
   await check("the ladder is the one in config", async () => {
     const rungs = await page.locator("ol li").allInnerTexts();
-    const easy = ladderFor(true);
+    const easy = LADDER;
     const want = easy.segments.map((s, i) => `${i ? "+" : ""}${s}s ${easy.points[i]} pts`);
     const got = rungs.map(r => r.replace(/\s+/g, " ").trim().toLowerCase());
     expect(JSON.stringify(got) === JSON.stringify(want.map(w => w.toLowerCase())), `ladder ${JSON.stringify(got)}, config ${JSON.stringify(want)}`);

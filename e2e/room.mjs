@@ -6,28 +6,25 @@
    - joining by code (typed) and by the #room link,
    - a buzz race is answered in the order buzzes reached the room,
    - a wrong answer passes to the next buzzer, a right one scores the rung,
-   - nobody knowing carries the clip ladder on (manual and automatic), on
-     the difficulty's own ladder (Music-only has one rung fewer),
+   - nobody knowing carries the clip ladder on (manual and automatic),
    - the answer timer runs out, and everyone locked out reveals the song,
    - a phone that reloads mid-show keeps its seat and score,
    - the podium matches the room, and every phone's final place does too,
-   - "Heard it too much": one vote of three does not skip, a majority does,
-     the host can skip on its own, the room stops at its skip cap, votes
-     close once someone buzzes, and a skipped song reaches a phone only as
-     its song key, after the skip,
+   - skips: two votes of three do not skip, the third does, the host can
+     skip on its own as often as it likes, votes close once someone buzzes,
+     and a skipped song never reaches a phone and lands in no history,
    - no phone ever receives the title before its reveal, or any stream URL,
      or the merged song history the room keeps for the host.
-   node e2e/room.mjs [--host=phone] [--difficulty=easy|medium|hard] [--categories=item,mass] [--phone-engine=chromium] [--worker=https://...] [--shots=dir] */
+   node e2e/room.mjs [--host=phone] [--difficulty=easy|medium] [--categories=item,mass] [--phone-engine=chromium] [--worker=https://...] [--shots=dir] */
 import fs from "node:fs";
 import path from "node:path";
 import { chromium, webkit, devices } from "playwright";
 import { serve, args, localWorker, silence, skipLanding, moreSettings, wireWorker, MUTE_ARGS } from "./harness.mjs";
 import { displayTitle } from "../src/lib/utils.js";
-import { CATEGORIES, DIFFICULTY, ROOM_ANSWER_SECS, ladderFor } from "../src/lib/config.ts";
+import { CATEGORIES, DIFFICULTY, LADDER, ROOM_ANSWER_SECS } from "../src/lib/config.ts";
 import { songKey } from "../src/lib/utils.js";
 
 const A = args({ difficulty: "easy" });
-const LADDER = ladderFor(DIFFICULTY[A.difficulty]?.sound === "full");
 const CLIP_POINTS = LADDER.points;
 const categories = A.categories ? A.categories.split(",") : [];
 const shotsDir = A.shots && A.shots !== "true" ? A.shots : null;
@@ -156,10 +153,10 @@ async function answer(p, text, { pick = true } = {}){
 let deadStreams = 0;
 const live = (n, rung) => until(`song ${n} live at rung ${rung}`, async () => {
   if (song()?.n === n && song().state === "live" && song().rung === rung) return true;
-  const skip = host.page.getByRole("button", { name: "Skip this song" });
-  if (rung === 0 && await skip.isVisible().catch(() => false)){
+  const dead = host.page.getByText(/won't stream right now|isn't available/);
+  if (rung === 0 && await dead.isVisible().catch(() => false)){
     if (++deadStreams > 2) fail("three dead streams");
-    await skip.click({ timeout: 1500 }).catch(() => {});
+    await host.page.getByRole("button", { name: "Skip this song" }).click({ timeout: 1500 }).catch(() => {});
   }
   return false;
 }, 45000);
@@ -473,21 +470,21 @@ try {
   await host.page.getByText("After round 1").waitFor();
   await shot(host, "host-09-board");
 
-  // Song 5: "Heard it too much". One vote of three is not enough, two are;
-  // then the host skips on its own until the room's cap is used up.
+  // Song 5: skips. Two votes of three are not enough, the third is; then the
+  // host skips on its own, twice, with no cap in the way.
   await nextSong(5);
   await live(5, 0);
-  const voteBtn = p => p.page.getByRole("button", { name: /^Heard it too much|^Voted to skip/ });
-  const hostSkip = host.page.getByRole("button", { name: /^Heard it too much/ });
+  const voteBtn = p => p.page.getByRole("button", { name: /^Skip this song|^Voted to skip/ });
+  const hostSkip = host.page.getByRole("button", { name: "Skip this song" });
   const skipTo = async (used, before) => {
-    await until(`skip ${used}`, () => hostState().skips.used === used);
+    await until(`skip ${used}`, () => hostState().skips === used);
     await host.page.getByText("Skipped", { exact: true }).waitFor({ timeout: 10000 });
     if ((await host.page.getByText(before.title, { exact: true }).count()) !== 1) fail("skipped title not on the host screen");
     const after = await hostShow();
     if (after.idx !== before.idx + 1 || after.skipsSeen !== used) fail(`skip ${used} moved the host from ${before.idx} to ${after.idx}`);
-    if ((after.queue[after.idx].tier ?? null) !== before.tier) fail(`skip ${used}: replacement tier ${after.queue[after.idx].tier} != ${before.tier}`);
-    const tired = await host.page.evaluate(() => JSON.parse(localStorage.getItem("tt_tired") || "{}"));
-    if (!(Date.now() - tired[songKey(before.title)] < 60e3)) fail(`skip ${used}: song not on the tired cooldown`);
+    const played = await host.page.evaluate(() => JSON.parse(localStorage.getItem("tt_played") || "{}"));
+    if (played[songKey(before.title)]) fail(`skip ${used}: skipped song recorded as played on the host`);
+    if (await host.page.evaluate(() => localStorage.getItem("tt_tired"))) fail(`skip ${used}: skip wrote the old tired history`);
     if (song().n !== 5 || hostState().results.length !== 4) fail("a skip changed the song number or the results");
     await live(5, 0);
   };
@@ -501,20 +498,22 @@ try {
     await sleep(300);
     return { got, send: async m => { got.length = 0; ws.send(JSON.stringify(m)); await sleep(300); return got.find(x => x.t === "error")?.code; }, close: () => ws.close() };
   };
-  const cued = async () => { const s = await hostShow(); const t = s.queue[s.idx]; return { idx: s.idx, title: displayTitle(t.title), tier: t.tier ?? null }; };
-  if (hostState().skips.used !== 0 || hostState().skips.max < 2) fail(`unexpected skip budget ${JSON.stringify(hostState().skips)}`);
+  const cued = async () => { const s = await hostShow(); const t = s.queue[s.idx]; return { idx: s.idx, title: displayTitle(t.title) }; };
+  if (hostState().skips !== 0) fail(`unexpected skip count ${hostState().skips}`);
   let before = await cued();
   const firstCue = song().cue;
   await voteBtn(asha).click();
   await until("Asha's vote", () => song().votes.length === 1);
+  await voteBtn(ravi).click();
+  await until("Ravi's vote", () => song().votes.length === 2);
   await sleep(600);
-  if (song().state !== "live" || hostState().skips.used !== 0) fail("one vote of three skipped the song");
-  await host.page.getByText(/^Skip votes 1 of 2/).waitFor();
-  await asha.page.getByRole("button", { name: "Voted to skip · 1 of 2" }).waitFor();
-  await ravi.page.getByRole("button", { name: "Heard it too much · 1 of 2" }).waitFor();
+  if (song().state !== "live" || hostState().skips !== 0) fail("two votes of three skipped the song");
+  await host.page.getByText(/^Skip votes 2 of 3/).waitFor();
+  await asha.page.getByRole("button", { name: "Voted to skip · 2 of 3" }).waitFor();
+  await meena.page.getByRole("button", { name: "Skip this song · 2 of 3" }).waitFor();
   await shot(host, "host-12-skip-vote");
   await shot(asha, "phone-12-voted");
-  await voteBtn(ravi).click();
+  await voteBtn(meena).click();
   await skipTo(1, before);
   if (song().votes.length) fail("votes carried over to the new song");
   if (song().cue === firstCue) fail("the replacement kept the skipped song's cue");
@@ -524,25 +523,17 @@ try {
     const code1 = await h.send({ t: "skip", cue: firstCue });
     h.close();
     if (code1 !== "stale") fail(`a late skip for the old cue answered ${code1}`);
-    if (hostState().skips.used !== 1 || song().state !== "live") fail("a late skip hit the replacement");
+    if (hostState().skips !== 1 || song().state !== "live") fail("a late skip hit the replacement");
   }
-  for (let used = 2; used <= hostState().skips.max; used++){
+  for (let used = 2; used <= 3; used++){
     before = await cued();
     await hostSkip.click();
     await skipTo(used, before);
   }
   await hostSkip.waitFor();
-  if (!(await hostSkip.isDisabled())) fail("host can skip past the cap");
-  if (await voteBtn(meena).count()) fail("phones can vote past the cap");
-  await shot(host, "host-13-skips-used");
-  // The room itself holds the cap, whatever a client sends.
-  {
-    const h = await rawHost();
-    const capped = await h.send({ t: "skip", cue: song().cue });
-    h.close();
-    if (capped !== "no-skips") fail(`a skip past the cap answered ${capped}`);
-    if (hostState().skips.used !== hostState().skips.max) fail("a refused skip changed the count");
-  }
+  if (await hostSkip.isDisabled()) fail("host skip gone after three skips");
+  if (!(await voteBtn(meena).count())) fail("phones cannot vote after three skips");
+  await shot(host, "host-13-skips");
 
   // The rest of the show: one quick right answer per song, alternating.
   const reloadHost = async () => {
@@ -623,7 +614,7 @@ try {
       if (m.t === "heard") fail(`${p.label} received the room's song history`);
       if (m.t === "state"){
         for (const r of m.results || []) shown.add(songKey(r.title));
-        for (const x of m.skipped || []) shown.add(x.key);
+        if (m.skipped) fail(`${p.label} received a skipped-song list`);
         if (m.song?.answer){
           if (m.song.state !== "revealed") fail(`${p.label} got the answer to song ${m.song.n} before the reveal`);
           shown.add(songKey(m.song.answer.title));
@@ -643,7 +634,7 @@ try {
   if (hostState().players.some(p => p.score !== 0)) fail("scores not reset for the next show");
   await asha.page.locator('button[aria-label="Buzz"]').waitFor({ timeout: 15000 });
   // A new show has its skips back; votes close for everyone once someone buzzes.
-  if (hostState().skips.used !== 0) fail("skips not reset for the next show");
+  if (hostState().skips !== 0) fail("skips not reset for the next show");
   await voteBtn(asha).waitFor({ timeout: 10000 });
   await buzz(meena);
   await voteBtn(asha).waitFor({ state: "detached", timeout: 5000 });

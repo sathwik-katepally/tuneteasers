@@ -1,20 +1,20 @@
 # Song loading
 
-`buildCrate(mix, eras, sound, difficulty, minSongs, cooldown, categories)` in `src/lib/crate.ts` assembles the game queue; it returns `{ queue, source }` or `{ error: "load" | "thin" | "safe" }`.
-`difficulty` is `settings.difficulty`, one of `"easy" | "medium" | "hard"`; `buildCrate` also accepts `"mixed"` (every tier) as its own default, which no screen sends.
-It maps to corpus tiers through `DIFFICULTY_TIERS` in `src/lib/constants.js` (easy → easy; medium → easy + medium; hard → medium + hard; mixed → all); when the mapped tiers hold fewer than `minSongs` songs for the chosen languages and eras the crate widens to all tiers before reporting `thin`.
+`buildCrate(mix, eras, sound, minSongs, cooldown, categories, heardBy)` in `src/lib/crate.ts` assembles the game queue; it returns `{ queue, source }` or `{ error: "load" | "thin" | "safe" }`.
+The level (`settings.difficulty`, `"easy" | "medium"`) picks only the `sound`: both levels draw the same songs.
+The corpus tier keeps the popular songs, those whose `score` (the popularity percentile within the song's language and decade) is at least `POPULAR_MIN_SCORE` (0.5, `src/lib/config.ts`), so the top half; when they hold fewer than `minSongs` songs for the chosen languages, eras and categories the crate widens to every song before reporting `thin` (not in Music-only, where the shortage shows as `safe`).
 `minSongs` is the caller's rounds times contestants (the code default is 10).
-The uncurated fallback tiers carry no tier and ignore it.
-`categories` is a list of corpus tags (`dance`, `romantic`, `sad`, `item`, `mass`; `[]` means every song): a corpus song passes when it carries any of them, and the difficulty widening above happens inside that set.
+The uncurated fallback tiers carry no score and ignore the cut.
+`categories` is a list of corpus tags (`dance`, `romantic`, `sad`, `item`, `mass`; `[]` means every song): a corpus song passes when it carries any of them, and the widening above happens inside that set.
 The fallback tiers carry no tags, so with categories set they never run: an unreachable corpus returns `load` and too few tagged songs return `thin` (or `safe` in Music-only).
 `categoryCounts` in the same file counts each category's songs the way the corpus tier picks them, for the setup screen's chips.
 
 ## Source tiers
 
 1. **Curated corpus** (`loadFromCorpus`) - `public/corpus.json`, the verified film-song pool built offline by `scripts/build-corpus.mjs` (below).
-   The crate filters it by language, era, difficulty tier and the device blocklist, orders fresh songs before ones still cooling down, draws `CORPUS_DRAW` candidates and resolves them to streams with one batch request per `CORPUS_BATCH` ids (`GET /songs?ids=`, served by our Worker and by any saavn.dev-compatible mirror in `SAAVN_BASES`).
+   The crate filters it by language, era, the popularity cut and the device blocklist, orders fresh songs before ones still cooling down, draws `CORPUS_DRAW` candidates and resolves them to streams with one batch request per `CORPUS_BATCH` ids (`GET /songs?ids=`, served by our Worker and by any saavn.dev-compatible mirror in `SAAVN_BASES`).
    The draw is weighted by popularity (`DRAW_WEIGHT` in `src/lib/config.ts`): a song's chance is proportional to `(score + floor) ^ power`, with `score` its percentile within its language and decade, so the hits of a tier come up several times as often as its long tail without ever leaving it out; the final queue order is drawn the same way (`weightedShuffle`), and songs without a score (the fallback tiers) draw as if they sat in the middle.
-   Tracks carry `album` = film, `year` = the film's verified year, `tier` and `score`.
+   Tracks carry `album` = film, `year` = the film's verified year and `score`.
    If the corpus file is missing or the ids cannot be resolved (worker and mirror down), the tiers below take over; if the corpus loads but fewer than `minSongs` songs match the filters, the crate returns `{ error: "thin" }` rather than playing unverified songs.
 2. **Saavn search** (`loadFromSaavn`) - JioSaavn search APIs listed in `SAAVN_BASES`; full songs, so snippets start at the intro.
    The first base is our own Cloudflare Worker (`worker/`, see docs/testing-and-deploy.md); the public nandanvarma mirror follows as a fallback.
@@ -49,6 +49,7 @@ The rule is film songs only, with the film's real release year:
    Everything else is rejected: singles, devotional and indie releases, dubs whose original film is not found, remixes, pre-2000 songs, and songs under the play-count floor.
 5. **Difficulty** - within each language x decade (raw counts are not comparable: Hindi 2010s median ≈ 19M plays vs 2000s ≈ 6M) the score blends the play-count percentile (weight 0.8) with the editorial-playlist membership percentile (0.2).
    The top 30% by score is `easy`, the next 40% `medium`, the rest `hard` (cut-offs in the config, baked into the file's `tiers`).
+   The client reads `score` and ignores `tier` (the popularity cut at the top of this doc).
 
 6. **Categories** - see below.
 
@@ -98,10 +99,11 @@ On resume, the remaining queue is checked against the current index again; stale
 
 ## Song cooldown (per device, or per group)
 
-A song's history has two kinds, each a localStorage map of normalized title → timestamp: `tt_played` for songs heard through to the reveal, and `tt_tired` for songs skipped as "Heard it too much" (docs/architecture.md, Skips).
-Each kind sits out for its own `COOLDOWN_DAYS` in `src/lib/config.ts`: 7 days after a play, 30 after a tired skip, because a song someone is sick of should stay away longer.
-Entries older than the longest cooldown are pruned; a stream-error skip records nothing.
-`cooldownOf(...histories)` in `src/lib/storage.ts` turns histories (`{ played, tired }`, this device's from `loadHistory`, a group's, later a person's) into one map of song key → the time the song may come back, latest wins, and that map is `buildCrate`'s `cooldown`.
+A song's history is a localStorage map of normalized title → timestamp, `tt_played`, for songs heard through to the reveal; a skip records nothing (docs/architecture.md, Skips).
+A played song sits out for `COOLDOWN_DAYS` (7) in `src/lib/config.ts`.
+Entries older than the cooldown are pruned.
+A `tt_tired` map from the old "Heard it too much" skip may still sit in localStorage; nothing reads it.
+`cooldownOf(...histories)` in `src/lib/storage.ts` turns histories (song key → last played, this device's from `loadHistory`, a group's, later a person's) into one map of song key → the time the song may come back, latest wins, and that map is `buildCrate`'s `cooldown`.
 In a group, `startGame` passes the group's history merged with the device's (`groupCooldown`), so songs any phone in the group played or skipped sit out too; see docs/group-sync.md.
 A buzz-in host also merges in every seated phone's history, which each phone brings to its seat, and passes `heardBy` (song key → how many of the people present heard it); see "No repeats" in docs/room-mode.md.
 Songs still cooling down are excluded from the crate when at least `COOLDOWN_MIN_FRESH` (15, in `src/lib/config.ts`) fresh songs remain and they cover the show (rounds x contestants).

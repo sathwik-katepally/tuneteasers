@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { DIFFICULTY, ROOM_ANSWER_SECS, ROOM_GRACE_SECS, ROOM_SONGS_PER_ROUND, ROOM_WRONG_BEAT_MS,
-  hookOffset, ladderFor } from "../lib/config";
+import { DIFFICULTY, LADDER, ROOM_ANSWER_SECS, ROOM_GRACE_SECS, ROOM_SONGS_PER_ROUND, ROOM_WRONG_BEAT_MS, hookOffset } from "../lib/config";
 import { nearTitles } from "../lib/answer.js";
 import { useClipPlayer } from "../lib/ladder";
-import { answerTitles, buildCrate, withFreshAt, withSameTierNext } from "../lib/crate";
+import { answerTitles, buildCrate, withFreshAt } from "../lib/crate";
 import { engine, keepAwake } from "../lib/engine.js";
 import { cooldownOf, loadHistory, markPlayed, type Cooldown } from "../lib/storage";
 import { displayTitle } from "../lib/utils.js";
@@ -23,9 +22,8 @@ import type { GameState, Mix, Settings, Track, Verdict } from "../types";
 type Phase = "opening" | "lobby" | "loading" | "countdown" | "song" | "reveal" | "board" | "done" | "failed";
 interface Revealed { track: Track; verdict: Verdict }
 
-/* Refusals that leave the show stuck get a note on the big screen. A refused
-   skip or a clip beaten by a buzz does not: the note also offers the free
-   "Skip this song", which would read wrong right after a skip-cap refusal. */
+/* Refusals that leave the show stuck get a note on the big screen. A late
+   skip or a clip beaten by a buzz does not: the show carries on by itself. */
 const STUCK = new Set(["bad-song-number", "bad-song", "not-started", "already-started", "no-players"]);
 
 /* The host screen of a buzz-in room: the only device that plays audio. It
@@ -47,7 +45,7 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
   const msLeft = useMsLeft(view);
   const track = show ? show.queue[show.idx] ?? null : null;
   const plain = show?.plain ?? DIFFICULTY[settings.difficulty].sound === "full";
-  const ladder = ladderFor(plain);
+  const ladder = LADDER;
   const player = useClipPlayer({ track, plain,
     setStatus: s => setAudio(a => (s === "playing" && a === "blocked" ? a : s)),
     onStarted: rung => room.send({ t: "clip", rung, points: ladder.points[rung] }),
@@ -137,7 +135,7 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
     setError("");
     own.current = (await groupCooldown()) ?? cooldownOf(loadHistory());
     const { cooldown, heardBy } = withRoomHeard(own.current, live.current.heard);
-    const crate = await buildCrate(show.mix, show.eras, show.plain ? "full" : "inst", show.difficulty, show.total, cooldown, show.categories, heardBy);
+    const crate = await buildCrate(show.mix, show.eras, show.plain ? "full" : "inst", show.total, cooldown, show.categories, heardBy);
     if ("error" in crate){
       setError(crate.error === "safe" ? "Not enough verified music-only clips for this show. Go back and pick Easy or fewer rounds."
         : crate.error === "thin" ? `Not enough songs match your picks. Go back and pick more eras${show.categories.length ? " or another kind of song" : ""}.`
@@ -316,12 +314,12 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
     toCountdown();
   }
 
-  /* After a stream error: free, and no cooldown for a song nobody heard.
-     The room takes song n again with the next track. */
+  /* After a stream error: the room never heard of this cue, so song n is
+     cued again with the next track without asking it. */
   function skipSong(){
     if (!show || !track) return;
     engine.stop();
-    nextTrack(show);
+    nextTrack(show, displayTitle(track.title));
   }
   function nextTrack(s: HostShow, skippedTitle = ""){
     const next = freshCue({ ...s, idx: s.idx + 1 });
@@ -335,21 +333,18 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
     toCountdown(skippedTitle);
   }
 
-  /* "Heard it too much", decided by the room (a majority vote, or the host's
-     own tap): the song sits out for the tired cooldown and song n is cued
-     again with a song of the same tier when one is left. Acting on the
-     room's skip count, not the tap, makes each skip happen exactly once,
-     through a reload too. */
+  /* A skip decided by the room (every phone voted, or the host's own tap):
+     song n is cued again with the next track, and nothing is recorded.
+     Acting on the room's skip count, not the tap, makes each skip happen
+     exactly once, through a reload too. */
   useEffect(() => {
     const { view: v, show: sh, track: t } = live.current;
     if (!v || !sh?.started || !t || (phase !== "song" && phase !== "countdown")) return;
-    if (v.skips.used <= sh.skipsSeen || v.song?.state !== "skipped" || v.song.n !== sh.songNo + 1) return;
+    if (v.skips <= sh.skipsSeen || v.song?.state !== "skipped" || v.song.n !== sh.songNo + 1) return;
     engine.stop();
-    markPlayed(t.title, "tired");
-    recordPlay(t.title, "tired");
-    log("skip", { tired: true, room: true, title: String(t.title).slice(0, 28) });
-    nextTrack({ ...sh, queue: withSameTierNext(sh.queue, sh.idx, cooldownNow()) ?? sh.queue, skipsSeen: v.skips.used }, displayTitle(t.title));
-  }, [view?.skips.used, view?.song?.state, phase]); // eslint-disable-line react-hooks/exhaustive-deps
+    log("skip", { room: true, title: String(t.title).slice(0, 28) });
+    nextTrack({ ...sh, skipsSeen: v.skips }, displayTitle(t.title));
+  }, [view?.skips, view?.song?.state, phase]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function leaveBoard(){
     if (!show) return;
@@ -415,7 +410,7 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
         <HostPlaying view={view} song={view.song?.n === show.songNo + 1 ? view.song : null} songNo={show.songNo + 1} total={show.total} ladder={ladder} clip={clip} audio={audio}
           graceUntil={graceUntil} msLeft={msLeft} note={note} wrong={wrong} link={room.link}
           onPlay={() => playClip(clip.rung, true)} onMore={more} onReveal={giveUp} onSkip={skipSong}
-          onHeardIt={cue => room.send({ t: "skip", cue })} />
+          onRoomSkip={cue => room.send({ t: "skip", cue })} />
       );
   }
   const inShow = !!show?.started && phase !== "lobby" && phase !== "failed" && phase !== "opening";
@@ -437,7 +432,7 @@ function asGame(view: RoomView | null, show: HostShow | null): GameState | null 
     id: view.code, queue: [], trackIdx: show.idx, turn: 0, round: round(Math.max(1, show.songNo)),
     totalRounds: Math.ceil(show.total / show.perRound), totalSongs: show.total, source: "room",
     mode: "players", difficulty: show.difficulty, mix: show.mix,
-    cast: view.players.map(p => ({ id: p.id, name: p.name, members: [], score: p.score, skips: 0 })),
+    cast: view.players.map(p => ({ id: p.id, name: p.name, members: [], score: p.score })),
     history: view.results.map(r => ({ id: r.winner ?? "", song: displayTitle(r.title), points: r.points, round: round(r.n) })),
     finished: view.phase === "over",
   };

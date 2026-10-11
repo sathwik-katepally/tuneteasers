@@ -21,13 +21,13 @@ export function CategoryPicker({ settings: S, need, blocked, onChange }: Props){
   const [loaded, setLoaded] = useState<{ key: string; counts: Counts | null } | null>(null);
   const sound = DIFFICULTY[S.difficulty].sound;
   const erasKey = S.eras.join(",");
-  const key = JSON.stringify([S.mix, erasKey, sound, S.difficulty, need, blocked]);
+  const key = JSON.stringify([S.mix, erasKey, sound, need, blocked]);
   const counts = loaded?.key === key ? loaded.counts : undefined;
 
   useEffect(() => {
     let live = true;
     const timer = setTimeout(() => {
-      categoryCounts(S.mix, S.eras, sound, S.difficulty, need, CATEGORIES.map(c => c.id)).then(c => { if (live) setLoaded({ key, counts: c }); });
+      categoryCounts(S.mix, S.eras, sound, need, CATEGORIES.map(c => c.id)).then(c => { if (live) setLoaded({ key, counts: c }); });
     }, 200);
     return () => { live = false; clearTimeout(timer); };
   }, [key]); // eslint-disable-line react-hooks/exhaustive-deps

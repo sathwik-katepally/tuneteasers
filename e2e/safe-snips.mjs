@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import { serve, open, args, saved, moreSettings } from "./harness.mjs";
-import { ladderFor } from "../src/lib/config.ts";
+import { LADDER } from "../src/lib/config.ts";
 import { SNIP_ACCEPTED, SNIP_INDEX_V, SNIP_LEGACY, SNIP_WINDOW_SEC } from "../src/lib/constants.js";
 
 // The index the build serves: the committed one, or the v5 fixture copied in
@@ -31,7 +31,7 @@ async function ladder(page, difficulty){
   await page.waitForFunction(() => window.__ttLastMode, null, { timeout:30000 });
   const mode = await page.evaluate(() => window.__ttLastMode);
   if (mode !== (difficulty === "Easy" ? "plain" : "snip")) fail(`${difficulty}: played ${mode}`);
-  const L = ladderFor(difficulty === "Easy");
+  const L = LADDER;
   for (const sec of L.segments.slice(1)){
     await page.getByText("Guess, or hear more").waitFor({ timeout:30000 });
     await page.getByRole("button", { name:`Hear ${sec}s more` }).click();
@@ -95,7 +95,7 @@ async function run(profile){
     };
   });
   try {
-    for (const difficulty of ["Easy", "Medium", "Hard"]){
+    for (const difficulty of ["Easy", "Medium"]){
       await setup(page, difficulty);
       await ladder(page, difficulty);
       console.log(`PASS ${profile} ${difficulty} max rung and replay`);

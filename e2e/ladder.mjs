@@ -16,12 +16,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { serve, open, args, saved, moreSettings } from "./harness.mjs";
-import { ladderFor } from "../src/lib/config.ts";
+import { LADDER } from "../src/lib/config.ts";
 import { SNIP_WINDOW_SEC } from "../src/lib/constants.js";
 
 const A = args({ profile: "desktop", difficulty: "easy", mix: "both", "window-at": "", log: "", shots: "" });
 const music = A.difficulty !== "easy";
-const L = ladderFor(!music);
+const L = LADDER;
 const FULL = L.end(L.last);
 // s of media time. Easy has no audio-clock gate, so its stop rides a JS timer
 // that a busy machine can delay; seams are held tighter below.

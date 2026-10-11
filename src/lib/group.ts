@@ -8,7 +8,7 @@ import { useSyncExternalStore } from "react";
 import { WORKER_API } from "./constants.js";
 import { songKey } from "./utils.js";
 import { HISTORY_MS, cooldownOf, loadHistory, type History } from "./storage";
-import type { GameState, PlayKind } from "../types";
+import type { GameState } from "../types";
 
 export interface Group {
   id: string;
@@ -34,7 +34,7 @@ export interface GroupResult {
   cast: ResultCast[];
 }
 
-type Round = { id: string; key: string; kind?: PlayKind };
+type Round = { id: string; key: string };
 interface Outbox { groupId: string; rounds: Round[]; results: GroupResult[] }
 type SyncState = "idle" | "syncing" | "offline" | "revoked";
 export interface GroupSnapshot { group: Group | null; pending: number; sync: SyncState }
@@ -137,19 +137,16 @@ async function call<T>(path: string, token: string | null, init: { method?: stri
   return body as T;
 }
 
-/* The newest IMPORT_MAX songs of this phone's history, across both kinds. */
+/* The newest IMPORT_MAX songs of this phone's history. */
 function localHistory(): History {
   const since = Date.now() - HISTORY_MS;
-  const h = loadHistory();
-  const entries = (["played", "tired"] as const).flatMap(kind => Object.entries(h[kind]).map(([k, v]) => ({ kind, k, v })))
-    .filter(e => e.k && e.v > since)
-    .sort((a, b) => b.v - a.v)
+  const entries = Object.entries(loadHistory())
+    .filter(([k, v]) => k && v > since)
+    .sort((a, b) => b[1] - a[1])
     .slice(0, IMPORT_MAX);
-  const out: History = { played: {}, tired: {} };
-  for (const e of entries) out[e.kind][e.k] = e.v;
-  return out;
+  return Object.fromEntries(entries);
 }
-export const localHistoryCount = () => { const h = localHistory(); return new Set([...Object.keys(h.played), ...Object.keys(h.tired)]).size; };
+export const localHistoryCount = () => Object.keys(localHistory()).length;
 
 function adopt(group: Group){
   lsSet(LS_GROUP, group);
@@ -158,8 +155,8 @@ function adopt(group: Group){
 }
 
 async function importHistory(invite: string){
-  const { played, tired } = localHistory();
-  if (Object.keys(played).length || Object.keys(tired).length) await call("/group/import", invite, { body: { played, tired } });
+  const played = localHistory();
+  if (Object.keys(played).length) await call("/group/import", invite, { body: { played } });
 }
 
 export async function createGroup(name: string, withHistory: boolean){
@@ -205,9 +202,9 @@ function enqueue(add: (o: Outbox) => void){
   void flush();
 }
 
-export function recordPlay(title: string, kind: PlayKind = "played"){
+export function recordPlay(title: string){
   const key = songKey(title);
-  if (key) enqueue(o => { o.rounds.push({ id: randomId(), key, kind }); });
+  if (key) enqueue(o => { o.rounds.push({ id: randomId(), key }); });
 }
 
 export function recordResult(g: GameState){
@@ -291,9 +288,9 @@ async function groupHistory(): Promise<History | null> {
   // earlier failure must not stop this read, or the group is never asked again.
   if ((await flush()) === "failed" || snap.sync === "revoked") return null;
   try {
-    const r = await call<Partial<History>>("/group/played", g.invite);
+    const r = await call<{ played?: History }>("/group/played", g.invite);
     if (snap.group?.id === g.id && snap.sync !== "syncing") emit({ sync: "idle" });
-    return { played: r.played || {}, tired: r.tired || {} };
+    return r.played || {};
   } catch (e){
     if (snap.group?.id === g.id){
       const status = e instanceof GroupError ? e.status : 0;
