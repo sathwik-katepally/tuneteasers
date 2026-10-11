@@ -44,20 +44,18 @@ Autocomplete offers every known title in the show's languages; if she is right s
 5. When a clip ends with nobody buzzing, buzzing stays open for `ROOM_GRACE_SECS`, then the next rung plays. The host can also tap "Hear more" or "Reveal it".
 6. If every player is locked out the song is revealed straight away.
 
-## Skipping a song ("Heard it too much")
+## Skipping a song
 
-Once a song's clip is playing (a cued song hasn't been heard yet), and until anyone buzzes, each phone shows "Heard it too much".
-A tap sends `vote`; the room counts votes itself and skips once more than `ROOM_SKIP_VOTE_SHARE` (0.5) of the seated players have voted, so 2 of 3 or 3 of 4.
-Seated means every player with a seat, online or not; the host can always skip on its own ("Heard it too much" under the song, which sends `skip`).
-A show has `ROOM_SKIPS_PER_SHOW` (3) skips in all, votes and host skips together; "Same crowd again" gives them back.
-Both numbers are Worker vars in `worker/wrangler.jsonc`, because the room is what enforces them; the view carries `skips { used, max }` and each song's `votes` and `votesNeeded` for the screens.
+Once a song's clip is playing (a cued song hasn't been heard yet), and until anyone buzzes, each phone shows "Skip this song".
+A tap sends `vote`; the room counts votes itself and skips once every seated player who is online has voted (`votesNeeded`, never below one), so a phone that dropped off cannot hold the song for the rest.
+The host can always skip on its own ("Skip this song" under the song, which sends `skip`).
+Skips are free and unlimited; the view carries `skips` (how many this show, for the host) and each song's `votes` and `votesNeeded` for the screens.
 
-Every `song` the room accepts gets a new `cue` id, a re-cue of the same `n` included, and `vote` and `skip` name the cue they are for; one that arrives after a re-cue is stale and ignored, so a late vote or a replayed skip can't skip the replacement or spend the cap.
-A skip puts the song in state `skipped` without a result, a reveal or its answer; phones only get its song key afterwards, in `skipped`, for their own history (below), and the title never.
-The host acts on the room's skip count rather than on a tap, so each skip happens exactly once, a reload included (`skipsSeen` in the saved show): it stops the audio, records the song as `tired` for this device and the group (docs/song-loading.md), and cues song `n` again with the next queued song from the same corpus tier, falling back to the next song when that tier has run out.
+Every `song` the room accepts gets a new `cue` id, a re-cue of the same `n` included, and `vote` and `skip` name the cue they are for; one that arrives after a re-cue is stale and ignored, so a late vote or a replayed skip can't skip the replacement.
+A skip puts the song in state `skipped` without a result, a reveal or its answer; phones never get its title or its key.
+The host acts on the room's skip count rather than on a tap, so each skip happens exactly once, a reload included (`skipsSeen` in the saved show): it stops the audio and cues song `n` again with the next queued song; nothing is recorded, since the song was not heard through.
 Its countdown shows "Skipped: <title>" on the big screen only.
-Fishing for an easier song gains nothing here, since a skip changes the song for everyone and takes a majority or the host.
-A stream error keeps its own free "Skip this song" on the host, which re-cues `n` without touching the skip count or any history.
+A stream error has its own "Skip this song" on the host, which re-cues `n` without asking the room.
 
 A show is `rounds × ROOM_SONGS_PER_ROUND` songs, with the box office after every round.
 "Same crowd again" on the podium starts a new show in the same room with scores reset; the phones stay in their seats.
@@ -66,7 +64,7 @@ All of these numbers live in `src/lib/config.ts`; the host passes the answer tim
 ## No repeats
 
 Nobody sets anything up for this and nothing on screen mentions it.
-Every phone already keeps its own song history from playing (`tt_played` and `tt_tired`, docs/song-loading.md).
+Every phone already keeps its own song history from playing (`tt_played`, docs/song-loading.md).
 When a phone takes its seat, and on every reconnect, its `join` carries the songs it is still sitting out, as song key to hours until the song may come back (`heardPayload` in `src/lib/room.ts`).
 Hours rather than a time, so the phone's, the room's and the host's clocks never need to agree.
 A phone with more than `ROOM_HEARD.songs` (300) such songs sends the ones sitting out longest.
@@ -75,16 +73,16 @@ The room keeps each seat's songs in its own storage key (`heard:<seat>`), replac
 A seat that leaves the lobby or is removed takes its songs with it.
 Only the host gets them: `heard { songs: { key: [hours, seats] } }`, every seat's songs merged, on the host's hello and whenever a seat's songs change.
 
-Example: Asha played "Kesariya" at home last night and Ravi skipped "Tum Hi Ho" as heard too much two weeks ago.
+Example: Asha played "Kesariya" at home last night and Ravi played "Tum Hi Ho" three days ago.
 When they sit down, the host's `heard` holds both, each with one seat, and the crate for the show leaves both out.
 
 The host merges that into its own cooldown map (this screen's history, and its group's, docs/group-sync.md) with `withRoomHeard` and builds the crate from it at Start, so the whole party's recent songs sit out.
 When fresh songs run short, the repeats that come back first are the ones the fewest people present have heard (the host's own history counts as one), then the soonest due.
-A phone that sits down after the show started is caught when the next song is picked: if it has heard that song, the host swaps in the first later song of the same tier it has not (`withFreshAt`, and `withSameTierNext` prefers such a song for a skip's replacement).
+A phone that sits down after the show started is caught when the next song is picked: if it has heard that song, the host swaps in the first later song it has not (`withFreshAt`).
 
 Phones record what the room played in their own history (`useRecordHeard`), so the next room, or a pass-the-phone game on that phone, leaves it out too.
 Every revealed song (the view's `results`) is recorded as played.
-A skipped song arrives in the view's `skipped` list as `{ key, tired }` after its skip: tired for a phone that voted to skip it, played for the others, who heard the clip but did not ask for it gone.
+A skipped song is recorded by nobody and never reaches a phone.
 A phone that joins mid-show records the songs revealed before it arrived as well; it was in the room while they played.
 
 ## Protocol
@@ -100,10 +98,10 @@ The first message must be a hello; anything else is refused until then, and a co
 | host | `song { n, title, film, year, artist, near }` | Arms song `n` (buzzing shut). `n` must be one past the number of results and at most `total`, so a re-cue can restart an unfinished song but never replay a scored one |
 | host | `clip { rung, points }` | A clip is playing; buzzing open at these points |
 | host | `reveal` / `end` / `kick { id }` | Nobody got it / show over / remove a player (lobby only) |
-| host | `skip { cue }` | Skips the song straight away (clip live, nobody has buzzed, a skip left) |
+| host | `skip { cue }` | Skips the song straight away (clip live, nobody has buzzed) |
 | phone | `join { key, name, heard? }` | Takes a seat, or gets its seat back when the key is known; `heard` is the phone's songs sitting out, `{ key: hours }` (No repeats) |
 | phone | `buzz` / `answer { text }` / `leave` | |
-| phone | `vote { cue }` | "Heard it too much" for the current song; a majority skips it |
+| phone | `vote { cue }` | A vote to skip the current song; it goes once every phone online has voted |
 | room | `welcome`, `state`, `error { code }` | `state` is the full view for that device, sent after every change |
 | room | `heard { songs }` | Host only: every seat's songs merged, `{ key: [hours, seats] }` |
 
@@ -123,7 +121,6 @@ Codes are four letters from `BCDFGHJKLMNPQRSTVWXZ` (no vowels, so no words).
 ## Limits and expiry
 
 - Nothing goes to D1. Room state lives in the Durable Object's own storage and is wiped by an alarm after 3 idle hours.
-  The host's `recordPlay` for a skipped song is the host device's own group sync, the same as for a played one.
 - Origin must be the Pages origin or localhost, for both `POST /api/rooms` and the WebSocket.
 - Rate limits (Workers rate limiting, per IP): 10 new rooms a minute, 240 room connections a minute (a whole party shares one IP behind the Wi-Fi).
 - Per connection: every frame is charged to a bucket of 12 refilled at 6 a second, before anything else; 40 refused frames close the socket (4429), and any frame over the size limit, or binary, closes it at once (1009).
@@ -144,9 +141,9 @@ So "Main Hu Na" matches "Main Hoon Na" and "kesaria" matches "Kesariya", while "
 ## Testing
 
 `npm run e2e:room` (`e2e/room.mjs`) starts a local `wrangler dev` and proxies the room WebSockets to it from Playwright, recording every frame.
-Desktop Chromium hosts (or a WebKit iPhone with `--host=phone`; `--difficulty=medium` plays a Music-only show on the shorter ladder) and three WebKit iPhones in separate contexts play a full 12-song show: join by typed code and by link, a buzz race in arrival order, wrong answer to the next buzzer, right answer at the rung's points, "Hear more" and the automatic ladder after a miss, a typed misspelling, a reload and a leave-and-return keeping the seat, the answer clock running out, everyone locked out, the box office, "Heard it too much" (one vote of three does not skip, two do, the host skips until the cap, the room refuses a skip past the cap or after a buzz, the same-tier replacement and the tired history on the host, and the skipped title on the big screen only), the host reloading while a phone answers (the room scores it once and the host resumes on its reveal), the host reloading on the final reveal, podium totals against the room's results, each phone's final place, and "Same crowd again".
+Desktop Chromium hosts (or a WebKit iPhone with `--host=phone`; `--difficulty=medium` plays a Music-only show) and three WebKit iPhones in separate contexts play a full 12-song show: join by typed code and by link, a buzz race in arrival order, wrong answer to the next buzzer, right answer at the rung's points, "Hear more" and the automatic ladder after a miss, a typed misspelling, a reload and a leave-and-return keeping the seat, the answer clock running out, everyone locked out, the box office, skips (two votes of three do not skip, the third does, the host skips on its own twice more, the room refuses a stale skip and a skip after a buzz, nothing lands in the host's history, and the skipped title on the big screen only), the host reloading while a phone answers (the room scores it once and the host resumes on its reveal), the host reloading on the final reveal, podium totals against the room's results, each phone's final place, and "Same crowd again".
 It then probes the room directly: a foreign origin, an unclaimed code, a wrong host token, silent sockets up to the cap and their 4401 timeout (in a browser page with its own context: Node's WebSocket reports a close the server starts late or never, and the game contexts route the Worker's host through the script's Node proxy, which matters when `--worker` is production), frames before a hello, a host command from a phone, an oversized frame, a flood, and song numbers out of order.
 `--worker=<origin>` runs it against a deployed Worker (the preview one) instead, and `--categories=romantic,...` checks that every song in the show carries one of those tags.
 
-`npm run e2e:room-norepeat` (`e2e/room-norepeat.mjs`) seeds three WebKit phones' histories (one over the cap, one with tired songs, one with songs back from their cooldown), then checks what each phone sends, the hours and seat counts the host gets, the room's caps from raw sockets (an oversized join, 400 songs, malformed entries, a history that is not a map, seats leaving the lobby), a crate with none of those songs, a revealed song as played on every phone, a vote-skipped song as tired on the voters and played on the other phone, a reload and an offline seat keeping their songs, a phone joining mid-show having heard the next song (swapped out), and a second room with a new host screen that leaves out what the first room played.
+`npm run e2e:room-norepeat` (`e2e/room-norepeat.mjs`) seeds three WebKit phones' histories (one over the cap, one with songs still sitting out, one with songs back from their cooldown), then checks what each phone sends, the hours and seat counts the host gets, the room's caps from raw sockets (an oversized join, 400 songs, malformed entries, a history that is not a map, seats leaving the lobby), a crate with none of those songs, a revealed song as played on every phone, a vote-skipped song in nobody's history, a reload and an offline seat keeping their songs, a phone joining mid-show having heard the next song (swapped out), and a second room with a new host screen that leaves out what the first room played.
 Its secrecy scan is the one above, plus every other phone's seeded songs.

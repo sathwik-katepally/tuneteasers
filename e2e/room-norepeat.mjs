@@ -1,20 +1,18 @@
 /* No repeats in a buzz-in room, with nothing to set up. Desktop Chromium
    hosts, WebKit iPhones buzz, against a local `wrangler dev` (or --worker).
-   Each phone's history is seeded the way playing leaves it (tt_played,
-   tt_tired), then:
+   Each phone's history is seeded the way playing leaves it (tt_played), then:
    - every phone brings the songs it is still sitting out to its seat, and
      the room hands the host only the merged list (seats per song);
    - the room enforces the payload caps (frame size, song count, key length,
      hours) and a seat that leaves the lobby takes its songs with it;
    - the host's crate holds none of the seated phones' songs;
    - a revealed song lands in every phone's played history, a vote-skipped
-     one in the voters' tired history and the others' played history;
+     one in nobody's;
    - a phone that reloads, or drops offline, keeps its songs in the room;
    - a phone that sits down mid-show gets its next song swapped out;
    - a second room with the same phones leaves out what the first one played;
    - no phone receives another phone's history, the merged list, a URL, or
-     any title of the show before its reveal (a skipped one only as its key,
-     after the skip).
+     any title of the show before its reveal (a skipped one never).
    node e2e/room-norepeat.mjs [--worker=https://...] */
 import fs from "node:fs";
 import { chromium, webkit, devices } from "playwright";
@@ -61,7 +59,7 @@ async function until(what, fn, timeout = 30000){
   }
 }
 
-// Easy-tier corpus songs in both languages: what an Easy room's crate draws from.
+// Top-tier corpus songs in both languages: inside the popular half a room's crate draws from.
 const corpus = JSON.parse(fs.readFileSync(new URL("../dist/corpus.json", import.meta.url), "utf8"));
 const col = n => corpus.cols.indexOf(n);
 const easy = shuffle([...new Set(corpus.songs.filter(r => r[col("tier")] === "easy").map(r => songKey(r[col("title")])))]);
@@ -69,13 +67,13 @@ const publicTitles = corpus.songs.map(r => displayTitle(r[col("title")]));
 const now = Date.now();
 const seeds = {
   asha: easy.slice(0, 150),           // played an hour ago: out for about 7 days
-  ravi: easy.slice(150, 210),         // skipped as tired 20 days ago: out for about 10 more
+  ravi: easy.slice(150, 210),         // played 3 days ago: out for about 4 more
   raviOld: easy.slice(210, 250),      // played 8 days ago: back in
   meena: Array.from({ length: 400 }, (_, i) => `zz meena ${String(i).padStart(3, "0")}`),
 };
 const histories = {
   Asha: { tt_played: Object.fromEntries(seeds.asha.map(k => [k, now - HOUR])) },
-  Ravi: { tt_tired: Object.fromEntries(seeds.ravi.map(k => [k, now - 20 * DAY])), tt_played: Object.fromEntries(seeds.raviOld.map(k => [k, now - 8 * DAY])) },
+  Ravi: { tt_played: Object.fromEntries([...seeds.ravi.map(k => [k, now - 3 * DAY]), ...seeds.raviOld.map(k => [k, now - 8 * DAY])]) },
   Meena: { tt_played: Object.fromEntries(seeds.meena.map((k, i) => [k, now - (i + 1) * 60e3])) },
 };
 
@@ -150,7 +148,7 @@ try {
   if (!sent.Meena["zz meena 000"] || sent.Meena["zz meena 399"]) fail("Meena's phone did not keep its most recent songs under the cap");
   if (seeds.raviOld.some(k => sent.Ravi[k] || H()[k])) fail("songs back from their cooldown were sent to the room");
   for (const k of seeds.asha) if (!(H()[k][0] >= 7 * 24 - 2 && H()[k][0] <= 7 * 24)) fail(`Asha's "${k}" comes back in ${H()[k][0]}h`);
-  for (const k of seeds.ravi) if (!(H()[k][0] >= 10 * 24 - 2 && H()[k][0] <= 10 * 24)) fail(`Ravi's tired "${k}" comes back in ${H()[k][0]}h`);
+  for (const k of seeds.ravi) if (!(H()[k][0] >= 4 * 24 - 2 && H()[k][0] <= 4 * 24)) fail(`Ravi's "${k}" comes back in ${H()[k][0]}h`);
   if (Object.keys(H()).filter(k => k.startsWith("zz meena")).length !== ROOM_HEARD.songs) fail("the host did not get Meena's capped songs");
 
   // The room holds the caps itself, whatever a client sends.
@@ -196,8 +194,8 @@ try {
   const idOf = name => latest.host.players.find(p => p.name === name)?.id;
   const live = n => until(`song ${n} live`, async () => {
     if (song()?.n === n && song().state === "live") return true;
-    const skip = host.page.getByRole("button", { name: "Skip this song" });
-    if (await skip.isVisible().catch(() => false)) await skip.click({ timeout: 1500 }).catch(() => {});
+    const dead = host.page.getByText(/won't stream right now|isn't available/);
+    if (await dead.isVisible().catch(() => false)) await host.page.getByRole("button", { name: "Skip this song" }).click({ timeout: 1500 }).catch(() => {});
     return false;
   }, 45000);
   const current = async () => (await hostShow(host)).queue[(await hostShow(host)).idx];
@@ -223,19 +221,24 @@ try {
   await until("song 1 revealed", () => song().n === 1 && song().state === "revealed");
   for (const p of phones) await until(`song 1 in ${p.label}'s history`, async () => recent((await readHistory(p)).played[key1] || 0), 10000);
 
-  // Song 2: Asha and Ravi vote it out. They keep it as tired, Meena as played.
+  // Song 2: all three vote it out. Nobody records it.
   await nextSong(2);
   await live(2);
   const key2 = songKey((await current()).title);
-  const vote = p => p.page.getByRole("button", { name: /^Heard it too much/ }).click();
+  const vote = p => p.page.getByRole("button", { name: /^Skip this song/ }).click();
   await vote(asha);
   await until("Asha's vote", () => song().votes.length === 1);
   await vote(ravi);
-  await until("song 2 skipped", () => latest.host.skips.used === 1);
-  for (const p of [asha, ravi]) await until(`song 2 tired on ${p.label}`, async () => recent((await readHistory(p)).tired[key2] || 0), 10000);
-  await until("song 2 played on Meena", async () => recent((await readHistory(meena)).played[key2] || 0), 10000);
-  if ((await readHistory(meena)).tired[key2]) fail("a phone that did not vote keeps the skipped song as tired");
+  await until("Ravi's vote", () => song().votes.length === 2);
+  await sleep(600);
+  if (song().state !== "live" || latest.host.skips) fail("two votes of three skipped the song");
+  await vote(meena);
+  await until("song 2 skipped", () => latest.host.skips === 1);
   await live(2);
+  for (const p of phones){
+    const h = await readHistory(p);
+    if (h.played[key2] || Object.keys(h.tired).length) fail(`${p.label} recorded the skipped song`);
+  }
 
   // Meena reloads: her seat comes back with her history as it is now.
   const meenaId = idOf("Meena");
@@ -307,7 +310,7 @@ try {
       if (m.t === "heard") fail(`${p.label} received the room's merged history`);
       if (m.t === "state"){
         for (const r of m.results || []) shown.add(songKey(r.title));
-        for (const x of m.skipped || []) shown.add(x.key);
+        if (m.skipped) fail(`${p.label} received a skipped-song list`);
         if (m.song?.answer && m.song.state !== "revealed") fail(`${p.label} got song ${m.song.n}'s answer early`);
         if (m.song?.answer) shown.add(songKey(m.song.answer.title));
       }

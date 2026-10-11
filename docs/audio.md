@@ -54,11 +54,11 @@ A later change of window length is judged from the stored curves, but any window
 
 ## The clip ladder
 
-A turn listens to one continuous clip window in rungs: the first 5 seconds, then "Hear 7s more" continues from 5 to 12 seconds, and on Easy "Hear 8s more" from 12 to 20.
-Music-only has only the first two rungs, because its window is a verified 12-second interval; Easy plays from the song's hook with the vocals in and needs no verified window.
+A turn listens to one continuous clip window in rungs: the first 5 seconds, then "Hear 7s more" continues from 5 to 12 seconds.
+The ladder is the same for both sounds: Music-only's window is a verified 12-second interval, and Easy plays from the song's hook with the vocals in and needs no verified window.
 Replay plays everything heard so far, from 0 to the current rung's end.
-The numbers are `CLIP_LADDERS` in `src/lib/config.ts`, one ladder per sound; `ladderFor(plain).span(rung, replay)` gives the `{ from, to }` seconds a play covers.
-To give Music-only its third rung back, add it to the `inst` ladder once the index holds enough 20-second windows: raise `SNIP_WINDOW_SEC`, bump `SNIP_INDEX_V` and `SNIP_METHOD`, and dispatch a full rescore (docs/testing-and-deploy.md); config.ts refuses to load a ladder longer than the window.
+The numbers are `CLIP_LADDER` in `src/lib/config.ts`; `LADDER.span(rung, replay)` gives the `{ from, to }` seconds a play covers.
+To add a longer rung, the index has to hold enough longer windows first: raise `SNIP_WINDOW_SEC`, bump `SNIP_INDEX_V` and `SNIP_METHOD`, and dispatch a full rescore (docs/testing-and-deploy.md); config.ts refuses to load a ladder longer than the window.
 A continuation always seeks, even to where the element already is: Chromium otherwise resumes a paused element about 60ms past its pause point, which would skip audio at the seam.
 The engine stops a clip at a media time, not after a wall-clock delay: a timer re-aims at the end from the element's own clock (and, for Music-only, re-aims the gain gate on the audio clock), so each rung is exact to a few milliseconds and the next one starts where it stopped.
 `currentTime` only moves in steps (100-250ms apart, and a busy WebKit reports a stale value for longer), so between steps the engine extrapolates from when it last saw the value change and polls every 15ms near the end.

@@ -3,8 +3,7 @@
    #join link, desktop plays a show, and then:
    - the phone's next crate fetched the desktop's plays and left them out,
    - the desktop's finished show is in the phone's Past shows,
-   - a song the phone plays, or skips as heard too much (kind "tired"), is
-     left out of the desktop's next crate, and the group keeps the kind,
+   - a song the phone plays is left out of the desktop's next crate,
    - with the Worker unreachable the phone still plays, queues its plays, and
      sends them once the Worker is back.
    The deployed Worker host is rerouted to a local `wrangler dev` with a fresh
@@ -69,10 +68,9 @@ async function setupShow(page){
 }
 
 /* Plays `turns` turns (all, when null) from the current handover. Returns the
-   titles judged (played) and, with heardIt, the one skipped first as heard too
-   much (tired). A stream-error skip records nothing. */
-async function play(page, turns = null, { heardIt = false } = {}){
-  const played = [], tired = [];
+   titles judged (played). A dead stream is skipped, which records nothing. */
+async function play(page, turns = null){
+  const played = [];
   const btn = name => page.getByRole("button", { name });
   for (let n = 0, guard = 0; guard < 40; guard++){
     const handover = page.getByRole("button", { name: /^It's with me|roll it$/ });
@@ -84,23 +82,17 @@ async function play(page, turns = null, { heardIt = false } = {}){
     if (turns !== null && n >= turns) break;
     await handover.click();
     const nope = btn("I know this one");
-    for (let skip = heardIt && !tired.length; ; skip = false){
+    await nope.waitFor({ timeout: 30000 });
+    for (let tries = 0; ; tries++){
+      const dead = page.getByText("This song won't stream right now");
+      await Promise.race([
+        page.waitForFunction(() => [...document.querySelectorAll("button")].some(b => b.textContent === "I know this one" && !b.disabled), null, { timeout: 30000 }),
+        dead.waitFor({ timeout: 30000 }),
+      ]).catch(() => {});
+      if (!(await dead.isVisible())) break;
+      if (tries === 2) fail("three dead streams in a row");
+      await btn("Skip this song").click();
       await nope.waitFor({ timeout: 30000 });
-      for (let tries = 0; ; tries++){
-        const dead = page.getByText("This song won't stream right now");
-        await Promise.race([
-          page.waitForFunction(() => [...document.querySelectorAll("button")].some(b => b.textContent === "I know this one" && !b.disabled), null, { timeout: 30000 }),
-          dead.waitFor({ timeout: 30000 }),
-        ]).catch(() => {});
-        if (!(await dead.isVisible())) break;
-        if (tries === 2) fail("three dead streams in a row");
-        await btn("Skip this song").click();
-      }
-      if (!skip) break;
-      const g = (await saved(page)).game;
-      tired.push(g.queue[g.trackIdx].title);
-      await btn(/^Heard it too much/).click();
-      await page.getByText("Skipped", { exact: true }).waitFor();
     }
     const g = (await saved(page)).game;
     played.push(g.queue[g.trackIdx].title);
@@ -111,7 +103,7 @@ async function play(page, turns = null, { heardIt = false } = {}){
     await next.waitFor({ state: "detached" });
     n++;
   }
-  return { played, tired };
+  return { played };
 }
 
 const outbox = page => page.evaluate(() => JSON.parse(localStorage.getItem("tt_group_outbox") || "null"));
@@ -128,13 +120,11 @@ try {
 
   // Desktop: an existing phone with its own history makes the group.
   const importKey = "group sync import probe";
-  const tiredImportKey = "group sync tired import probe";
   await desktop.page.goto(url + "seed.html");
-  await desktop.page.evaluate(([k, t]) => {
+  await desktop.page.evaluate(k => {
     localStorage.clear();
     localStorage.setItem("tt_played", JSON.stringify({ [k]: Date.now() - 3600e3 }));
-    localStorage.setItem("tt_tired", JSON.stringify({ [t]: Date.now() - 10 * 86400e3 }));
-  }, [importKey, tiredImportKey]);
+  }, importKey);
   await desktop.page.goto(url);
   if (await desktop.page.getByText("More than one phone?").count()) fail("group card on the home screen");
   await groupScreen(desktop.page);
@@ -157,8 +147,7 @@ try {
   if (!group.owner) fail("maker has no owner secret");
   if ((await api(invite, "/group")).role !== "member") fail("invite link carries more than member rights");
   const imported = await api(invite, "/group/played");
-  if (!imported.played[importKey] || imported.played[tiredImportKey]) fail("local played history was not imported as played");
-  if (!imported.tired[tiredImportKey] || imported.tired[importKey]) fail("local tired history was not imported as tired");
+  if (!imported.played[importKey]) fail("local played history was not imported");
   await desktop.page.getByRole("button", { name: "Done" }).click();
   await desktop.page.getByText("Friday night crew").waitFor();
   await home(desktop.page);
@@ -220,20 +209,16 @@ try {
   if (!seen.phonePlayed) fail("phone did not fetch the group's cooldown before its crate");
   const fetched = desktopKeys.filter(k => !seen.phonePlayed.played[k]);
   if (fetched.length) fail(`phone's cooldown fetch lacked ${fetched.join(", ")}`);
-  if (!seen.phonePlayed.tired?.[tiredImportKey]) fail("phone's cooldown fetch lacked the group's tired songs");
   const phoneQueue = (await saved(phone.page)).game.queue.map(t => songKey(t.title));
   const repeats = phoneQueue.filter(k => desktopKeys.includes(k) || k === importKey);
   if (repeats.length) fail(`phone's crate repeats desktop songs: ${repeats.join(", ")}`);
 
-  // Phone skips one song as heard too much and plays the next; the desktop's
-  // next crate leaves both out, and the group keeps the skip as tired.
-  const phoneRun = await play(phone.page, 1, { heardIt: true });
+  // Phone plays one song; the desktop's next crate leaves it out.
+  const phoneRun = await play(phone.page, 1);
   await waitSynced(phone.page);
-  const tiredKeys = phoneRun.tired.map(songKey);
-  const phoneKeys = [...phoneRun.played, ...phoneRun.tired].map(songKey);
+  const phoneKeys = phoneRun.played.map(songKey);
   const group2 = await api(invite, "/group/played");
-  if (phoneRun.played.map(songKey).some(k => !group2.played[k])) fail("phone play not in the group");
-  if (!tiredKeys.length || tiredKeys.some(k => !group2.tired[k] || group2.played[k])) fail("phone's heard-it skip not in the group as tired");
+  if (phoneKeys.some(k => !group2.played[k])) fail("phone play not in the group");
   await desktop.page.getByRole("button", { name: "New show" }).click();
   await setupShow(desktop.page);
   await desktop.page.getByRole("button", { name: /Start the show/ }).click();

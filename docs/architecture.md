@@ -8,13 +8,13 @@
 - `src/game/usePassTheGame.ts` - the pass-the-phone turn engine: the per-turn state that is not saved (phase, clip, revealed track, verdict, steal) and every handler the game screens call, owning a turn the way `Host` owns a room.
 - `src/room/` - buzz-in rooms (docs/room-mode.md): `Host` (the host screen's state owner, with `Lobby` and `HostPlaying`) and `Phone` (a phone's join, buzzer and answer pad).
 - `src/types.ts` - shared types for saved state, tracks, turns and verdicts.
-- `src/lib/config.ts` - every gameplay number: clip ladder and its rung spans, points per rung, speed bonus, hint cost, round options, difficulty table, skips per contestant and the cooldown days; also the song category labels.
+- `src/lib/config.ts` - every gameplay number: clip ladder and its rung spans, points per rung, speed bonus, hint cost, round options, difficulty table, the popularity cut and the cooldown days; also the song category labels.
 - `src/lib/save.ts` - the saved game: `loadSaved` (sanitize, migrate v6) and `save`.
 - `src/lib/constants.js` - search queries, language/era tables, exclusion regex.
 - `src/lib/utils.js` - pure helpers (`songKey`, `displayTitle`, `shuffle`, `safeUrl`, ...).
-- `src/lib/storage.ts` - track sanitization, the song history behind the cooldown (`tt_played`, `tt_tired`, `cooldownOf`) and the blocked-artist store.
+- `src/lib/storage.ts` - track sanitization, the song history behind the cooldown (`tt_played`, `cooldownOf`) and the blocked-artist store.
 - `src/lib/group.ts` - optional group sync: the group invite, the write outbox, the group cooldown fetch and past results (docs/group-sync.md).
-- `src/lib/crate.ts` - song loading (`buildCrate`) across the 3 source tiers, `withSameTierNext` (a skip's same-tier replacement), and `answerTitles` (the public title list a room phone autocompletes from).
+- `src/lib/crate.ts` - song loading (`buildCrate`) across the 3 source tiers, `withFreshAt` (a room's swap for a song a late phone has heard), and `answerTitles` (the public title list a room phone autocompletes from).
 - `src/lib/room.ts` - buzz-in room client: `createRoom`, the `#room=` link, `useRoom` (PartySocket), seat and host-show storage.
 - `src/lib/answer.js` - answer folding, matching and autocomplete, shared with the Worker.
 - `src/lib/engine.js` - the audio engine (songs and synthesised sound effects) and screen wake lock.
@@ -40,7 +40,7 @@ A `max-height: 760px` pass tightens spacing so every in-game screen fits a short
 `App` holds one persisted `state` object: `{ screen, settings, players, teams, game }`.
 `settings` is `{ play, mix, eras, difficulty, categories, mode, rounds }`; `play` picks pass-the-phone or a buzz-in room (see Screens and phases); `categories` lists the chosen song categories (`[]` is "Any", which is also what saves from before categories load as, and unknown ids are dropped); `players` and `teams` are the setup rosters (`{ id, name, members }`, members only used by teams).
 `game` is `{ id, queue, trackIdx, turn, round, totalRounds, totalSongs, source, mode, difficulty, mix, cast, history, finished }` or null; `id` makes the finished show's group result idempotent.
-`cast` is a snapshot of the roster with a `score` and the "Heard it too much" `skips` used, taken at game start, so editing the roster on the home screen never disturbs a saved game.
+`cast` is a snapshot of the roster with a `score`, taken at game start, so editing the roster on the home screen never disturbs a saved game.
 `history` holds one `{ id, song, points, round }` entry per judged turn; the box office derives each round's gains from it.
 Every `state` change is saved to localStorage (`tuneteasers_v7`) by an effect; `loadSaved` restores and sanitizes it on boot.
 A save from the pre-points version (`tuneteasers_v6`) is migrated once: players keep their names, scores are multiplied by `LEGACY_SCORE_SCALE`, "With vocals" becomes Easy and "Music only" Medium, and the old key is removed on the next save.
@@ -79,14 +79,14 @@ A skip keeps the same contestant and goes straight to a new countdown (see Skips
 ## Gameplay rules
 
 All numbers are in `src/lib/config.ts`.
-Difficulty: Easy plays popular songs with vocals ("full" sound, from a likely hook), Medium a broader pool as music only, Hard deeper cuts as music only; it is passed to `buildCrate` as its 4th argument.
-Song categories (Dance & party, Romantic, Sad, Item songs, Mass beats) narrow the pool to corpus songs carrying any chosen tag; they are passed to `buildCrate` as its 7th argument (see docs/song-loading.md).
+Difficulty: Easy plays the songs with vocals ("full" sound, from a likely hook), Medium the same songs as music only; both draw the top half of the corpus by popularity (`POPULAR_MIN_SCORE`, docs/song-loading.md), so the level changes the sound, not the songs.
+Song categories (Dance & party, Romantic, Sad, Item songs, Mass beats) narrow the pool to corpus songs carrying any chosen tag; they are passed to `buildCrate` as its 6th argument (see docs/song-loading.md).
 On the setup screen "Any" is the empty selection and clears the others; each category shows how many songs it offers for the chosen languages, eras and difficulty, and one with fewer than rounds x contestants is greyed out with "only N" (in Music-only with a note that few dance or item songs have a clean instrumental stretch).
 A chosen category that turns thin stays tappable so it can be turned off.
-Clip ladder: each turn starts with a 5s clip; "Hear 7s more" continues to 12s without replaying what was heard, and on Easy "Hear 8s more" goes on to 20s; Replay plays from the top to the current end (docs/audio.md).
-Music-only (Medium and Hard) stops at 12s because it may only play inside a verified 12-second vocal-free window.
-The ladders (`CLIP_LADDERS`, one per sound, and `ladderFor(plain)` with its `span`, `start` and `end`) are in `src/lib/config.ts` and the play call (`playRung`) with its turn bookkeeping (`useClipPlayer`) in `src/lib/ladder.ts`, so any screen that runs a turn, the room host included, shares them.
-Points: 100 / 60 / 30 by rung on Easy and 100 / 60 on Music-only, plus a speed bonus of up to 20 that stays full while a clip plays and fades over about 13s once it has ended, minus 20 for each hint taken, never below 10.
+Clip ladder: each turn starts with a 5s clip; "Hear 7s more" continues to 12s without replaying what was heard; Replay plays from the top to the current end (docs/audio.md).
+The ladder is the same for both sounds and stops at 12s because Music-only may only play inside a verified 12-second vocal-free window.
+The ladder (`CLIP_LADDER`, and `LADDER` with its `span`, `start` and `end`) is in `src/lib/config.ts` and the play call (`playRung`) with its turn bookkeeping (`useClipPlayer`) in `src/lib/ladder.ts`, so any screen that runs a turn, the room host included, shares them.
+Points: 100 / 60 by rung, plus a speed bonus of up to 20 that stays full while a clip plays and fades over about 13s once it has ended, minus 20 for each hint taken, never below 10.
 Hints come one tap at a time, least telling first (`HINT_ORDER` and `hintsFor` in `src/lib/config.ts`): the year, the music director, the singers, then the film, which goes last because naming the film scores.
 A detail the song's record lacks is left out, so the link counts what that song has ("Hint 1 of 3, costs 20").
 The player says the song or film aloud, then taps "I know this one" to score the current points, or "Pass to <next>" to hand the song on.
@@ -106,14 +106,9 @@ Teams: turns rotate through teams; if a team lists members, the phone holder rot
 
 ## Skips
 
-There are two ways to skip a song while listening, and both keep the same contestant.
+"Skip this song" is offered while listening, for any reason (heard it to death, nobody will know it, a dead stream), free and unlimited, and it keeps the same contestant.
+The next queued song comes in, and the skipped title goes up on the next countdown ("Skipped: Kesariya") so the room sees what was skipped.
+Nothing is recorded: the song was not heard through, so it stays in play for later shows (docs/song-loading.md).
+A stealer sees "Nobody knows it" instead, except after a stream error, when the skip is offered to whoever holds the phone.
 
-- **"Heard it too much"** is for a song the player has heard to death.
-  Each contestant (player or team) gets `SKIPS_PER_PLAYER` (1) per show, shown as a ticket stub next to the link ("1 left", then "Used"), and it is offered until the player judges.
-  The replacement is the next queued song from the same corpus tier (`withSameTierNext`), so skipping a hard song cannot fish for an easy one; when no song of that tier is left the link is not offered.
-  The skipped title goes up on the next countdown ("Skipped: Kesariya") so the room sees what was skipped.
-  The song is recorded as `tired` on the device and the group, which keeps it out of crates for longer than a played song (docs/song-loading.md).
-- **"Skip this song"** shows only after a stream error, instead of the link above.
-  It is free and unlimited, takes the next song in the queue, and records nothing: a song that only failed to stream may play fine next time.
-
-Buzz-in rooms have their own vote-based version (docs/room-mode.md).
+Buzz-in rooms skip by vote or the host's tap (docs/room-mode.md).
