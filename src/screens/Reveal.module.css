@@ -1,6 +1,9 @@
 .screen {
   position: relative;
-  flex: 1;
+  /* A 0px basis, not flex: 1's 0%: the theatre only has a min-height, so a
+     percentage basis counts the card's text toward the page height, and a
+     song with long credits scrolls the page by the lines it wraps. */
+  flex: 1 1 0px;
   display: flex;
   flex-direction: column;
   min-height: 0;
