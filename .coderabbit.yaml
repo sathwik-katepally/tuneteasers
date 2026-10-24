@@ -1,0 +1,82 @@
+# yaml-language-server: $schema=https://www.coderabbit.ai/integrations/schema.v2.json
+language: en-US
+tone_instructions: "Report correctness, security and secrecy problems only. Skip style, naming and refactor suggestions. Never suggest unit tests or mocks: this repo verifies with Playwright E2E."
+
+reviews:
+  profile: chill
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  in_progress_fortune: false
+  sequence_diagrams: false
+  related_prs: false
+  suggested_labels: false
+  suggested_reviewers: false
+  collapse_walkthrough: true
+  path_filters:
+    - "!public/catalog.json"
+    - "!public/corpus.json"
+    - "!public/snips.json"
+    - "!package-lock.json"
+    - "!dist/**"
+  path_instructions:
+    - path: "src/**"
+      instructions: |
+        Hard rules from CLAUDE.md, flag any break:
+        - Every playback path, sound effects included, goes through src/lib/engine.js. No new Audio(), <audio> or AudioContext elsewhere.
+        - Gameplay numbers (clip ladder, points, bonus, hint cost, rounds, timings, popularity cut, cooldown) live only in src/lib/config.ts.
+        - Stream URLs must be https and pass sanitizeTrack before they are rendered or played.
+        - The game must still play end to end with no group and with the Worker unreachable.
+        - iOS Safari only lets an audio element start outside a tap once it has played inside one (docs/audio.md); flag timer-started playback that skips the prime.
+    - path: "src/room/**"
+      instructions: |
+        Room secrecy (docs/room-mode.md): a phone must never receive a song title before its reveal, any stream URL, or another phone's song history.
+        Only the host screen plays audio.
+    - path: "worker/**"
+      instructions: |
+        The Worker is the trust boundary. Check origin checks, rate limits, size limits and input validation.
+        Room data lives only in the Durable Object and must never be copied to D1.
+        Never store audio, stems or stream URLs, and never log a group invite.
+    - path: "worker/migrations/**"
+      instructions: "Applied migrations are immutable. Flag any edit to an existing migration file; schema changes must be new files."
+    - path: "e2e/**"
+      instructions: "Playwright E2E against the real build. Flag waits that make a suite flaky (fixed sleeps racing a real event) and missing assertions on what a user sees."
+  auto_review:
+    enabled: true
+    drafts: false
+    ignore_usernames:
+      - "github-actions[bot]"
+    ignore_title_keywords:
+      - "Refresh song catalog"
+      - "Refresh song corpus"
+      - "Refresh snips index"
+  finishing_touches:
+    docstrings:
+      enabled: false
+    unit_tests:
+      enabled: false
+  tools:
+    oxc:
+      enabled: true
+    actionlint:
+      enabled: true
+    gitleaks:
+      enabled: true
+    biome:
+      enabled: false
+    eslint:
+      enabled: false
+    markdownlint:
+      enabled: false
+    languagetool:
+      enabled: false
+
+chat:
+  auto_reply: true
+
+knowledge_base:
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "CLAUDE.md"
+      - "docs/*.md"
