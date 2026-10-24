@@ -21,7 +21,7 @@ import path from "node:path";
 import { chromium, webkit, devices } from "playwright";
 import { serve, args, localWorker, silence, skipLanding, moreSettings, wireWorker, MUTE_ARGS } from "./harness.mjs";
 import { displayTitle } from "../src/lib/utils.js";
-import { CATEGORIES, DIFFICULTY, LADDER, ROOM_ANSWER_SECS } from "../src/lib/config.ts";
+import { CATEGORIES, DIFFICULTY, LADDER, ROOM_ANSWER_SECS, ROOM_AUTO_SECS } from "../src/lib/config.ts";
 import { songKey } from "../src/lib/utils.js";
 
 const A = args({ difficulty: "easy" });
@@ -48,6 +48,21 @@ const wire = (context, label) => wireWorker(context, worker.origin, origin, traf
 
 // --host=phone runs the host screen on a WebKit iPhone too (a room with no laptop).
 const hostOnPhone = A.host === "phone";
+
+/* The big screen runs the show from timers, so it is held to the iOS rule
+   (e2e/autoplay.mjs): play() outside a tap is refused unless that element
+   was unlocked in an earlier tap. Refusals are counted across reloads. */
+const iosAutoplay = () => {
+  let inTap = false;
+  addEventListener("click", () => { inTap = true; setTimeout(() => { inTap = false; }, 0); }, true);
+  const real = HTMLMediaElement.prototype.play;
+  HTMLMediaElement.prototype.play = function(){
+    if (inTap){ this.__unlocked = true; return real.call(this); }
+    if (this.__unlocked) return real.call(this);
+    sessionStorage.setItem("tt_e2e_blocked", String(Number(sessionStorage.getItem("tt_e2e_blocked") || 0) + 1));
+    return Promise.reject(new DOMException("blocked", "NotAllowedError"));
+  };
+};
 async function device(kind, label){
   const desk = kind === "host" && !hostOnPhone;
   const browser = desk
@@ -59,6 +74,7 @@ async function device(kind, label){
   await wire(context, label);
   await context.addInitScript(silence);
   await context.addInitScript(skipLanding);
+  if (kind === "host") await context.addInitScript(iosAutoplay);
   // Counts what actually reached the page, to tell a lost frame from an app bug.
   await context.addInitScript(() => {
     const W = window.WebSocket;
@@ -161,13 +177,9 @@ const live = (n, rung) => until(`song ${n} live at rung ${rung}`, async () => {
   return false;
 }, 45000);
 
+// Nobody taps: the reveal, the box office and the countdown move on by themselves.
 async function nextSong(n){
-  const next = host.page.getByRole("button", { name: /Next song|box office|On to round/ });
-  await until(`song ${n} cued`, async () => {
-    if (song()?.n === n) return true;
-    if (await next.count() && await next.first().isEnabled({ timeout: 500 }).catch(() => false)) await next.first().click({ timeout: 1500 }).catch(() => {});
-    return false;
-  });
+  await until(`song ${n} cued`, () => song()?.n === n, (ROOM_AUTO_SECS.reveal + ROOM_AUTO_SECS.board + 20) * 1000);
 }
 
 async function revealed(n){
@@ -347,7 +359,11 @@ try {
   await shot(host, "host-03-lobby-full");
   await shot(meena, "phone-03-waiting");
 
-  await host.page.getByRole("button", { name: "Start the show" }).click();
+  // The lobby starts the show by itself once phones stop arriving; held, it waits.
+  await host.page.getByRole("button", { name: "Wait for everyone" }).click();
+  await sleep((ROOM_AUTO_SECS.lobby + 2) * 1000);
+  if ((await hostShow())?.started) fail("the lobby started while held");
+  await host.page.getByRole("button", { name: "Start by itself" }).click();
   const show = await until("host queue", async () => { const s = await hostShow(); return s?.started && s.queue.length ? s : null; });
   if (categories.length){
     const corpus = JSON.parse(fs.readFileSync(new URL("../dist/corpus.json", import.meta.url), "utf8"));
@@ -466,8 +482,7 @@ try {
   await revealed(4);
   if (song().winner !== null || hostState().players.map(p => p.score).join() !== before4) fail("everyone wrong still scored");
   await host.page.getByText("Nothing for anyone").waitFor();
-  await host.page.getByRole("button", { name: "To the box office" }).click();
-  await host.page.getByText("After round 1").waitFor();
+  await host.page.getByText("After round 1").waitFor({ timeout: (ROOM_AUTO_SECS.reveal + 5) * 1000 });
   await shot(host, "host-09-board");
 
   // Song 5: skips. Two votes of three are not enough, the third is; then the
@@ -575,10 +590,15 @@ try {
   await host.page.getByRole("button", { name: "Final box office" }).waitFor({ timeout: 20000 });
   if (song().n !== show.total || hostState().results.length !== show.total) fail("resume on the final reveal moved the room on");
   if (hostState().players.map(pl => pl.score).join() !== finalScores) fail("scores changed across a host reload");
+  // Paused, the final reveal stays up past its countdown; a tap moves on.
+  await host.page.getByRole("button", { name: "Pause" }).click();
+  await sleep((ROOM_AUTO_SECS.reveal + 2) * 1000);
+  if (!await host.page.getByRole("button", { name: "Resume" }).isVisible()) fail("the paused reveal moved on");
   await host.page.getByRole("button", { name: "Final box office" }).click();
   await host.page.getByText("Final count").waitFor();
-  await host.page.getByRole("button", { name: "Roll the credits" }).click();
-  await host.page.getByRole("button", { name: "Same crowd again" }).waitFor();
+  await host.page.getByRole("button", { name: "Same crowd again" }).waitFor({ timeout: (ROOM_AUTO_SECS.board + 10) * 1000 });
+  const refused = await host.page.evaluate(() => Number(sessionStorage.getItem("tt_e2e_blocked") || 0));
+  if (refused) fail(`${refused} plays on the big screen were refused under the iOS autoplay rule`);
   await until("room over", () => hostState().phase === "over");
   await shot(host, "host-10-podium");
 

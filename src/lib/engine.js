@@ -13,9 +13,12 @@ import { log, errMsg } from "./log.js";
 import { SNIP_WINDOW_SEC, snipMethodOk } from "./constants.js";
 
 const STALL_MS = 12000; // a dead or stalled stream must not pin the game on "Cueing it up…"
+// About a long show's songs and skips; a pool that runs dry falls back to "Tap to play".
+const POOL_SIZE = 40;
+const SILENCE = "data:audio/wav;base64,UklGRmQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YUAAAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA";
 
 export const engine = {
-  ctx:null, el:null, pre:null, timer:null, boundary:null, session:0,
+  ctx:null, el:null, pre:null, timer:null, boundary:null, session:0, pool:[],
   ac(){
     if (!this.ctx) this.ctx = new (window.AudioContext||window.webkitAudioContext)();
     if (this.ctx.state === "suspended") this.ctx.resume();
@@ -38,7 +41,7 @@ export const engine = {
     if (this.pre && this.pre.dataset.src === url && this.pre.dataset.cors === want && !this.pre.error){
       this.el = this.pre; this.pre = null; return this.el;
     }
-    const el = new Audio();
+    const el = this._fresh();
     if (cors) el.crossOrigin = "anonymous";
     el.preload = "auto";
     el.dataset.src = url;
@@ -193,7 +196,7 @@ export const engine = {
     const url = track.stream;
     if ((this.el && this.el.dataset.src === url) || (this.pre && this.pre.dataset.src === url)) return;
     if (this.pre){ try { this.pre.removeAttribute("src"); this.pre.load(); } catch(e){} } // cancel the old one
-    const el = new Audio();
+    const el = this._fresh();
     const cors = !plain;
     if (cors) el.crossOrigin = "anonymous";
     el.preload = "auto";
@@ -202,6 +205,21 @@ export const engine = {
     el.src = url;
     this.pre = el;
   },
+  /* iOS lets an element start audio from a timer only once that same element
+     has played inside a tap, and the unlock survives a new src. A buzz-in
+     room's big screen plays song after song from timers with nobody touching
+     it, so each tap tops up a pool of unlocked elements that later songs load
+     into. Only elements whose silent play went through join the pool. */
+  unlock(){
+    this.ac();
+    for (let i = this.pool.length; i < POOL_SIZE; i++){
+      const el = new Audio(SILENCE);
+      el.muted = true;
+      const keep = () => { el.pause(); el.muted = false; el.removeAttribute("src"); if (this.pool.length < POOL_SIZE) this.pool.push(el); };
+      try { const p = el.play(); if (p) p.then(keep, () => {}); else keep(); } catch(e){}
+    }
+  },
+  _fresh(){ return this.pool.pop() || new Audio(); },
   /* Unlock the track's element inside a tap. iOS only lets an element start
      audio from a timer (the countdown) once it has been played from a user
      gesture, so this plays it muted for a moment and pauses it again. */
