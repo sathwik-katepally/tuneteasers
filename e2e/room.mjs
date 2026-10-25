@@ -478,9 +478,11 @@ try {
   if (waited < ROOM_ANSWER_SECS - 2) fail(`answer clock ran out after ${waited}s`);
   if (!song().guesses.some(g => g.id === raviId && g.timeout)) fail("timeout was not recorded");
   // Meena names the film, not the song, for part of the points (unless the
-  // song is named after its film, when that is the title).
+  // song is named after its film, when that is the title, or the film shares
+  // a name with a song in this show: a guess goes to every phone, and the
+  // secrecy check below would rightly flag it).
   const show3 = await hostShow(), track3 = show3.queue[show3.idx], film3 = filmOf(track3);
-  const byFilm = !!film3 && songKey(film3) !== songKey(displayTitle(track3.title));
+  const byFilm = !!film3 && !show3.queue.some(t => songKey(displayTitle(t.title)) === songKey(film3));
   const meena3 = scoreOf("Meena"), worth3 = song().points;
   await answer(meena, byFilm ? film3 : displayTitle(track3.title), { pick: false });
   await revealed(3);
