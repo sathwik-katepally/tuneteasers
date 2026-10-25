@@ -9,7 +9,7 @@ import { songKey, displayTitle } from "./utils.js";
    only makes two different titles look closer; the exact-other-title rule in
    isCorrect keeps that from scoring a wrong pick. */
 const FOLDS = [
-  [/(^| )y(?=e)/g, "$1"], [/(^| )nahi?n?(?= |$)/g, "$1nai"], [/ph/g, "f"], [/chh|ch/g, "c"], [/([kgjtdbs])h/g, "$1"],
+  [/(^| )y(?=e)/g, "$1"], [/(^| )nahi?n?(?= |$)/g, "$1nai"], [/x/g, "ks"], [/ph/g, "f"], [/chh|ch/g, "c"], [/([kgjtdbs])h/g, "$1"],
   [/w/g, "v"], [/z/g, "j"], [/q/g, "k"],
   [/ee|ii|ie/g, "i"], [/oo|uu/g, "u"], [/aa/g, "a"], [/ai|ei|ay/g, "e"],
   [/([a-z])\1+/g, "$1"],

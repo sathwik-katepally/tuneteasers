@@ -152,7 +152,7 @@ Codes are four letters from `BCDFGHJKLMNPQRSTVWXZ` (no vowels, so no words).
 
 Most players pick from the autocomplete, so the list has to tell look-alikes apart and a pick of the same song has to count.
 
-`fold()` lowercases, strips the `(From "…")` qualifiers and punctuation, removes accents, and folds romanised spelling variants: a leading `y` before `e` (`Yemaindo`/`Emaindo`), aspirated consonants (`dh` to `d`), `w`/`v`, `z`/`j`, `q`/`k`, long vowels (`aa`, `ee`, `oo`), `ai`/`ei` to `e`, and doubled letters.
+`fold()` lowercases, strips the `(From "…")` qualifiers and punctuation, removes accents, and folds romanised spelling variants: a leading `y` before `e` (`Yemaindo`/`Emaindo`), `nahi`/`nahin` to `nai`, `x` to `ks` (`Lux`/`Luks`), aspirated consonants (`dh` to `d`), `w`/`v`, `z`/`j`, `q`/`k`, long vowels (`aa`, `ee`, `oo`), `ai`/`ei` to `e`, and doubled letters.
 A guess is right when its folded form equals the title's, or names a version of it (the title without `2.0`, `Title Track`, `feat.`, `Remix`, `Reprise`, `Male`/`Female`, `Sad` or a number, so "Dus Bahane" is right for "Dus Bahane 2.0" and "Dhadak" for "Dhadak Title Track"), or is within a small edit distance of it (0 for four letters or fewer, then 1, 2, 3 as the title grows), unless it is exactly one of the near titles the host sent with the song.
 In that distance a vowel swapped, added or dropped costs half, since vowels are the least fixed part of a romanised spelling ("nuvvosthanante" for "Nuvvasthanante", "emaindhoo" for "Yemaindo").
 Near titles leave out the song's own film, where a look-alike is the same song spelled another way ("Tujhe Bhula Diya" for "Tujhe Bhula Diya Phir", both Anjaana Anjaani).
