@@ -482,14 +482,21 @@ export function withFreshAt(queue: Track[], idx: number, cooldown: Cooldown): Tr
 }
 
 /* Pass the phone with contestants who chose a language: the queue in turn
-   order, each turn's song in its contestant's language (any for the rest). */
-export function orderForCast(queue: Track[], cast: { lang?: Lang }[]): Track[] {
+   order, each turn's song in its contestant's language. The rest take songs
+   a chosen language can spare beyond the turns still owed to its contestants
+   in the show's first `slots` turns, so they never use those up. */
+export function orderForCast(queue: Track[], cast: { lang?: Lang }[], slots: number): Track[] {
   if (!cast.some(c => c.lang)) return queue;
+  const owed = new Map<Lang, number>();
+  for (let i = 0; i < slots; i++){ const l = cast[i % cast.length].lang; if (l) owed.set(l, (owed.get(l) || 0) + 1); }
   const left = queue.slice(), out: Track[] = [];
+  const spare = (t: Track) => left.filter(x => x.lang === t.lang).length > (owed.get(t.lang) || 0);
   for (let i = 0; left.length; i++){
     const want = cast[i % cast.length].lang;
-    const j = want ? left.findIndex(t => t.lang === want) : 0;
-    out.push(left.splice(Math.max(0, j), 1)[0]);
+    const j = want ? left.findIndex(t => t.lang === want) : left.findIndex(spare);
+    const [t] = left.splice(Math.max(0, j), 1);
+    out.push(t);
+    if (want && i < slots && t.lang === want) owed.set(want, owed.get(want)! - 1);
   }
   return out;
 }

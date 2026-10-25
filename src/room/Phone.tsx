@@ -7,7 +7,7 @@ import { Ticket } from "../components/Ticket";
 import { NAME_MAX } from "../lib/config";
 import { prepareTitles, suggest } from "../lib/answer.js";
 import { answerTitles, type AnswerEntry } from "../lib/crate";
-import { isFilmLang } from "../lib/languages";
+import { isFilmLang, langsOf } from "../lib/languages";
 import { displayTitle } from "../lib/utils.js";
 import { cleanCode, dropSeat, heardPayload, isCode, lastName, loadSeat, newSeat, playerName, rememberName, setRoomUrl, useMsLeft,
   useRecordHeard, useRoom, type RoomView, type Seat } from "../lib/room";
@@ -191,9 +191,11 @@ function Buzzer({ view, send, online, error }: {
   const out = !!song?.locked.includes(me);
   const place = song ? song.queue.indexOf(me) : -1;
   const open = (state === "live" || state === "answering" || state === "missed") && !out && !queued && online;
-  const titles = useAnswerTitles(view.langs);
+  // A room on a Worker from before the language list sends only the one word, mix.
+  const langs = view.langs ?? langsOf(view.mix) ?? [];
+  const titles = useAnswerTitles(langs);
   // What else scores half in this show's languages: the room says nothing about the song itself.
-  const halves = [...new Set((view.langs || []).map(l => (isFilmLang(l) ? "film" : "artist")))].join(" or ");
+  const halves = [...new Set(langs.map(l => (isFilmLang(l) ? "film" : "artist")))].join(" or ");
   // Skip votes are open once the clip plays, until anyone buzzes; every phone has to vote.
   const votable = state === "live" && !!song && !song.queue.length && !song.guesses.length && online;
   const voted = !!song?.votes.includes(me);
@@ -317,10 +319,10 @@ function entryMeta(e: AnswerEntry){
 
 function useAnswerTitles(langs: RoomView["langs"]){
   const [list, setList] = useState<(AnswerEntry & { forms: string[] })[]>([]);
-  const key = (langs || []).join(",");
+  const key = langs.join(",");
   useEffect(() => {
     let live = true;
-    answerTitles(langs || []).then(t => { if (live) setList(prepareTitles(t)); }, () => {});
+    answerTitles(langs).then(t => { if (live) setList(prepareTitles(t)); }, () => {});
     return () => { live = false; };
   }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
   return list;

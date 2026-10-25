@@ -48,6 +48,8 @@ export interface RoomView {
   phase: "lobby" | "show" | "over";
   code: string;
   langs: Lang[];
+  /* The one word the view also carries for phones on the site from before. */
+  mix?: string;
   total: number;
   perRound: number;
   answerSecs: number;

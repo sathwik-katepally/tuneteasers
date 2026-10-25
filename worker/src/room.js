@@ -12,7 +12,7 @@
 import { Server } from "partyserver";
 import { isCorrect, isFilm } from "../../src/lib/answer.js";
 import { ROOM_HEARD } from "../../src/lib/constants.js";
-import { langsOf } from "../../src/lib/languages.ts";
+import { langsOf, oldMix } from "../../src/lib/languages.ts";
 
 const CODE_ALPHABET = "BCDFGHJKLMNPQRSTVWXZ";
 export const CODE_RX = /^[BCDFGHJKLMNPQRSTVWXZ]{4}$/;
@@ -310,8 +310,10 @@ export class Room extends Server {
       t: "state",
       phase: r.phase,
       code: r.code,
-      // A room saved before the language list holds one word, mix.
+      // A room saved before the language list holds one word, mix; a phone tab
+      // still on the site from before reads mix.
       langs: r.langs ?? langsOf(r.mix),
+      mix: r.mix ?? oldMix(r.langs),
       total: r.total,
       perRound: r.perRound,
       answerSecs: r.rules.answerSecs,

@@ -95,7 +95,7 @@ export function usePassTheGame(state: AppState, setState: Dispatch<SetStateActio
       return;
     }
     const castNow: CastMember[] = roster.map(r => ({ id: r.id, name: r.name, members: [...r.members], ...(r.lang ? { lang: r.lang } : {}), score: 0 }));
-    const queue = orderForCast(crate.queue, castNow);
+    const queue = orderForCast(crate.queue, castNow, S.rounds * castNow.length);
     const game: GameState = {
       id: randomId(),
       queue, trackIdx: 0, turn: 0, round: 1, totalRounds: S.rounds,
@@ -240,7 +240,8 @@ export function usePassTheGame(state: AppState, setState: Dispatch<SetStateActio
     const gg = state.game;
     if (!gg) return;
     // Songs already played stay in the queue; only the ones still waiting are dropped.
-    const queue = gg.queue.filter((t, i) => i < gg.trackIdx || !isBlocked(t, set));
+    // The next turn's song may be the one that goes, so its contestant's language is put back first.
+    const queue = withLangAt(gg.queue.filter((t, i) => i < gg.trackIdx || !isBlocked(t, set)), gg.trackIdx, gg.cast[gg.turn]?.lang);
     const ranOut = gg.trackIdx >= queue.length;
     if (ranOut) setVerdict(v => (v ? { ...v, roundOver: true, finished: true } : v));
     setState(st => ({ ...st, game: { ...gg, queue, totalSongs: queue.length, finished: gg.finished || ranOut } }));

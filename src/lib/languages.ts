@@ -35,6 +35,9 @@ export function langsOf(v: unknown): Lang[] | null {
   return langs.length ? langs : null;
 }
 
+/* The one word a site from before the language list reads ("bolly" was Hindi). */
+export const oldMix = (langs: readonly Lang[]) => (langs.length === 1 && langs[0] === "hindi" ? "bolly" : langs.length === 1 && langs[0] === "telugu" ? "telugu" : "both");
+
 /* "Hindi", "Hindi and Tamil", "Hindi, Tamil and English". */
 export function langsLabel(langs: readonly Lang[]): string {
   const names = langs.map(langLabel);
