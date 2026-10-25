@@ -488,3 +488,16 @@
 .rankMe span {
   color: var(--bulb);
 }
+
+/* Two-line suggestions: fewer of them on a short phone, so "Lock it in" stays on screen. */
+@media (max-height: 760px) {
+  .hint_:nth-child(n + 5) {
+    display: none;
+  }
+}
+
+@media (max-height: 640px) {
+  .hint_:nth-child(n + 4) {
+    display: none;
+  }
+}
