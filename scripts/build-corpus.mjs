@@ -55,8 +55,10 @@ const de = s => String(s || "")
   .replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
 
 /* -- fetch with retry and an optional on-disk cache -- */
+const cacheKey = url => CACHE && path.join(CACHE, crypto.createHash("sha1").update(url).digest("hex"));
+const isCached = url => !!CACHE && fs.existsSync(cacheKey(url));
 async function getText(url, headers, tries = 4){
-  const key = CACHE && path.join(CACHE, crypto.createHash("sha1").update(url).digest("hex"));
+  const key = cacheKey(url);
   if (key && fs.existsSync(key)) return fs.readFileSync(key, "utf8");
   let last;
   for (let i = 0; i < tries; i++){
@@ -379,18 +381,24 @@ async function classify(raw, M){
    MusicBrainz asks for at most one request a second, so calls queue. */
 const MB = "https://musicbrainz.org/ws/2/recording?fmt=json&limit=25&query=";
 let mbQueue = Promise.resolve();
+const mbSeen = new Map(); // one lookup per song and artist, however many Saavn copies the seed holds
 function firstRelease(title, artist){
   const q = `recording:"${title.replace(/["\\]/g, "")}" AND artist:"${artist.replace(/["\\]/g, "")}"`;
+  const memo = `${songKey(title)}|${norm(artist)}`;
+  if (mbSeen.has(memo)) return mbSeen.get(memo);
+  const url = MB + encodeURIComponent(q);
   const run = mbQueue.then(async () => {
+    const cached = isCached(url);
     let j = null;
-    try { j = JSON.parse(await getText(MB + encodeURIComponent(q), { "user-agent": WD_UA, accept: "application/json" })); } catch {}
-    await sleep(CFG.musicbrainz.gapMs);
+    try { j = JSON.parse(await getText(url, { "user-agent": WD_UA, accept: "application/json" })); } catch {}
+    if (!cached) await sleep(CFG.musicbrainz.gapMs);
     const key = songKey(title);
     const years = (j?.recordings || []).filter(r => r.score >= CFG.musicbrainz.minScore && songKey(r.title) === key)
       .map(r => parseInt(r["first-release-date"])).filter(y => y > 1900);
     return years.length ? Math.min(...years) : 0;
   });
   mbQueue = run.catch(() => {});
+  mbSeen.set(memo, run);
   return run;
 }
 
@@ -419,11 +427,14 @@ async function classifyPop(raw, home){
   // The album the song came out on: the earliest copy that is not a compilation or a bare single.
   const album = c => { const a = cleanAlbum(c.more_info?.album).name; return a && !COMPILATION_RX.test(a) && norm(a) !== norm(title) ? a : ""; };
   const canonical = copies.filter(c => album(c)).sort((a, b) => yearOf(a) - yearOf(b))[0] || raw;
-  const saavnYear = Math.min(...copies.map(yearOf).filter(Boolean));
+  const years = copies.map(yearOf).filter(Boolean);
+  const saavnYear = years.length ? Math.min(...years) : 0;
+  // The play floor first: it is free, and MusicBrainz is one request a second.
+  if (playsOf(canonical) < CFG.minPlays) return { reject: "low-plays" };
+  if (saavnYear && saavnYear < CFG.minYear) return { reject: "pre-" + CFG.minYear };
   const mbYear = await firstRelease(title, lead);
   const year = mbYear ? Math.min(mbYear, saavnYear || mbYear) : saavnYear;
   if (year < CFG.minYear) return { reject: "pre-" + CFG.minYear };
-  if (playsOf(canonical) < CFG.minPlays) return { reject: "low-plays" };
   return { copy: canonical, film: album(canonical), year, yv: !!mbYear, source: mbYear ? "musicbrainz" : "saavn" };
 }
 
