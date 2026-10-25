@@ -397,7 +397,10 @@ function firstRelease(title, artist){
     const years = (j?.recordings || []).filter(r => r.score >= CFG.musicbrainz.minScore && songKey(r.title) === key
       && (r["artist-credit"] || []).some(c => norm(c.name || c.artist?.name) === who))
       .map(r => parseInt(r["first-release-date"])).filter(y => y > 1900);
-    return years.length ? Math.min(...years) : 0;
+    // MusicBrainz has stray dates too (one "If I Can't Have You" copy is dated 2006), so a year
+    // counts once two recordings back it within a year; a lone recording is taken as it is.
+    years.sort((a, b) => a - b);
+    return years.length === 1 ? years[0] : years.find(y => years.filter(x => x <= y + 1).length >= 2) ?? 0;
   });
   mbQueue = run.catch(() => {});
   mbSeen.set(memo, run);
