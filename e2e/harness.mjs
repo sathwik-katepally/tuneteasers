@@ -185,7 +185,7 @@ export async function moreSettings(page){
    "English", ...): the wanted ones go on first, since the last one on can't go off. */
 export async function pickLangs(page, labels){
   const group = page.getByRole("group", { name: "Languages" });
-  const all = await group.getByRole("button").allInnerTexts();
+  const all = (await group.getByRole("button").allTextContents()).map(t => t.trim());
   const want = new Set(labels.map(l => l.toLowerCase()));
   const on = async name => (await group.getByRole("button", { name, exact: true }).getAttribute("aria-pressed")) === "true";
   for (const name of all) if (want.has(name.toLowerCase()) && !(await on(name))) await group.getByRole("button", { name, exact: true }).click();
