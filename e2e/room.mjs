@@ -19,10 +19,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import { chromium, webkit, devices } from "playwright";
-import { serve, args, localWorker, silence, skipLanding, moreSettings, wireWorker, MUTE_ARGS } from "./harness.mjs";
+import { serve, args, localWorker, silence, skipLanding, moreSettings, pickLangs, wireWorker, MUTE_ARGS } from "./harness.mjs";
 import { displayTitle } from "../src/lib/utils.js";
 import { CATEGORIES, DIFFICULTY, LADDER, ROOM_ANSWER_SECS, ROOM_AUTO_SECS, ROOM_FILM_SHARE } from "../src/lib/config.ts";
 import { songKey } from "../src/lib/utils.js";
+import { LANGUAGES, isFilmLang } from "../src/lib/languages.ts";
 
 const A = args({ difficulty: "easy" });
 const CLIP_POINTS = LADDER.points;
@@ -317,6 +318,8 @@ try {
   await host.page.evaluate(() => localStorage.clear());
   await host.page.goto(url);
   await host.page.getByRole("radio", { name: "Buzz in" }).click();
+  // --langs=english,hindi: the show's languages (default Hindi and Telugu).
+  if (A.langs) await pickLangs(host.page, A.langs.split(",").map(id => LANGUAGES.find(l => l.id === id)?.label ?? fail(`unknown language ${id}`)));
   await moreSettings(host.page);
   await host.page.getByRole("radio", { name: DIFFICULTY[A.difficulty].label, exact: true }).click();
   await host.page.getByRole("radio", { name: "3", exact: true }).click();
@@ -476,18 +479,20 @@ try {
   const waited = (Date.now() - t0) / 1000;
   if (waited < ROOM_ANSWER_SECS - 2) fail(`answer clock ran out after ${waited}s`);
   if (!song().guesses.some(g => g.id === raviId && g.timeout)) fail("timeout was not recorded");
-  // Meena names the film, not the song, for part of the points (unless the
-  // song is named after its film, when that is the title, or the film shares
-  // a name with a song in this show: a guess goes to every phone, and the
-  // secrecy check below would rightly flag it).
-  const show3 = await hostShow(), track3 = show3.queue[show3.idx], film3 = filmOf(track3);
-  const byFilm = !!film3 && !show3.queue.some(t => songKey(displayTitle(t.title)) === songKey(film3));
+  // Meena names the film (an English song's artist), not the song, for part of
+  // the points (unless the song is named after it, when that is the title, or
+  // it shares a name with a song in this show: a guess goes to every phone,
+  // and the secrecy check below would rightly flag it).
+  const show3 = await hostShow(), track3 = show3.queue[show3.idx];
+  const kind3 = isFilmLang(track3.lang) ? "film" : "artist";
+  const half3 = kind3 === "film" ? filmOf(track3) : String(track3.artist || "").split(",")[0].trim();
+  const byHalf = !!half3 && !show3.queue.some(t => songKey(displayTitle(t.title)) === songKey(half3));
   const meena3 = scoreOf("Meena"), worth3 = song().points;
-  await answer(meena, byFilm ? film3 : displayTitle(track3.title), { pick: false });
+  await answer(meena, byHalf ? half3 : displayTitle(track3.title), { pick: false });
   await revealed(3);
-  const won3 = byFilm ? Math.max(1, Math.round(worth3 * ROOM_FILM_SHARE)) : worth3;
-  if (scoreOf("Meena") - meena3 !== won3) fail(`naming ${byFilm ? "the film" : "the song"} scored ${scoreOf("Meena") - meena3}, not ${won3}`);
-  if (byFilm) await meena.page.getByText("You named the film").waitFor();
+  const won3 = byHalf ? Math.max(1, Math.round(worth3 * ROOM_FILM_SHARE)) : worth3;
+  if (scoreOf("Meena") - meena3 !== won3) fail(`naming ${byHalf ? `the ${kind3}` : "the song"} scored ${scoreOf("Meena") - meena3}, not ${won3}`);
+  if (byHalf) await meena.page.getByText(`You named the ${kind3}`).waitFor();
 
   // Song 4: everyone answers wrong, which reveals with nobody scoring.
   await nextSong(4);

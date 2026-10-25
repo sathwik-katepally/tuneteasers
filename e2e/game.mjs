@@ -74,6 +74,11 @@ try {
     await who.fill("Priya, Rahul"); await page.keyboard.press("Enter");
   } else {
     await btn("Add").click(); await page.keyboard.type("Anu"); await page.keyboard.press("Enter");
+    // --player-lang=english: Anu's own turns play only that language.
+    if (A["player-lang"]){
+      await btn("Give someone one language").click();
+      await page.getByLabel("Anu's songs").selectOption(A["player-lang"]);
+    }
   }
   await shot("01-setup");
   await btn(/Start the show/).click();
@@ -84,6 +89,7 @@ try {
   }
 
   await page.route(u => u.host === DEAD_HOST, r => r.abort("connectionrefused"));
+  let langTurns = 0;
   let turns = 0, extended = false, hinted = false, resumed = false, deadStreams = 0, heard = null, deadSkip = null;
   const expectMode = A.difficulty === "easy" ? ["plain"] : ["snip", "plain"];
   for (let guard = 0; guard < 80; guard++){
@@ -112,6 +118,11 @@ try {
       await handover.waitFor();
       const g = (await saved(page)).game;
       deadSkip = { g, track: g.queue[g.trackIdx], history: await songHistory() };
+    }
+    if (A["player-lang"]){
+      const g = (await saved(page)).game, c = g.cast[g.turn], t = g.queue[g.trackIdx];
+      if (c.lang && t.lang !== c.lang) fail(`${c.name}'s turn plays ${t.lang} ("${t.title}"), not ${c.lang}`);
+      if (c.lang) langTurns++;
     }
     await page.evaluate(() => { window.__ttLastMode = null; });
     await handover.click();
@@ -289,6 +300,7 @@ try {
   if (errors.length) fail("page errors: " + errors.join(" | "));
   if (overflow.length) fail("screens scroll at this size: " + overflow.join(", "));
   if (!resumed) fail("home/resume path not exercised");
+  if (A["player-lang"] && !langTurns) fail("no turn had a player's own language");
   if (!heard) fail("skip not exercised");
   if (g.history.some(h => h.song === displayTitle(heard.title))) fail("skipped song was played later in the show");
   if (categories.length){
