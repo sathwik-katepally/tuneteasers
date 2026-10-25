@@ -277,7 +277,8 @@ function Buzzer({ view, send, online, error }: {
             {won && <div className={s.resultStamp}><Stamp text={`+${song.won}`} sub="Housefull" rotate={-7} /></div>}
           </div>
           <p className={s.sub}>{lastGuess && !lastGuess.ok ? (lastGuess.timeout ? "You ran out of time on this one." : `You said “${lastGuess.text}”.`)
-            : won && lastGuess?.film ? "You named the film, so half the points." : "Next song in a moment."}</p>
+            : won && lastGuess?.film ? "You named the film, so half the points."
+            : song.n >= view.total ? "That was the last song." : song.n % view.perRound === 0 ? "The box office is on the big screen." : "Next song in a moment."}</p>
         </div>
       ) : !answering && (
         <div className={s.buzzWrap}>
