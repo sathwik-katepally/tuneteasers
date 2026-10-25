@@ -48,7 +48,7 @@ try {
   await expectPressed(["Item songs"], "after Item");
   await chip("Mass").click();
   await expectPressed(["Item songs", "Mass"], "after Mass");
-  if (JSON.stringify((await saved(page)).settings.categories) !== '["item","mass"]') fail("categories not saved in config order");
+  if (JSON.stringify((await saved(page)).settings.categories) !== '["mass","item"]') fail("categories not saved in config order");
   await shot("cat-02-item-mass");
   await chip("Any").click();
   await expectPressed(["Any"], "after Any");
@@ -98,12 +98,28 @@ try {
   await counted("Item songs");
   await expectPressed(["Item songs"], "save with junk categories");
 
+  // Categories follow the languages: English has hip hop and no item or mass songs, so a
+  // chosen Item goes, with a line saying why, when English is the only language left.
+  await seed({ ...base, settings: { ...old, langs: ["hindi"], eras: ["2000s", "2010s", "2020s"], rounds: 3, categories: ["item"] }, players: [{ id: "p1", name: "Solo", members: [] }], game: null });
+  await counted("Item songs");
+  if (await chip("Hip hop").count()) fail("Hip hop shown for a Hindi show");
+  await pickLangs(page, ["English"]);
+  await page.getByRole("status").getByText("No Item songs in English, so that choice is off.").waitFor();
+  await counted("Hip hop");
+  if (await chip("Item songs").count() || await chip("Mass").count()) fail("Item or Mass shown for an English show");
+  await expectPressed(["Any"], "Item dropped for English");
+  if (JSON.stringify((await saved(page)).settings.categories) !== "[]") fail("dropped category still saved");
+  await pickLangs(page, ["Hindi", "English"]);
+  await counted("Item songs");
+  await counted("Hip hop");
+  await shot("cat-05-english");
+
   // No corpus: the chips stay off, and a categories game does not fall back to untagged songs.
   await page.route(u => u.pathname.endsWith("/corpus.json"), r => r.abort("connectionrefused"));
   await seed({ ...base, settings: { ...old, difficulty: "easy", rounds: 3, categories: ["item"] }, players: [{ id: "p1", name: "Solo", members: [] }], game: null });
   await page.getByText(/Categories need the song list/).waitFor();
   if (!(await chip("Mass").isDisabled())) fail("chips enabled without a corpus");
-  await shot("cat-05-offline");
+  await shot("cat-06-offline");
   await page.getByRole("button", { name: /Start the show/ }).click();
   await page.getByText(/Couldn't load songs/).waitFor({ timeout: 30000 });
   if ((await saved(page)).game) fail("a categories game started without the corpus");

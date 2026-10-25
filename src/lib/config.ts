@@ -1,5 +1,5 @@
 import type { Category, Difficulty, Lang, Songs, Track } from "../types";
-import { isFilmLang } from "./languages";
+import { isFilmLang } from "./languages.ts";
 import { SNIP_WINDOW_SEC } from "./constants.js";
 
 /* Every gameplay number lives here: the clip ladder, what each rung pays,

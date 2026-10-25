@@ -178,7 +178,7 @@ export const saved = page => page.evaluate(() => JSON.parse(localStorage.getItem
 export async function moreSettings(page){
   const summary = page.getByRole("button", { name: /Change$/ });
   if (await summary.count()) await summary.click();
-  await page.getByRole("radiogroup", { name: "Difficulty" }).waitFor();
+  await page.getByRole("radiogroup", { name: "Sound" }).waitFor();
 }
 
 /* Sets the setup screen's language chips to exactly these (labels: "Hindi",

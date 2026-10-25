@@ -62,7 +62,13 @@ export function Setup(p: Props){
     setDropped(`No ${nouns.join(" or ")} in ${langsLabel(S.langs)}, so that choice is off.`);
     upSettings({ categories: S.categories.filter(c => !gone.includes(c)) });
   }, [counts]); // eslint-disable-line react-hooks/exhaustive-deps
-  const multi = S.langs.length > 1 && !room;
+  // Per-contestant languages stay behind one link until someone uses them, so a first run reads no more.
+  const [perLang, setPerLang] = useState(() => list.some(e => e.lang));
+  const multi = S.langs.length > 1 && !room && (perLang || list.some(e => e.lang));
+  // Offered once someone has a real name: a first run with Player 1 and Player 2 has no one to give a language to.
+  const named = list.some(e => !/^(Player|Team) \d+$/.test(e.name));
+  const langLink = S.langs.length > 1 && !room && !multi && named &&
+    <button type="button" className={`link ${s.langLink}`} onClick={() => setPerLang(true)}>Give someone one language</button>;
   const setLang = (id: string, lang: Lang | undefined) => setList(list.map(e => (e.id === id ? { ...e, lang } : e)));
 
   const add = (name: string) => setList([...list, { id: newId(), name, members: [] }]);
@@ -117,6 +123,7 @@ export function Setup(p: Props){
                   ))}
                   {list.length < MAX_CAST && <AddChip label="Add" placeholder="Name" onAdd={add} />}
                   {multi && <p className={s.hint}>Mix: songs in any chosen language. Tap it to pick one.</p>}
+                  {langLink}
                 </div>
               ) : (
                 <div className={s.teams}>
@@ -130,6 +137,7 @@ export function Setup(p: Props){
                   )}
                   <p className={s.hint}>Name each team and, if you like, who's on it: the phone then goes round the team.</p>
                   {multi && <p className={s.hint}>Mix: songs in any chosen language. Tap it to pick one.</p>}
+                  {langLink}
                 </div>
               )}
             </div>
