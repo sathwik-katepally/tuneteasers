@@ -161,8 +161,8 @@ async function buzz(p){
 // A suggestion is named by its title, then its films and year ("Chaleya, Jawan, 2023").
 const optionName = text => new RegExp(`^${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(,|$)`);
 // The film as the host sends it (filmOf in src/lib/crate.ts).
-const filmOf = t => (/\(From "([^"]+)"\)/i.exec(t.album) || /\(From "([^"]+)"\)/i.exec(t.title))?.[1]
-  ?? String(t.album || "").replace(/\s*\((?:Original Motion Picture )?Soundtrack\)/i, "").replace(/\s+-\s+(?:Single|EP)$/i, "").trim();
+const filmOf = t => (/[([]From "([^"]+)"[)\]]/i.exec(t.album) || /[([]From "([^"]+)"[)\]]/i.exec(t.title))?.[1]
+  ?? String(t.album || "").replace(/\s*[([](?:Original )?(?:Motion Pictures? )?Soundtrack[)\]]/i, "").replace(/\s+-\s+(?:Single|EP)$/i, "").trim();
 
 async function answer(p, text, { pick = true } = {}){
   const input = p.page.getByLabel("Your answer");

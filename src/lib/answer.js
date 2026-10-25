@@ -60,9 +60,11 @@ function matches(guess, g, title, others){
   const t = squash(title);
   if (!t) return false;
   if (g === t) return true;
+  // Exactly another listed song is wrong, a version of this one included:
+  // "Gulabi 2.0" (Noor) is not "Gulabi" (Shuddh Desi Romance).
+  if (others.some(o => { const k = squash(o); return k && k !== t && k === g; })) return false;
   const bt = base(title);
   if (bt && base(guess) === bt) return true;
-  if (others.some(o => { const k = squash(o); return k && k !== t && k === g; })) return false;
   return distance(g, t) <= slack(t.length);
 }
 
@@ -75,22 +77,22 @@ export function isCorrect(guess, title, others = [], film = ""){
   const g = squash(guess);
   if (!g) return false;
   const shown = displayTitle(String(title || ""));
-  const forms = [title];
+  let forms = [title];
   if (DASH.test(shown)){
-    const [head, ...rest] = shown.split(DASH);
-    forms.push(shown.split(DASH).join(" "));
-    if (film && squash(head) === squash(film)) forms.push(rest.join(" "));
+    const [head, ...rest] = shown.split(DASH), whole = shown.split(DASH).join(" ");
+    // In "Film - Song" the part songKey keeps is the film, which scores as a film.
+    forms = film && squash(head) === squash(film) ? [whole, rest.join(" ")] : [title, whole];
   }
   return forms.some(t => matches(guess, g, t, others));
 }
 
-/* The film, for part of the points: its name or a typo away from it.
-   songKey drops "(Original Motion Picture Soundtrack)" and " - Single". */
+/* The film, for part of the points: its name, or one vowel slip from it.
+   Stricter than a title, since sequels and look-alike films sit a digit or
+   a letter apart (Stree / Stree 2, Gabbar Singh / Kabir Singh) and there is
+   no list of them to guard with. songKey drops bracketed notes and " - Single". */
 export function isFilm(guess, film){
   const g = squash(guess), f = squash(film);
-  if (!g || !f) return false;
-  const bf = base(film);
-  return g === f || (!!bf && base(guess) === bf) || distance(g, f) <= slack(f.length);
+  return !!g && !!f && distance(g, f) <= 0.5;
 }
 
 /* Titles that isCorrect would take as a typo of `title`. The host sends

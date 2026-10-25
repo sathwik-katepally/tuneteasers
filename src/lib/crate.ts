@@ -367,8 +367,8 @@ export interface AnswerEntry { title: string; films: string[]; year: number; fil
 /* The film a track is from: "Sitaare (From "Ikkis") - Single" is Ikkis, and
    a soundtrack album loses "(Original Motion Picture Soundtrack)". Anything
    else (a compilation, a single) stays as it is and is not offered as a film. */
-const FROM = /\(From "([^"]+)"\)/i;
-const OST = /\s*\((?:Original Motion Picture )?Soundtrack\)/i;
+const FROM = /[([]From "([^"]+)"[)\]]/i;
+const OST = /\s*[([](?:Original )?(?:Motion Pictures? )?Soundtrack[)\]]/i;
 export function filmOf(album: string, title = ""): string {
   const from = FROM.exec(album) || FROM.exec(title);
   return from ? from[1].trim() : album.replace(OST, "").replace(/\s+-\s+(?:Single|EP)$/i, "").trim();
