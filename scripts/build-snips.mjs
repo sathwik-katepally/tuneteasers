@@ -115,7 +115,7 @@ function loadCorpus(){
 
 async function collectSongs(){
   const corpus = loadCorpus();
-  const lang = s => (s.language === "telugu" ? "telugu" : "bolly");
+  const lang = s => s.language;
   const seen = new Set(), pool = [], unresolved = [];
   let consecutiveEmpty = 0;
   for (let i = 0; i < corpus.length; i += CORPUS_BATCH){
@@ -319,7 +319,7 @@ function startExtractor(){
   console.log("resolving corpus songs to streams...");
   const corpus = await collectSongs();
   const perLang = l => corpus.filter(s => s.lang === l).length;
-  console.log(`corpus: ${corpus.length} unique songs (${perLang("bolly")} hindi, ${perLang("telugu")} telugu)`);
+  console.log(`corpus: ${corpus.length} unique songs (${[...new Set(corpus.map(s => s.lang))].map(l => `${perLang(l)} ${l}`).join(", ")})`);
   if (!corpus.length){ console.error("no corpus songs resolved, aborting without touching snips.json"); process.exit(1); }
 
   const prev = loadIndex();

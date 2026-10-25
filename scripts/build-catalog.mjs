@@ -6,10 +6,14 @@ import { songKey } from "../src/lib/utils.js";
 import { EXCLUDE_RX } from "../src/lib/constants.js";
 
 const TERMS = {
-  bolly: ["Arijit Singh","Pritam songs","Shreya Ghoshal hindi","A R Rahman hindi","Amit Trivedi","Vishal Shekhar","Sonu Nigam hindi","Atif Aslam hindi","Jubin Nautiyal","Mohit Chauhan","Sachin Jigar","Badshah hindi"],
+  hindi: ["Arijit Singh","Pritam songs","Shreya Ghoshal hindi","A R Rahman hindi","Amit Trivedi","Vishal Shekhar","Sonu Nigam hindi","Atif Aslam hindi","Jubin Nautiyal","Mohit Chauhan","Sachin Jigar","Badshah hindi"],
   telugu: ["Sid Sriram telugu","Devi Sri Prasad hits","Thaman S telugu","Anirudh telugu songs","Mickey J Meyer telugu","Gopi Sundar telugu","M M Keeravani telugu","Armaan Malik telugu","Anurag Kulkarni","telugu hit songs","Kaala Bhairava","Mangli telugu"],
+  tamil: ["Anirudh Ravichander","A R Rahman tamil","Harris Jayaraj","Yuvan Shankar Raja","Sid Sriram tamil","D Imman","G V Prakash Kumar","Santhosh Narayanan","Hiphop Tamizha","Dhanush tamil songs"],
+  english: ["Ed Sheeran","Taylor Swift","The Weeknd","Dua Lipa","Bruno Mars","Eminem","Coldplay","Imagine Dragons","Maroon 5","Justin Bieber","Rihanna","Billie Eilish"],
 };
-const LANG_OK = { bolly:["bollywood","hindi"], telugu:["telugu","tollywood"] };
+// iTunes' genre names a song's language for Indian music; English songs carry a Western genre instead.
+const LANG_OK = { hindi:["bollywood","hindi"], telugu:["telugu","tollywood"], tamil:["tamil","kollywood"], english:["pop","hip-hop","rap","dance","r&b","rock","alternative","electronic"] };
+const NOT_ENGLISH = /indian|bollywood|punjabi|tamil|telugu|hindi|devotional/;
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -37,6 +41,7 @@ for (const [lang, terms] of Object.entries(TERMS)) {
       if (EXCLUDE_RX.test(s.trackName)) continue;
       const g = (s.primaryGenreName || "").toLowerCase();
       if (!LANG_OK[lang].some(k => g.includes(k))) continue;
+      if (lang === "english" && NOT_ENGLISH.test(g)) continue;
       const year = s.releaseDate ? new Date(s.releaseDate).getFullYear() : 0;
       if (year < 2000) continue;
       const key = songKey(s.trackName);
