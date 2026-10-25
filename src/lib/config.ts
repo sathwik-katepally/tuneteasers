@@ -76,11 +76,15 @@ export const POPULAR_MIN_SCORE = 0.5;
 
 /* Buzz-in rooms (docs/room-mode.md): the host screen plays, phones buzz. */
 export const ROOM_SONGS_PER_ROUND = 4;
-export const ROOM_ANSWER_SECS = 15;
+export const ROOM_ANSWER_SECS = 20;
 // After a clip ends, how long buzzing stays open before the next rung plays.
 export const ROOM_GRACE_SECS = 6;
 // How long a wrong answer shows on the big screen before the show moves on.
 export const ROOM_WRONG_BEAT_MS = 1800;
+/* Nobody has to work the big screen: the lobby starts the show this long
+   after the last phone sat down, and a reveal and the box office move on by
+   themselves after these. Each countdown has a tap to go now and a Pause. */
+export const ROOM_AUTO_SECS = { lobby: 15, reveal: 6, board: 8 } as const;
 
 export const MAX_MEMBERS = 6;
 export const NAME_MAX = 24;

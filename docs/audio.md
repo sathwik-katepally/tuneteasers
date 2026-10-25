@@ -94,6 +94,14 @@ The prime marks the element paused, so the first clip always seeks to its start:
 If a browser still refuses (`play()` rejects with `NotAllowedError`), the engine logs `play-blocked`, stops the session and calls `onBlocked`; the game shows a "Tap to play" button that replays the rung inside a tap.
 `e2e/autoplay.mjs` emulates the iOS rule in Chromium and checks both paths.
 
+A buzz-in room's big screen moves from song to song on timers with nobody touching it (docs/room-mode.md), so there is no tap to prime the next song in.
+The unlock belongs to the element object and survives a new `src`, so `engine.unlock()` keeps a pool of unlocked elements: called inside a tap ("Open a room", Resume, "Start the show", "Same crowd again"), it plays up to `POOL_SIZE` (60) elements on a silent data URI, muted.
+An element joins the pool at its `play()` call, since that is when iOS unlocks it, so a reveal straight after a Resume tap already finds one; a refused play takes its element back out.
+Every element the engine loads a song into (`_el`, `prefetch`) comes from that pool while it lasts, then from `new Audio()`, which falls back to "Tap to play" on a strict browser.
+An unlocked element the engine is done with (the last song's, a replaced prefetch) goes back to the pool (`_recycle`), unless it is wired into the AudioContext for Music-only, where as-is playback through it would be silent; a long Music-only show is what the pool size covers.
+The room host primes only after a tap; a timer-started move skips the prime, since a prime outside a tap only races the clip.
+`e2e/room.mjs` runs the host under the same emulated rule and fails on any refused play.
+
 ## Sound effects
 
 `engine.sfx(name)` synthesises short effects on the engine's AudioContext; there are no audio files.

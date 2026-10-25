@@ -90,8 +90,8 @@ export function App(){
     screen = <Setup error={game.error} settings={S} upSettings={upSettings} players={state.players} teams={state.teams} setRoster={setRoster}
       blocked={game.blocked} unblockArtist={game.unblockArtist} startGame={() => game.startGame()} savedGame={saved}
       hostShow={hostShow?.started ? hostShow : null}
-      openRoom={() => { engine.ac(); saveHostShow(null); setHostShow(null); setHostResume(false); setState(st => ({ ...st, screen: "host" })); }}
-      resumeRoom={() => { engine.ac(); setHostResume(true); setState(st => ({ ...st, screen: "host" })); }}
+      openRoom={() => { engine.unlock(); saveHostShow(null); setHostShow(null); setHostResume(false); setState(st => ({ ...st, screen: "host" })); }}
+      resumeRoom={() => { engine.unlock(); setHostResume(true); setState(st => ({ ...st, screen: "host" })); }}
       discardRoom={() => { saveHostShow(null); setHostShow(null); }}
       joinRoom={() => { setBuzzerExit("setup"); setRoomCode(""); setState(st => ({ ...st, screen: "buzzer" })); }}
       resumeGame={game.resumeGame}

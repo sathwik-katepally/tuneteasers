@@ -106,7 +106,8 @@ async function join(p, code){
 }
 async function start(h, n){
   await until(`${n} players in ${h.label}'s lobby`, () => latest[h.label]?.players.length === n && latest[h.label].players.every(p => p.online));
-  await h.page.getByRole("button", { name: "Start the show" }).click();
+  // The lobby may already have started by itself if the last phone sat down a while ago.
+  await h.page.getByRole("button", { name: "Start the show" }).click({ timeout: 3000 }).catch(() => {});
   return until("host queue", async () => { const s = await hostShow(h); return s?.started && s.queue.length ? s : null; }, 60000);
 }
 

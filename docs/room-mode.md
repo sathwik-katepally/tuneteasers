@@ -7,7 +7,7 @@ It is the Kahoot or Jackbox model: no accounts, a four-letter code, and nothing 
 
 Example: the host taps "Buzz in from every phone" on the landing (or picks "Buzz in" on setup) and taps "Open a room"; the big screen shows `KFHB` and a QR code.
 Asha scans it; her phone shows the code as fixed text with her name field focused, she types her name and sees "You're in".
-When the clip starts her phone lights up BUZZ; she taps it, the song pauses on the big screen, and she has 15 seconds to type the title.
+When the clip starts her phone lights up BUZZ; she taps it, the song pauses on the big screen, and she has 20 seconds (`ROOM_ANSWER_SECS`) to type the title.
 Autocomplete offers every known title in the show's languages; if she is right she scores the rung's points, if not the next person who buzzed gets a turn.
 
 ## Who owns what
@@ -43,6 +43,22 @@ Autocomplete offers every known title in the show's languages; if she is right s
    - queue empty: `missed`. After a short beat (`ROOM_WRONG_BEAT_MS`) the host plays the next rung for everyone (the ladder's "Hear more": only the new stretch, `playRung` in `src/lib/ladder.ts`), or reveals once the ladder is spent. If a buzz cut the clip short, the next play starts from the top of the window instead, and on the last rung it replays. Buzzes are still accepted during the beat.
 5. When a clip ends with nobody buzzing, buzzing stays open for `ROOM_GRACE_SECS`, then the next rung plays. The host can also tap "Hear more" or "Reveal it".
 6. If every player is locked out the song is revealed straight away.
+
+## Nobody works the big screen
+
+After the tap that opens the room, the show runs itself, so nobody has to stand at the TV.
+The timings are `ROOM_AUTO_SECS` in `src/lib/config.ts`.
+
+- The lobby starts the show 15 seconds after the last phone sat down; every new seat starts that countdown over, so the show waits while people are still arriving.
+  "Wait for everyone" holds it, and "Start the show" goes at once.
+- A reveal moves on after 6 seconds and the box office after 8, the final one straight to the podium.
+  Each shows its countdown as a bar on its button, which goes at once when tapped, and a Pause link holds it until Resume (WCAG 2.2.2: content that moves on by itself needs a way to stop it).
+- The countdown before each song and everything inside a song (the ladder, the grace window, the reveal) were already automatic.
+- The podium waits for a tap ("Same crowd again" or "New show"), so the show ends where people want it to.
+- A start that failed (too few songs, no connection) waits for a tap instead of retrying on its own.
+
+Starting songs without a tap needs the engine's unlocked element pool on iOS (docs/audio.md); without it an iPhone host would stop on "Tap to play" at every song.
+Pass-the-phone keeps its taps: the hand-over is a real moment, and its tap is what unlocks the next clip.
 
 ## Skipping a song
 
@@ -141,7 +157,7 @@ So "Main Hu Na" matches "Main Hoon Na" and "kesaria" matches "Kesariya", while "
 ## Testing
 
 `npm run e2e:room` (`e2e/room.mjs`) starts a local `wrangler dev` and proxies the room WebSockets to it from Playwright, recording every frame.
-Desktop Chromium hosts (or a WebKit iPhone with `--host=phone`; `--difficulty=medium` plays a Music-only show) and three WebKit iPhones in separate contexts play a full 12-song show: join by typed code and by link, a buzz race in arrival order, wrong answer to the next buzzer, right answer at the rung's points, "Hear more" and the automatic ladder after a miss, a typed misspelling, a reload and a leave-and-return keeping the seat, the answer clock running out, everyone locked out, the box office, skips (two votes of three do not skip, the third does, the host skips on its own twice more, the room refuses a stale skip and a skip after a buzz, nothing lands in the host's history, and the skipped title on the big screen only), the host reloading while a phone answers (the room scores it once and the host resumes on its reveal), the host reloading on the final reveal, podium totals against the room's results, each phone's final place, and "Same crowd again".
+Desktop Chromium hosts (or a WebKit iPhone with `--host=phone`; `--difficulty=medium` plays a Music-only show) and three WebKit iPhones in separate contexts play a full 12-song show that the big screen runs by itself under the emulated iOS autoplay rule (no refused play, a held lobby that waits, then starts by itself, reveals and box offices that move on, a paused final reveal that stays): join by typed code and by link, a buzz race in arrival order, wrong answer to the next buzzer, right answer at the rung's points, "Hear more" and the automatic ladder after a miss, a typed misspelling, a reload and a leave-and-return keeping the seat, the answer clock running out, everyone locked out, the box office, skips (two votes of three do not skip, the third does, the host skips on its own twice more, the room refuses a stale skip and a skip after a buzz, nothing lands in the host's history, and the skipped title on the big screen only), the host reloading while a phone answers (the room scores it once and the host resumes on its reveal), the host reloading on the final reveal, podium totals against the room's results, each phone's final place, and "Same crowd again".
 It then probes the room directly: a foreign origin, an unclaimed code, a wrong host token, silent sockets up to the cap and their 4401 timeout (in a browser page with its own context: Node's WebSocket reports a close the server starts late or never, and the game contexts route the Worker's host through the script's Node proxy, which matters when `--worker` is production), frames before a hello, a host command from a phone, an oversized frame, a flood, and song numbers out of order.
 `--worker=<origin>` runs it against a deployed Worker (the preview one) instead, and `--categories=romantic,...` checks that every song in the show carries one of those tags.
 

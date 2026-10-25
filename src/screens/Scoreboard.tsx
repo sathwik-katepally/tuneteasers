@@ -1,11 +1,13 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useReducedMotion } from "motion/react";
 import { SplitFlap } from "../components/SplitFlap";
+import { AutoNext } from "../components/AutoNext";
 import type { GameState } from "../types";
 import s from "./Scoreboard.module.css";
 import sh from "./shared.module.css";
 
-export function Scoreboard({ game, round, onSettle, onNext }: { game: GameState; round: number; onSettle: () => void; onNext: () => void }){
+/* autoSecs: seconds before the board moves on by itself (buzz-in rooms); absent waits for a tap. */
+export function Scoreboard({ game, round, onSettle, onNext, autoSecs }: { game: GameState; round: number; onSettle: () => void; onNext: (auto?: boolean) => void; autoSecs?: number }){
   const reduce = useReducedMotion();
   const [settled, setSettled] = useState(false);
   useEffect(() => {
@@ -39,6 +41,7 @@ export function Scoreboard({ game, round, onSettle, onNext }: { game: GameState;
   const [leader, second] = [...game.cast].sort((a, b) => b.score - a.score);
   const tie = !!second && second.score === leader.score;
   const left = game.totalRounds - round;
+  const next = final ? "Roll the credits" : `On to round ${round + 1}`;
   const foot = !settled ? "Tallying"
     : final ? (tie ? "A tie at the top. Credits next." : `${leader.name} takes it. Credits next.`)
     : `${tie ? "Neck and neck at the top" : `${leader.name} leads`}. ${left} round${left === 1 ? "" : "s"} to go.`;
@@ -80,7 +83,9 @@ export function Scoreboard({ game, round, onSettle, onNext }: { game: GameState;
         <p className={s.foot}>{foot}</p>
       </div>
       <div className={sh.actions}>
-        <button type="button" className="btn btn-primary btn-block" onClick={onNext}>{final ? "Roll the credits" : `On to round ${round + 1}`}</button>
+        {autoSecs
+          ? <AutoNext secs={autoSecs} label={next} onGo={onNext} />
+          : <button type="button" className="btn btn-primary btn-block" onClick={() => onNext()}>{next}</button>}
       </div>
     </div>
   );

@@ -1,0 +1,47 @@
+.wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+}
+
+.btn {
+  position: relative;
+  overflow: hidden;
+}
+
+.label {
+  position: relative;
+}
+
+.count {
+  position: absolute;
+  right: 18px;
+  min-width: 1.4em;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  opacity: 0.85;
+}
+
+.fill {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 5px;
+  background: var(--bulb);
+  transform-origin: left;
+  transition: transform 250ms linear;
+}
+
+.fillHeld {
+  background: var(--cream-shade);
+}
+
+.hold {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+}

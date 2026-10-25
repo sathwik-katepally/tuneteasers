@@ -1,7 +1,8 @@
 import { X } from "lucide-react";
 import { BulbFrame } from "../components/Bulbs";
 import { Qr } from "../components/Qr";
-import { DIFFICULTY, ROOM_SONGS_PER_ROUND } from "../lib/config";
+import { AutoNext } from "../components/AutoNext";
+import { DIFFICULTY, ROOM_AUTO_SECS, ROOM_SONGS_PER_ROUND } from "../lib/config";
 import { roomLink, type Link, type RoomView } from "../lib/room";
 import type { Settings } from "../types";
 import sh from "../screens/shared.module.css";
@@ -12,7 +13,7 @@ const siteAddress = () => (location.host + location.pathname).replace(/\/(index\
 
 export function Lobby({ code, view, link, settings, error, onStart, onKick, onBack }: {
   code: string; view: RoomView | null; link: Link; settings: Settings; error: string;
-  onStart: () => void; onKick: (id: string) => void; onBack: () => void;
+  onStart: (auto: boolean) => void; onKick: (id: string) => void; onBack: () => void;
 }){
   const players = view?.players ?? [];
   const ready = link === "open" && players.length > 0;
@@ -63,9 +64,12 @@ export function Lobby({ code, view, link, settings, error, onStart, onKick, onBa
             <span>{LANG[settings.mix]}, {DIFFICULTY[settings.difficulty].label}</span>
             <span>{settings.rounds} rounds of {ROOM_SONGS_PER_ROUND} songs</span>
           </div>
-          <button type="button" className="btn btn-primary btn-block" onClick={onStart} disabled={!ready}>
-            {players.length ? "Start the show" : "Waiting for players"}
-          </button>
+          {/* Each phone that sits down starts the countdown over, so the show waits while people are still arriving.
+              After a failed start it waits for a tap, or it would retry on its own forever. */}
+          {error
+            ? <button type="button" className="btn btn-primary btn-block" onClick={() => onStart(false)} disabled={!ready}>Start the show</button>
+            : <AutoNext secs={ROOM_AUTO_SECS.lobby} label={players.length ? "Start the show" : "Waiting for players"} onGo={onStart}
+                restart={players.length} disabled={!ready} holdLabel="Wait for everyone" resumeLabel="Start by itself" />}
           <button type="button" className={`link ${s.back}`} onClick={onBack}>Close the room</button>
         </div>
       </div>

@@ -4,6 +4,7 @@ import { useReducedMotion } from "motion/react";
 import { Ban } from "lucide-react";
 import { Curtain } from "../components/Curtain";
 import { Stamp } from "../components/Stamp";
+import { AutoNext } from "../components/AutoNext";
 import { displayTitle } from "../lib/utils.js";
 import type { Track, Verdict } from "../types";
 import s from "./Reveal.module.css";
@@ -14,14 +15,16 @@ interface Props {
   name: string;
   verdict: Verdict;
   note: string;
-  onNext: () => void;
+  onNext: (auto?: boolean) => void;
   nextLabel?: string;
+  /* Seconds before the reveal moves on by itself (buzz-in rooms); absent waits for a tap. */
+  autoSecs?: number;
   primaryArtist: string;
   artistBlocked: boolean;
   onBlockArtist: () => void;
 }
 
-export function Reveal({ track, name, verdict, note, onNext, nextLabel, primaryArtist, artistBlocked, onBlockArtist }: Props){
+export function Reveal({ track, name, verdict, note, onNext, nextLabel, autoSecs, primaryArtist, artistBlocked, onBlockArtist }: Props){
   const reduce = useReducedMotion();
   const [open, setOpen] = useState(false);
   useEffect(() => {
@@ -33,6 +36,7 @@ export function Reveal({ track, name, verdict, note, onNext, nextLabel, primaryA
   const wrong = verdict?.result === "wrong";
   const film = track.album || "";
   const title = displayTitle(track.title);
+  const next = nextLabel ?? (verdict.finished ? "Final box office" : verdict.roundOver ? "To the box office" : "Pass it on");
   return (
     <div className={sh.stage}>
       <m.div
@@ -71,9 +75,9 @@ export function Reveal({ track, name, verdict, note, onNext, nextLabel, primaryA
         <m.p className={s.line} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: reduce ? 0 : 0.4 }}>
           {correct ? `+${verdict.points} for ${name}, ${verdict.total} in total` : "Better luck next reel"}
         </m.p>
-        <button type="button" className="btn btn-primary btn-block" onClick={onNext}>
-          {nextLabel ?? (verdict.finished ? "Final box office" : verdict.roundOver ? "To the box office" : "Pass it on")}
-        </button>
+        {autoSecs
+          ? <AutoNext secs={autoSecs} label={next} onGo={onNext} />
+          : <button type="button" className="btn btn-primary btn-block" onClick={() => onNext()}>{next}</button>}
         {primaryArtist && (
           <button type="button" className={s.block} onClick={onBlockArtist} disabled={artistBlocked}>
             {artistBlocked ? `${primaryArtist} won't come up again` : <><Ban size={14} strokeWidth={2.5} /> Don't play {primaryArtist} again</>}

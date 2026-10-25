@@ -13,9 +13,13 @@ import { log, errMsg } from "./log.js";
 import { SNIP_WINDOW_SEC, snipMethodOk } from "./constants.js";
 
 const STALL_MS = 12000; // a dead or stalled stream must not pin the game on "Cueing it up…"
+// A long Music-only show's songs and skips (its elements are wired into the
+// AudioContext and cannot go back); a pool that runs dry falls back to "Tap to play".
+const POOL_SIZE = 60;
+const SILENCE = "data:audio/wav;base64,UklGRmQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YUAAAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA";
 
 export const engine = {
-  ctx:null, el:null, pre:null, timer:null, boundary:null, session:0,
+  ctx:null, el:null, pre:null, timer:null, boundary:null, session:0, pool:[],
   ac(){
     if (!this.ctx) this.ctx = new (window.AudioContext||window.webkitAudioContext)();
     if (this.ctx.state === "suspended") this.ctx.resume();
@@ -35,16 +39,18 @@ export const engine = {
   _el(url, cors){
     const want = cors ? "1" : "";
     if (this.el && this.el.dataset.src === url && this.el.dataset.cors === want && !this.el.error) return this.el;
+    const old = this.el;
     if (this.pre && this.pre.dataset.src === url && this.pre.dataset.cors === want && !this.pre.error){
-      this.el = this.pre; this.pre = null; return this.el;
+      this.el = this.pre; this.pre = null; this._recycle(old); return this.el;
     }
-    const el = new Audio();
+    const el = this._fresh();
     if (cors) el.crossOrigin = "anonymous";
     el.preload = "auto";
     el.dataset.src = url;
     el.dataset.cors = want;
     el.src = url;
     this.el = el;
+    this._recycle(old);
     return el;
   },
   /* Resolves true once metadata is ready (seekable), false on error/stall. */
@@ -192,8 +198,8 @@ export const engine = {
     if (!track || !track.stream) return;
     const url = track.stream;
     if ((this.el && this.el.dataset.src === url) || (this.pre && this.pre.dataset.src === url)) return;
-    if (this.pre){ try { this.pre.removeAttribute("src"); this.pre.load(); } catch(e){} } // cancel the old one
-    const el = new Audio();
+    if (this.pre && !this._recycle(this.pre)){ try { this.pre.removeAttribute("src"); this.pre.load(); } catch(e){} } // cancel the old one
+    const el = this._fresh();
     const cors = !plain;
     if (cors) el.crossOrigin = "anonymous";
     el.preload = "auto";
@@ -201,6 +207,44 @@ export const engine = {
     el.dataset.cors = cors ? "1" : "";
     el.src = url;
     this.pre = el;
+  },
+  /* iOS lets an element start audio from a timer only once that same element
+     has played inside a tap, and the unlock survives a new src. A buzz-in
+     room's big screen plays song after song from timers with nobody touching
+     it, so each tap tops up a pool of unlocked elements that later songs load
+     into. The unlock happens at the play() call, so an element joins the
+     pool at once: a reveal right after a Resume tap takes one before the
+     silent play has settled, and the settling then leaves it alone. A
+     refused play takes its element back out. */
+  unlock(){
+    this.ac();
+    for (let i = this.pool.length; i < POOL_SIZE; i++){
+      const el = new Audio(SILENCE);
+      el.muted = true;
+      el._ttUnlocked = true;
+      this.pool.push(el);
+      const pooled = () => this.pool.includes(el);
+      const keep = () => { if (pooled()){ el.pause(); el.muted = false; el.removeAttribute("src"); } };
+      const drop = () => { if (pooled()) this.pool.splice(this.pool.indexOf(el), 1); };
+      try { const p = el.play(); if (p) p.then(keep, drop); else keep(); } catch(e){ drop(); }
+    }
+  },
+  _fresh(){ return this.pool.pop() || new Audio(); },
+  /* An unlocked element the engine is done with goes back to the pool, so
+     skips and replaced prefetches don't run it dry. Not one wired into the
+     AudioContext: as-is playback through it would be silent. */
+  _recycle(el){
+    if (!el || !el._ttUnlocked || el._ttSrc || this.pool.length >= POOL_SIZE || this.pool.includes(el)) return false;
+    try {
+      el.pause();
+      el.removeAttribute("src");
+      el.removeAttribute("crossorigin");
+      delete el.dataset.src; delete el.dataset.cors;
+      el._ttPaused = false;
+      el.load();
+    } catch(e){ return false; }
+    this.pool.push(el);
+    return true;
   },
   /* Unlock the track's element inside a tap. iOS only lets an element start
      audio from a timer (the countdown) once it has been played from a user

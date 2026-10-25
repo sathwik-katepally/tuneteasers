@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { DIFFICULTY, LADDER, ROOM_ANSWER_SECS, ROOM_GRACE_SECS, ROOM_SONGS_PER_ROUND, ROOM_WRONG_BEAT_MS, hookOffset } from "../lib/config";
+import { DIFFICULTY, LADDER, ROOM_ANSWER_SECS, ROOM_AUTO_SECS, ROOM_GRACE_SECS, ROOM_SONGS_PER_ROUND, ROOM_WRONG_BEAT_MS, hookOffset } from "../lib/config";
 import { nearTitles } from "../lib/answer.js";
 import { useClipPlayer } from "../lib/ladder";
 import { answerTitles, buildCrate, withFreshAt } from "../lib/crate";
@@ -128,9 +128,11 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
     if (upcoming) engine.prefetch(upcoming, plain);
   }, [show?.idx, phase]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function startShow(){
+  /* auto: the lobby's countdown ran out, so there is no tap to unlock audio in. */
+  async function startShow(auto = false){
     if (!show) return;
     engine.ac();
+    if (!auto) engine.unlock();
     setPhase("loading");
     setError("");
     own.current = (await groupCooldown()) ?? cooldownOf(loadHistory());
@@ -303,14 +305,17 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
     setPhase("reveal");
   }
 
-  function afterReveal(){
+  /* auto: the reveal's countdown moved on, not a tap. A prime only works
+     inside a tap; without one the next song plays from an element the
+     engine unlocked at an earlier tap (engine.unlock). */
+  function afterReveal(auto = false){
     if (!show || !revealed) return;
     engine.stop();
     if (revealed.verdict.finished) room.send({ t: "end" });
     if (revealed.verdict.roundOver){ setPhase("board"); return; }
     const s = freshCue(show);
     setShow(s);
-    engine.prime(s.queue[s.idx], s.plain);
+    if (!auto) engine.prime(s.queue[s.idx], s.plain);
     toCountdown();
   }
 
@@ -346,7 +351,7 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
     nextTrack({ ...sh, skipsSeen: v.skips }, displayTitle(t.title));
   }, [view?.skips, view?.song?.state, phase]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  function leaveBoard(){
+  function leaveBoard(auto = false){
     if (!show) return;
     if (view?.phase === "over" || show.songNo >= show.total || show.idx >= show.queue.length){
       engine.ac();
@@ -356,7 +361,7 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
     }
     const s = freshCue(show);
     setShow(s);
-    engine.prime(s.queue[s.idx], s.plain);
+    if (!auto) engine.prime(s.queue[s.idx], s.plain);
     toCountdown();
   }
 
@@ -393,16 +398,16 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
       break;
     case "reveal":
       screen = revealed && <Reveal track={revealed.track} name={revealed.verdict.name} verdict={revealed.verdict} note={note}
-        onNext={afterReveal} nextLabel={revealed.verdict.finished ? "Final box office" : revealed.verdict.roundOver ? "To the box office" : "Next song"}
+        onNext={afterReveal} autoSecs={ROOM_AUTO_SECS.reveal} nextLabel={revealed.verdict.finished ? "Final box office" : revealed.verdict.roundOver ? "To the box office" : "Next song"}
         primaryArtist="" artistBlocked={false} onBlockArtist={() => {}} />;
       break;
     case "board":
       key = `board-${show?.songNo}`;
-      screen = game && <Scoreboard game={game} round={Math.max(1, Math.ceil((show?.songNo ?? 1) / (show?.perRound ?? 1)))} onSettle={() => engine.sfx("flaps")} onNext={leaveBoard} />;
+      screen = game && <Scoreboard game={game} round={Math.max(1, Math.ceil((show?.songNo ?? 1) / (show?.perRound ?? 1)))} onSettle={() => engine.sfx("flaps")} onNext={leaveBoard} autoSecs={ROOM_AUTO_SECS.board} />;
       break;
     case "done":
       meta = "The end";
-      screen = game && <Podium cast={game.cast} onAgain={() => { if (show) setShow({ ...show, started: false }); startShow(); }} onNewShow={endShow} />;
+      screen = game && <Podium cast={game.cast} onAgain={() => { if (show) setShow({ ...show, started: false }); void startShow(); }} onNewShow={endShow} />;
       break;
     default:
       key = `song-${show?.idx}`;
