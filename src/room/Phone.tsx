@@ -307,7 +307,8 @@ function Buzzer({ view, send, online, error }: {
 function entryMeta(e: AnswerEntry){
   if (e.film) return `The film${e.year ? `, ${e.year}` : ""} · half points`;
   const films = e.films.length > 2 ? `${e.films.slice(0, 2).join(", ")} +${e.films.length - 2}` : e.films.join(", ");
-  return [films, e.year || ""].filter(Boolean).join(", ");
+  // One year for several films would read as the first film's year.
+  return [films, e.films.length === 1 && e.year || ""].filter(Boolean).join(", ");
 }
 
 function useAnswerTitles(mix: RoomView["mix"]){

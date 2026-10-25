@@ -161,7 +161,7 @@ So "Main Hu Na" matches "Main Hoon Na" and "kesaria" matches "Kesariya", while "
 Naming the film instead scores `ROOM_FILM_SHARE` (half) of the points (`isFilm`, the same folding and typo allowance against the film the host sent); the phone then reads "You named the film, so half the points" and the big screen "+50 for Asha (the film)".
 The host sends the film cleaned by `filmOf` in `src/lib/crate.ts`: `Sitaare (From "Ikkis") - Single` is Ikkis, and a soundtrack album loses "(Original Motion Picture Soundtrack)".
 
-The phone's list (`answerTitles`) has one entry per title with every film it is from and the earliest year, shown under the title ("Chaleya / Jawan, 2023" against "Chhaliya / Tashan, 2008"), and one entry per film, marked "The film · half points", ranked after songs.
+The phone's list (`answerTitles`) has one entry per title with every film it is from, shown under the title with the year when there is one film ("Chaleya / Jawan, 2023" against "Chhaliya / Tashan, 2008"), and one entry per film, marked "The film · half points", ranked after songs.
 A film that is also a song's title is left to that song's entry.
 `suggest` matches a whole-title prefix, then word prefixes, then letters anywhere, plainly and folded, and last by consonants only, closest first, so "nuvvos" still finds "Nuvvasthanante".
 
