@@ -12,12 +12,12 @@
 import { Server } from "partyserver";
 import { isCorrect, isFilm } from "../../src/lib/answer.js";
 import { ROOM_HEARD } from "../../src/lib/constants.js";
+import { langsOf, oldMix } from "../../src/lib/languages.ts";
 
 const CODE_ALPHABET = "BCDFGHJKLMNPQRSTVWXZ";
 export const CODE_RX = /^[BCDFGHJKLMNPQRSTVWXZ]{4}$/;
 const KEY_RX = /^[A-Za-z0-9_-]{16,64}$/;
 const TOKEN_RX = /^[A-Za-z0-9_-]{22}$/;
-const MIXES = ["bolly", "telugu", "both"];
 const CONTROL_RX = /[\u0000-\u001f\u007f]/g;
 const HAS_CONTROL = /[\u0000-\u001f\u007f]/;
 const HOUR = 3600e3;
@@ -122,7 +122,7 @@ export class Room extends Server {
     this.room = {
       code, hostHash, createdAt: Date.now(), touchedAt: Date.now(),
       phase: "lobby", players: [], rules: { answerSecs: 15 },
-      mix: "both", total: 0, perRound: 1, song: null, results: [], seq: 0, skips: 0, cues: 0,
+      langs: ["hindi", "telugu"], total: 0, perRound: 1, song: null, results: [], seq: 0, skips: 0, cues: 0,
     };
     await this.save();
     return true;
@@ -310,7 +310,10 @@ export class Room extends Server {
       t: "state",
       phase: r.phase,
       code: r.code,
-      mix: r.mix,
+      // A room saved before the language list holds one word, mix; a phone tab
+      // still on the site from before reads mix.
+      langs: r.langs ?? langsOf(r.mix),
+      mix: r.mix ?? oldMix(r.langs),
       total: r.total,
       perRound: r.perRound,
       answerSecs: r.rules.answerSecs,
@@ -409,7 +412,9 @@ const HOST = {
   start(conn, m){
     const r = this.room;
     if (r.phase === "show") return "already-started";
-    if (!MIXES.includes(m.mix)) return "bad-mix";
+    // A host from before the language list sends one word, mix.
+    const langs = langsOf(m.langs ?? m.mix);
+    if (!langs) return "bad-mix";
     if (!intIn(m.total, 1, LIMITS.songs) || !intIn(m.perRound, 1, LIMITS.songs)) return "bad-length";
     if (!intIn(m.answerSecs, ...LIMITS.answerSecs)) return "bad-rules";
     // A host from before film answers sends none, and the film then scores nothing.
@@ -419,7 +424,8 @@ const HOST = {
     r.players = r.players.filter(p => !p.left);
     if (!r.players.length) return "no-players";
     r.phase = "show";
-    r.mix = m.mix;
+    r.langs = langs;
+    delete r.mix;
     r.total = m.total;
     r.perRound = m.perRound;
     r.rules = { answerSecs: m.answerSecs, filmShare };
@@ -442,7 +448,8 @@ const HOST = {
     r.cues = (r.cues || 0) + 1;
     r.song = {
       n: m.n, cue: r.cues, rung: -1, points: 0, state: "cue",
-      answer: { title, film: clean(m.film, LIMITS.title), year: intIn(m.year, 0, 3000) ? m.year : 0, artist: clean(m.artist, LIMITS.title) },
+      // half: what m.film holds, the film or (a pop song) the artist, which scores part of the points.
+      answer: { title, film: clean(m.film, LIMITS.title), half: m.half === "artist" ? "artist" : "film", year: intIn(m.year, 0, 3000) ? m.year : 0, artist: clean(m.artist, LIMITS.title) },
       queue: [], locked: [], answering: null, deadline: null, guesses: [], winner: null, won: 0, votes: [],
       // Other titles that fold close to this one: judging only, never in a view.
       near: m.near.map(t => clean(t, LIMITS.title)).filter(Boolean),
