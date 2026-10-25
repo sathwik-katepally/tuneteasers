@@ -392,8 +392,10 @@ function firstRelease(title, artist){
     let j = null;
     try { j = JSON.parse(await getText(url, { "user-agent": WD_UA, accept: "application/json" })); } catch {}
     if (!cached) await sleep(CFG.musicbrainz.gapMs);
-    const key = songKey(title);
-    const years = (j?.recordings || []).filter(r => r.score >= CFG.musicbrainz.minScore && songKey(r.title) === key)
+    // The search also returns same-titled recordings by others ("If I Can't Have You", 2006), so the artist must match too.
+    const key = songKey(title), who = norm(artist);
+    const years = (j?.recordings || []).filter(r => r.score >= CFG.musicbrainz.minScore && songKey(r.title) === key
+      && (r["artist-credit"] || []).some(c => norm(c.name || c.artist?.name) === who))
       .map(r => parseInt(r["first-release-date"])).filter(y => y > 1900);
     return years.length ? Math.min(...years) : 0;
   });
@@ -425,7 +427,11 @@ async function classifyPop(raw, home){
   if (home(lead) === "film") return { reject: "indian-act" };
   const copies = [raw, ...await siblings(raw)];
   // The album the song came out on: the earliest copy that is not a compilation or a bare single.
-  const album = c => { const a = cleanAlbum(c.more_info?.album).name; return a && !COMPILATION_RX.test(a) && norm(a) !== norm(title) ? a : ""; };
+  // Edition notes ("Meteora (DMD Album + 3 Bonus Tracks)", "Divide (Deluxe)") are not the album's name.
+  const album = c => {
+    const a = cleanAlbum(c.more_info?.album).name.replace(/(\s*[([][^)\]]*[)\]])+$/, "").trim();
+    return a && !COMPILATION_RX.test(a) && norm(a) !== norm(title) ? a : "";
+  };
   const canonical = copies.filter(c => album(c)).sort((a, b) => yearOf(a) - yearOf(b))[0] || raw;
   const years = copies.map(yearOf).filter(Boolean);
   const saavnYear = years.length ? Math.min(...years) : 0;
