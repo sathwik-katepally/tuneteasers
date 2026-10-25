@@ -47,6 +47,7 @@ const wire = (context, label) => wireWorker(context, worker.origin, origin, traf
 });
 
 // --host=phone runs the host screen on a WebKit iPhone too (a room with no laptop).
+// --phone=se plays on 320px iPhone SEs, the smallest screen the in-show fit check covers.
 const hostOnPhone = A.host === "phone";
 
 /* The big screen runs the show from timers, so it is held to the iOS rule
@@ -73,7 +74,7 @@ async function device(kind, label){
     : await (A["phone-engine"] === "chromium" ? chromium : webkit).launch();
   const context = await browser.newContext(desk
     ? { viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" }
-    : { ...devices["iPhone 13"], reducedMotion: "reduce" });
+    : { ...devices[A.phone === "se" ? "iPhone SE" : "iPhone 13"], reducedMotion: "reduce" });
   await wire(context, label);
   await context.addInitScript(silence);
   await context.addInitScript(skipLanding);
