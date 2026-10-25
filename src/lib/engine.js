@@ -13,8 +13,9 @@ import { log, errMsg } from "./log.js";
 import { SNIP_WINDOW_SEC, snipMethodOk } from "./constants.js";
 
 const STALL_MS = 12000; // a dead or stalled stream must not pin the game on "Cueing it up…"
-// About a long show's songs and skips; a pool that runs dry falls back to "Tap to play".
-const POOL_SIZE = 40;
+// A long Music-only show's songs and skips (its elements are wired into the
+// AudioContext and cannot go back); a pool that runs dry falls back to "Tap to play".
+const POOL_SIZE = 60;
 const SILENCE = "data:audio/wav;base64,UklGRmQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YUAAAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA";
 
 export const engine = {
@@ -38,8 +39,9 @@ export const engine = {
   _el(url, cors){
     const want = cors ? "1" : "";
     if (this.el && this.el.dataset.src === url && this.el.dataset.cors === want && !this.el.error) return this.el;
+    const old = this.el;
     if (this.pre && this.pre.dataset.src === url && this.pre.dataset.cors === want && !this.pre.error){
-      this.el = this.pre; this.pre = null; return this.el;
+      this.el = this.pre; this.pre = null; this._recycle(old); return this.el;
     }
     const el = this._fresh();
     if (cors) el.crossOrigin = "anonymous";
@@ -48,6 +50,7 @@ export const engine = {
     el.dataset.cors = want;
     el.src = url;
     this.el = el;
+    this._recycle(old);
     return el;
   },
   /* Resolves true once metadata is ready (seekable), false on error/stall. */
@@ -195,7 +198,7 @@ export const engine = {
     if (!track || !track.stream) return;
     const url = track.stream;
     if ((this.el && this.el.dataset.src === url) || (this.pre && this.pre.dataset.src === url)) return;
-    if (this.pre){ try { this.pre.removeAttribute("src"); this.pre.load(); } catch(e){} } // cancel the old one
+    if (this.pre && !this._recycle(this.pre)){ try { this.pre.removeAttribute("src"); this.pre.load(); } catch(e){} } // cancel the old one
     const el = this._fresh();
     const cors = !plain;
     if (cors) el.crossOrigin = "anonymous";
@@ -218,6 +221,7 @@ export const engine = {
     for (let i = this.pool.length; i < POOL_SIZE; i++){
       const el = new Audio(SILENCE);
       el.muted = true;
+      el._ttUnlocked = true;
       this.pool.push(el);
       const pooled = () => this.pool.includes(el);
       const keep = () => { if (pooled()){ el.pause(); el.muted = false; el.removeAttribute("src"); } };
@@ -226,6 +230,22 @@ export const engine = {
     }
   },
   _fresh(){ return this.pool.pop() || new Audio(); },
+  /* An unlocked element the engine is done with goes back to the pool, so
+     skips and replaced prefetches don't run it dry. Not one wired into the
+     AudioContext: as-is playback through it would be silent. */
+  _recycle(el){
+    if (!el || !el._ttUnlocked || el._ttSrc || this.pool.length >= POOL_SIZE || this.pool.includes(el)) return false;
+    try {
+      el.pause();
+      el.removeAttribute("src");
+      el.removeAttribute("crossorigin");
+      delete el.dataset.src; delete el.dataset.cors;
+      el._ttPaused = false;
+      el.load();
+    } catch(e){ return false; }
+    this.pool.push(el);
+    return true;
+  },
   /* Unlock the track's element inside a tap. iOS only lets an element start
      audio from a timer (the countdown) once it has been played from a user
      gesture, so this plays it muted for a moment and pauses it again. */

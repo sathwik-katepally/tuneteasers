@@ -56,10 +56,13 @@ const iosAutoplay = () => {
   let inTap = false;
   addEventListener("click", () => { inTap = true; setTimeout(() => { inTap = false; }, 0); }, true);
   const real = HTMLMediaElement.prototype.play;
+  const count = () => sessionStorage.setItem("tt_e2e_blocked", String(Number(sessionStorage.getItem("tt_e2e_blocked") || 0) + 1));
+  // The browser's own refusals count too.
+  const native = el => real.call(el).catch(e => { if (e?.name === "NotAllowedError") count(); throw e; });
   HTMLMediaElement.prototype.play = function(){
-    if (inTap){ this.__unlocked = true; return real.call(this); }
-    if (this.__unlocked) return real.call(this);
-    sessionStorage.setItem("tt_e2e_blocked", String(Number(sessionStorage.getItem("tt_e2e_blocked") || 0) + 1));
+    if (inTap){ this.__unlocked = true; return native(this); }
+    if (this.__unlocked) return native(this);
+    count();
     return Promise.reject(new DOMException("blocked", "NotAllowedError"));
   };
 };
