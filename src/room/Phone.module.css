@@ -335,11 +335,27 @@
 
 .hint_ {
   min-height: 46px;
-  padding: 8px 12px;
+  padding: 7px 12px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1px;
   text-align: left;
+  line-height: 1.2;
+}
+
+.hintTitle {
   font-weight: 700;
   font-size: 16px;
-  line-height: 1.2;
+}
+
+.hintMeta {
+  font-size: 12.5px;
+  color: var(--teal-deep);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 
 .hint_ + .hint_ {

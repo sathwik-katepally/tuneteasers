@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { DIFFICULTY, LADDER, ROOM_ANSWER_SECS, ROOM_AUTO_SECS, ROOM_GRACE_SECS, ROOM_SONGS_PER_ROUND, ROOM_WRONG_BEAT_MS, hookOffset } from "../lib/config";
+import { DIFFICULTY, LADDER, ROOM_ANSWER_SECS, ROOM_AUTO_SECS, ROOM_FILM_SHARE, ROOM_GRACE_SECS, ROOM_SONGS_PER_ROUND, ROOM_WRONG_BEAT_MS, hookOffset } from "../lib/config";
 import { nearTitles } from "../lib/answer.js";
 import { useClipPlayer } from "../lib/ladder";
-import { answerTitles, buildCrate, withFreshAt } from "../lib/crate";
+import { answerTitles, buildCrate, filmOf, withFreshAt, type AnswerEntry } from "../lib/crate";
 import { engine, keepAwake } from "../lib/engine.js";
 import { cooldownOf, loadHistory, markPlayed, type Cooldown } from "../lib/storage";
 import { displayTitle } from "../lib/utils.js";
@@ -108,7 +108,7 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
   }, [view, show]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The public title list, for the near-miss titles sent with each song.
-  const pool = useRef<{ mix: Mix; titles: Promise<string[]> } | null>(null);
+  const pool = useRef<{ mix: Mix; titles: Promise<AnswerEntry[]> } | null>(null);
   const titlePool = (mix: Mix) => {
     if (pool.current?.mix !== mix) pool.current = { mix, titles: answerTitles(mix).catch(() => []) };
     return pool.current.titles;
@@ -148,7 +148,7 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
     const queue = crate.queue;
     await titlePool(show.mix);
     // No titles go to the room here: phones load the public list themselves.
-    room.send({ t: "start", mix: show.mix, total: show.total, perRound: show.perRound, answerSecs: ROOM_ANSWER_SECS });
+    room.send({ t: "start", mix: show.mix, total: show.total, perRound: show.perRound, answerSecs: ROOM_ANSWER_SECS, filmShare: ROOM_FILM_SHARE });
     // A phone that sat down while the crate loaded is only in the latest heard.
     const next = freshCue({ ...show, queue, idx: 0, songNo: 0, started: true, skipsSeen: 0 });
     setShow(next);
@@ -175,8 +175,9 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
     const n = show.songNo + 1;
     titlePool(show.mix).then(titles => {
       if (live.current.track !== track) return;
-      room.send({ t: "song", n, title: track.title, film: track.album || "", year: track.year || 0, artist: track.artist || "",
-        near: nearTitles(track.title, titles) });
+      const film = filmOf(track.album || "", track.title);
+      room.send({ t: "song", n, title: track.title, film, year: track.year || 0, artist: track.artist || "",
+        near: nearTitles(track.title, film, titles) });
     });
   }, [phase, room.link, show?.idx]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -231,7 +232,8 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
     if (cued && (v!.song!.state !== "cue" || !heard)) return;
     titlePool(sh.mix).then(titles => {
       if (live.current.track !== t || live.current.phase !== "song") return;
-      if (!cued) room.send({ t: "song", n, title: t.title, film: t.album || "", year: t.year || 0, artist: t.artist || "", near: nearTitles(t.title, titles) });
+      const film = filmOf(t.album || "", t.title);
+      if (!cued) room.send({ t: "song", n, title: t.title, film, year: t.year || 0, artist: t.artist || "", near: nearTitles(t.title, film, titles) });
       if (heard) room.send({ t: "clip", rung: c.rung, points: ladder.points[c.rung] });
     });
   }, [room.link]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -297,7 +299,7 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
     const finished = s.songNo >= s.total || s.idx >= s.queue.length;
     const winner = v.players.find(p => p.id === song.winner);
     setRevealed({ track: t, verdict: {
-      name: winner ? winner.name : "anyone", result: winner ? "correct" : "wrong", points: song.won, total: winner?.score ?? 0,
+      name: winner ? (song.guesses.some(g => g.id === winner.id && g.ok && g.film) ? `${winner.name} (the film)` : winner.name) : "anyone", result: winner ? "correct" : "wrong", points: song.won, total: winner?.score ?? 0,
       roundOver: finished || s.songNo % s.perRound === 0, finished, completedRound: Math.ceil(s.songNo / s.perRound),
     } });
     if (winner) setTimeout(() => engine.sfx("stamp"), 90);

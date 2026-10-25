@@ -21,7 +21,7 @@ import path from "node:path";
 import { chromium, webkit, devices } from "playwright";
 import { serve, args, localWorker, silence, skipLanding, moreSettings, wireWorker, MUTE_ARGS } from "./harness.mjs";
 import { displayTitle } from "../src/lib/utils.js";
-import { CATEGORIES, DIFFICULTY, LADDER, ROOM_ANSWER_SECS, ROOM_AUTO_SECS } from "../src/lib/config.ts";
+import { CATEGORIES, DIFFICULTY, LADDER, ROOM_ANSWER_SECS, ROOM_AUTO_SECS, ROOM_FILM_SHARE } from "../src/lib/config.ts";
 import { songKey } from "../src/lib/utils.js";
 
 const A = args({ difficulty: "easy" });
@@ -157,11 +157,17 @@ async function buzz(p){
   }
 }
 
+// A suggestion is named by its title, then its films and year ("Chaleya, Jawan, 2023").
+const optionName = text => new RegExp(`^${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(,|$)`);
+// The film as the host sends it (filmOf in src/lib/crate.ts).
+const filmOf = t => (/\(From "([^"]+)"\)/i.exec(t.album) || /\(From "([^"]+)"\)/i.exec(t.title))?.[1]
+  ?? String(t.album || "").replace(/\s*\((?:Original Motion Picture )?Soundtrack\)/i, "").replace(/\s+-\s+(?:Single|EP)$/i, "").trim();
+
 async function answer(p, text, { pick = true } = {}){
   const input = p.page.getByLabel("Your answer");
   await p.page.getByRole("button", { name: "Lock it in" }).waitFor({ timeout: 10000 });
   await input.fill(text.slice(0, Math.max(4, Math.ceil(text.length * 0.6))));
-  const option = p.page.getByRole("option", { name: text, exact: true });
+  const option = p.page.getByRole("option", { name: optionName(text) });
   if (pick && await option.count()) await option.first().click();
   else { await input.fill(text); await p.page.getByRole("button", { name: "Lock it in" }).click(); }
 }
@@ -411,7 +417,7 @@ try {
   // The phone's suggestions come from the public list it loaded itself.
   if (publicTitles.some(t => songKey(t) === songKey(title1))){
     await second.page.getByLabel("Your answer").fill(title1.slice(0, Math.max(4, Math.ceil(title1.length * 0.6))));
-    await second.page.getByRole("option", { name: title1, exact: true }).first().waitFor({ timeout: 5000 });
+    await second.page.getByRole("option", { name: optionName(title1) }).first().waitFor({ timeout: 5000 });
     await shot(second, "phone-05b-suggestions");
   }
   await answer(second, title1);
@@ -470,8 +476,16 @@ try {
   const waited = (Date.now() - t0) / 1000;
   if (waited < ROOM_ANSWER_SECS - 2) fail(`answer clock ran out after ${waited}s`);
   if (!song().guesses.some(g => g.id === raviId && g.timeout)) fail("timeout was not recorded");
-  await answer(meena, displayTitle(await currentTitle()));
+  // Meena names the film, not the song, for part of the points (unless the
+  // song is named after its film, when that is the title).
+  const show3 = await hostShow(), track3 = show3.queue[show3.idx], film3 = filmOf(track3);
+  const byFilm = !!film3 && songKey(film3) !== songKey(displayTitle(track3.title));
+  const meena3 = scoreOf("Meena"), worth3 = song().points;
+  await answer(meena, byFilm ? film3 : displayTitle(track3.title), { pick: false });
   await revealed(3);
+  const won3 = byFilm ? Math.max(1, Math.round(worth3 * ROOM_FILM_SHARE)) : worth3;
+  if (scoreOf("Meena") - meena3 !== won3) fail(`naming ${byFilm ? "the film" : "the song"} scored ${scoreOf("Meena") - meena3}, not ${won3}`);
+  if (byFilm) await meena.page.getByText("You named the film").waitFor();
 
   // Song 4: everyone answers wrong, which reveals with nobody scoring.
   await nextSong(4);

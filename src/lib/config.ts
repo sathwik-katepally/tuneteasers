@@ -77,6 +77,8 @@ export const POPULAR_MIN_SCORE = 0.5;
 /* Buzz-in rooms (docs/room-mode.md): the host screen plays, phones buzz. */
 export const ROOM_SONGS_PER_ROUND = 4;
 export const ROOM_ANSWER_SECS = 20;
+// Naming the film instead of the song scores this share of the points.
+export const ROOM_FILM_SHARE = 0.5;
 // After a clip ends, how long buzzing stays open before the next rung plays.
 export const ROOM_GRACE_SECS = 6;
 // How long a wrong answer shows on the big screen before the show moves on.

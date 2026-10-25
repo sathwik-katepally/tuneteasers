@@ -110,7 +110,7 @@ The first message must be a hello; anything else is refused until then, and a co
 | From | Message | Does |
 | --- | --- | --- |
 | host | `host { token }` | Authenticates with the host secret from `POST /api/rooms` |
-| host | `start { mix, total, perRound, answerSecs }` | Lobby (or a finished show) to a new show; scores reset |
+| host | `start { mix, total, perRound, answerSecs, filmShare }` | Lobby (or a finished show) to a new show; scores reset. `filmShare` (0 to 1, `ROOM_FILM_SHARE`) is what naming the film scores; a host that sends none gives the film nothing |
 | host | `song { n, title, film, year, artist, near }` | Arms song `n` (buzzing shut). `n` must be one past the number of results and at most `total`, so a re-cue can restart an unfinished song but never replay a scored one |
 | host | `clip { rung, points }` | A clip is playing; buzzing open at these points |
 | host | `reveal` / `end` / `kick { id }` | Nobody got it / show over / remove a player (lobby only) |
@@ -150,14 +150,25 @@ Codes are four letters from `BCDFGHJKLMNPQRSTVWXZ` (no vowels, so no words).
 
 ## Answer matching
 
-`fold()` lowercases, strips the `(From "…")` qualifiers and punctuation, removes accents, and folds romanised spelling variants: aspirated consonants (`dh` to `d`), `w`/`v`, `z`/`j`, `q`/`k`, long vowels (`aa`, `ee`, `oo`), `ai`/`ei` to `e`, and doubled letters.
-A guess is right when its folded form equals the title's, or is within a small edit distance of it (0 for four letters or fewer, then 1, 2, 3 as the title grows), unless it is exactly one of the near titles the host sent with the song.
-So "Main Hu Na" matches "Main Hoon Na" and "kesaria" matches "Kesariya", while "Kesari" does not.
+Most players pick from the autocomplete, so the list has to tell look-alikes apart and a pick of the same song has to count.
+
+`fold()` lowercases, strips the `(From "…")` qualifiers and punctuation, removes accents, and folds romanised spelling variants: a leading `y` before `e` (`Yemaindo`/`Emaindo`), aspirated consonants (`dh` to `d`), `w`/`v`, `z`/`j`, `q`/`k`, long vowels (`aa`, `ee`, `oo`), `ai`/`ei` to `e`, and doubled letters.
+A guess is right when its folded form equals the title's, or names a version of it (the title without `2.0`, `Title Track`, `feat.`, `Remix`, `Reprise`, `Male`/`Female`, `Sad` or a number, so "Dus Bahane" is right for "Dus Bahane 2.0" and "Dhadak" for "Dhadak Title Track"), or is within a small edit distance of it (0 for four letters or fewer, then 1, 2, 3 as the title grows), unless it is exactly one of the near titles the host sent with the song.
+In that distance a vowel swapped, added or dropped costs half, since vowels are the least fixed part of a romanised spelling ("nuvvosthanante" for "Nuvvasthanante", "emaindhoo" for "Yemaindo").
+Near titles leave out the song's own film, where a look-alike is the same song spelled another way ("Tujhe Bhula Diya" for "Tujhe Bhula Diya Phir", both Anjaana Anjaani).
+So "Main Hu Na" matches "Main Hoon Na" and "kesaria" matches "Kesariya", while "Kesari" does not, and picking "Chhaliya" (Tashan) for "Chaleya" (Jawan) is wrong.
+
+Naming the film instead scores `ROOM_FILM_SHARE` (half) of the points (`isFilm`, the same folding and typo allowance against the film the host sent); the phone then reads "You named the film, so half the points" and the big screen "+50 for Asha (the film)".
+The host sends the film cleaned by `filmOf` in `src/lib/crate.ts`: `Sitaare (From "Ikkis") - Single` is Ikkis, and a soundtrack album loses "(Original Motion Picture Soundtrack)".
+
+The phone's list (`answerTitles`) has one entry per title with every film it is from and the earliest year, shown under the title ("Chaleya / Jawan, 2023" against "Chhaliya / Tashan, 2008"), and one entry per film, marked "The film · half points", ranked after songs.
+A film that is also a song's title is left to that song's entry.
+`suggest` matches a whole-title prefix, then word prefixes, then letters anywhere, plainly and folded, and last by consonants only, closest first, so "nuvvos" still finds "Nuvvasthanante".
 
 ## Testing
 
 `npm run e2e:room` (`e2e/room.mjs`) starts a local `wrangler dev` and proxies the room WebSockets to it from Playwright, recording every frame.
-Desktop Chromium hosts (or a WebKit iPhone with `--host=phone`; `--difficulty=medium` plays a Music-only show) and three WebKit iPhones in separate contexts play a full 12-song show that the big screen runs by itself under the emulated iOS autoplay rule (no refused play, a held lobby that waits, then starts by itself, reveals and box offices that move on, a paused final reveal that stays): join by typed code and by link, a buzz race in arrival order, wrong answer to the next buzzer, right answer at the rung's points, "Hear more" and the automatic ladder after a miss, a typed misspelling, a reload and a leave-and-return keeping the seat, the answer clock running out, everyone locked out, the box office, skips (two votes of three do not skip, the third does, the host skips on its own twice more, the room refuses a stale skip and a skip after a buzz, nothing lands in the host's history, and the skipped title on the big screen only), the host reloading while a phone answers (the room scores it once and the host resumes on its reveal), the host reloading on the final reveal, podium totals against the room's results, each phone's final place, and "Same crowd again".
+Desktop Chromium hosts (or a WebKit iPhone with `--host=phone`; `--difficulty=medium` plays a Music-only show) and three WebKit iPhones in separate contexts play a full 12-song show that the big screen runs by itself under the emulated iOS autoplay rule (no refused play, a held lobby that waits, then starts by itself, reveals and box offices that move on, a paused final reveal that stays): join by typed code and by link, a buzz race in arrival order, wrong answer to the next buzzer, right answer at the rung's points, "Hear more" and the automatic ladder after a miss, a typed misspelling, a reload and a leave-and-return keeping the seat, the answer clock running out, a film named for half the points, everyone locked out, the box office, skips (two votes of three do not skip, the third does, the host skips on its own twice more, the room refuses a stale skip and a skip after a buzz, nothing lands in the host's history, and the skipped title on the big screen only), the host reloading while a phone answers (the room scores it once and the host resumes on its reveal), the host reloading on the final reveal, podium totals against the room's results, each phone's final place, and "Same crowd again".
 It then probes the room directly: a foreign origin, an unclaimed code, a wrong host token, silent sockets up to the cap and their 4401 timeout (in a browser page with its own context: Node's WebSocket reports a close the server starts late or never, and the game contexts route the Worker's host through the script's Node proxy, which matters when `--worker` is production), frames before a hello, a host command from a phone, an oversized frame, a flood, and song numbers out of order.
 `--worker=<origin>` runs it against a deployed Worker (the preview one) instead, and `--categories=romantic,...` checks that every song in the show carries one of those tags.
 
