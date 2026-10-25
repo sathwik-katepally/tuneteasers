@@ -116,7 +116,7 @@ export function Setup(p: Props){
                       lang={multi ? <LangPick who={e.name} langs={S.langs} value={e.lang} onChange={l => setLang(e.id, l)} /> : null} />
                   ))}
                   {list.length < MAX_CAST && <AddChip label="Add" placeholder="Name" onAdd={add} />}
-                  {multi && <p className={s.hint}>Mix plays songs in all the show's languages. Pick one to give a player only that language.</p>}
+                  {multi && <p className={s.hint}>Mix: songs in any chosen language. Tap it to pick one.</p>}
                 </div>
               ) : (
                 <div className={s.teams}>
@@ -129,7 +129,7 @@ export function Setup(p: Props){
                     <button type="button" className={s.addTeam} onClick={() => add(teamName())}><Plus size={14} strokeWidth={3} /> Add a team</button>
                   )}
                   <p className={s.hint}>Name each team and, if you like, who's on it: the phone then goes round the team.</p>
-                  {multi && <p className={s.hint}>Mix plays songs in all the show's languages. Pick one to give a team only that language.</p>}
+                  {multi && <p className={s.hint}>Mix: songs in any chosen language. Tap it to pick one.</p>}
                 </div>
               )}
             </div>
@@ -162,7 +162,7 @@ export function Setup(p: Props){
               <Seg<Songs> label="Songs" value={S.songs}
                 options={(Object.keys(SONGS) as Songs[]).map(k => ({ value: k, label: SONGS[k].label }))}
                 onChange={v => upSettings({ songs: v })} />
-              <p className={s.hint}>{counts ? `About ${counts.songs[S.songs].toLocaleString("en")} songs: ${SONGS[S.songs].note}.` : `${SONGS[S.songs].label}: ${SONGS[S.songs].note}.`}</p>
+              <p className={s.hint}>{counts ? `About ${counts.songs[S.songs].toLocaleString("en")} ${SONGS[S.songs].note}.` : `${SONGS[S.songs].label}: ${SONGS[S.songs].note.replace(/^songs, /, "")}.`}</p>
             </div>
 
             <div className={s.group}>
@@ -278,14 +278,18 @@ function TeamCard({ team, no, canRemove, onChange, onRemove, lang }: {
 /* Pass the phone with several languages: the one language a contestant's
    own turns play, or Mix. A choice outside the show's languages reads as Mix
    (and comes back if that language is picked again). A native select, so a
-   phone shows its own picker. */
+   phone shows its own picker, laid invisibly over its label: Safari sizes a
+   select to its longest option, which would push the name chips apart. */
 function LangPick({ who, langs, value, onChange }: { who: string; langs: Lang[]; value: Lang | undefined; onChange: (l: Lang | undefined) => void }){
   const v = value && langs.includes(value) ? value : "";
   return (
-    <select className={s.langPick} value={v} aria-label={`${who}'s songs`} onChange={e => onChange(langOf(e.target.value) ?? undefined)}>
-      <option value="">Mix</option>
-      {langs.map(l => <option key={l} value={l}>{langLabel(l)}</option>)}
-    </select>
+    <span className={s.langPick}>
+      <span aria-hidden>{v ? langLabel(v) : "Mix"}</span>
+      <select value={v} aria-label={`${who}'s songs`} onChange={e => onChange(langOf(e.target.value) ?? undefined)}>
+        <option value="">Mix</option>
+        {langs.map(l => <option key={l} value={l}>{langLabel(l)}</option>)}
+      </select>
+    </span>
   );
 }
 

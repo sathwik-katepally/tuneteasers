@@ -180,3 +180,14 @@ export async function moreSettings(page){
   if (await summary.count()) await summary.click();
   await page.getByRole("radiogroup", { name: "Difficulty" }).waitFor();
 }
+
+/* Sets the setup screen's language chips to exactly these (labels: "Hindi",
+   "English", ...): the wanted ones go on first, since the last one on can't go off. */
+export async function pickLangs(page, labels){
+  const group = page.getByRole("group", { name: "Languages" });
+  const all = await group.getByRole("button").allInnerTexts();
+  const want = new Set(labels.map(l => l.toLowerCase()));
+  const on = async name => (await group.getByRole("button", { name, exact: true }).getAttribute("aria-pressed")) === "true";
+  for (const name of all) if (want.has(name.toLowerCase()) && !(await on(name))) await group.getByRole("button", { name, exact: true }).click();
+  for (const name of all) if (!want.has(name.toLowerCase()) && (await on(name))) await group.getByRole("button", { name, exact: true }).click();
+}

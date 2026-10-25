@@ -377,9 +377,8 @@ try {
   const show = await until("host queue", async () => { const s = await hostShow(); return s?.started && s.queue.length ? s : null; });
   if (categories.length){
     const corpus = JSON.parse(fs.readFileSync(new URL("../dist/corpus.json", import.meta.url), "utf8"));
-    const lang = { hindi: "bolly", telugu: "telugu" };
     const tags = new Map(corpus.songs.map(r => Object.fromEntries(corpus.cols.map((c, i) => [c, r[i]])))
-      .map(r => [`${lang[r.language]}|${songKey(r.title)}`, r.tags]));
+      .map(r => [`${r.language}|${songKey(r.title)}`, r.tags]));
     for (const t of show.queue.slice(0, show.total)){
       const tt = tags.get(`${t.lang}|${songKey(t.title)}`);
       if (!tt?.some(x => categories.includes(x))) fail(`"${t.title}" is not tagged ${categories}`);

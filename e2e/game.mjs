@@ -1,6 +1,6 @@
 /* Plays one full show through the real UI against the real song sources and
    checks the scoring bookkeeping at the end.
-   node e2e/game.mjs --profile=phone|desktop --mode=players|teams --mix=bolly|telugu|both
+   node e2e/game.mjs --profile=phone|desktop --mode=players|teams --mix=both|hindi,english|...
      --difficulty=easy|medium --rounds=3 [--categories=item,mass] [--reduced] [--no-worker] [--no-saavn] [--shots=dir] [--url=http://...]
    --no-worker makes the project's Worker unreachable (songs then come from the mirror).
    --no-saavn makes the Worker and every Saavn mirror unreachable and checks the show came
@@ -11,12 +11,19 @@
    check the skip after a stream error moves on the same way and records nothing. */
 import fs from "node:fs";
 import path from "node:path";
-import { serve, open, args, saved, moreSettings } from "./harness.mjs";
+import { serve, open, args, saved, moreSettings, pickLangs } from "./harness.mjs";
 import { displayTitle, songKey } from "../src/lib/utils.js";
 import { SAAVN_BASES } from "../src/lib/constants.js";
-import { CATEGORIES, HINT_PENALTY, SPEED_BONUS_FADE_SECS, SPEED_BONUS_MAX } from "../src/lib/config.ts";
+import { CATEGORIES, DIFFICULTY, HINT_PENALTY, SPEED_BONUS_FADE_SECS, SPEED_BONUS_MAX } from "../src/lib/config.ts";
+import { LANGUAGES } from "../src/lib/languages.ts";
 
 const A = args({ profile: "phone", mode: "players", mix: "both", difficulty: "medium", rounds: "3" });
+// --mix: "both" (Hindi and Telugu) or a comma list of language ids.
+const langLabels = mix => (mix === "both" ? "hindi,telugu" : mix).split(",").map(id => {
+  const l = LANGUAGES.find(x => x.id === id);
+  if (!l) throw new Error(`unknown language ${id}`);
+  return l.label;
+});
 const shotsDir = A.shots && A.shots !== "true" ? A.shots : null;
 if (shotsDir) fs.mkdirSync(shotsDir, { recursive: true });
 
@@ -49,9 +56,9 @@ try {
   await page.evaluate(() => localStorage.clear());
   await page.goto(url);
   await page.getByRole("radio", { name: A.mode === "teams" ? "Teams" : "Players" }).click();
-  await page.getByRole("radio", { name: { bolly: "Hindi", telugu: "Telugu", both: "Both" }[A.mix], exact: true }).click();
+  await pickLangs(page, langLabels(A.mix));
   await moreSettings(page);
-  await page.getByRole("radio", { name: A.difficulty, exact: false }).click();
+  await page.getByRole("radio", { name: DIFFICULTY[A.difficulty].label, exact: true }).click();
   // The category counts load a moment after the fold opens and push the rounds control down.
   await page.getByRole("button", { name: /^Any, \d+ songs$/ }).waitFor();
   await page.getByRole("radio", { name: A.rounds, exact: true }).click();
@@ -286,9 +293,8 @@ try {
   if (g.history.some(h => h.song === displayTitle(heard.title))) fail("skipped song was played later in the show");
   if (categories.length){
     const corpus = JSON.parse(fs.readFileSync(new URL("../dist/corpus.json", import.meta.url), "utf8"));
-    const lang = { hindi: "bolly", telugu: "telugu" };
     const tags = new Map(corpus.songs.map(r => Object.fromEntries(corpus.cols.map((c, i) => [c, r[i]])))
-      .map(r => [`${lang[r.language]}|${songKey(r.title)}`, r.tags]));
+      .map(r => [`${r.language}|${songKey(r.title)}`, r.tags]));
     if (g.source !== "corpus") fail(`categories game drew from ${g.source}`);
     for (const t of g.queue){
       const tt = tags.get(`${t.lang}|${songKey(t.title)}`);

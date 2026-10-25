@@ -7,7 +7,7 @@
    Pass 2 (stricter, nothing unlocks): the game must fall back to a
    "Tap to play" button that works.
    node e2e/autoplay.mjs */
-import { serve, open } from "./harness.mjs";
+import { serve, open, pickLangs } from "./harness.mjs";
 
 const stub = strict => {
   let inTap = false;
@@ -29,7 +29,7 @@ for (const strict of [false, true]){
   await context.addInitScript(stub, strict);
   try {
     await page.goto(server.url);
-    await page.getByRole("radio", { name: "Hindi", exact: true }).click();
+    await pickLangs(page, ["Hindi"]);
     await page.getByRole("button", { name: /Start the show/ }).click();
     await page.getByRole("button", { name: /^It's with me/ }).click();
     const tap = page.getByRole("button", { name: "Tap to play" });

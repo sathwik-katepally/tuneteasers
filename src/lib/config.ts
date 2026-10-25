@@ -112,7 +112,7 @@ export const DIFFICULTY: Record<Difficulty, { label: string; sound: "full" | "in
 
 export const SONGS: Record<Songs, { label: string; note: string }> = {
   hits: { label: "Big hits", note: "songs nearly everyone knows" },
-  more: { label: "Less famous too", note: "the big hits and the less famous ones, mixed evenly" },
+  more: { label: "Less famous too", note: "songs, big hits and less famous ones mixed evenly" },
 };
 
 /* Song categories on the setup screen, in display order. The ids are the

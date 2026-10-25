@@ -7,7 +7,7 @@
    node e2e/categories.mjs [--profile=phone|desktop] [--shots=dir] */
 import fs from "node:fs";
 import path from "node:path";
-import { serve, open, args, saved, moreSettings } from "./harness.mjs";
+import { serve, open, args, saved, moreSettings, pickLangs } from "./harness.mjs";
 
 const A = args({ profile: "phone" });
 const shotsDir = A.shots && A.shots !== "true" ? A.shots : null;
@@ -19,7 +19,7 @@ const { browser, page, errors } = await open(A.profile);
 const chip = label => page.getByRole("button", { name: new RegExp(`^${label}(, \\d+ songs)?$`) });
 const pressed = async label => (await chip(label).getAttribute("aria-pressed")) === "true";
 const expectPressed = async (want, when) => {
-  for (const l of ["Any", "Dance & party", "Romantic", "Sad", "Item songs", "Mass beats"])
+  for (const l of ["Any", "Dance & party", "Romantic", "Sad", "Item songs", "Mass"])
     if (await pressed(l) !== want.includes(l)) fail(`${when}: ${l} should be ${want.includes(l) ? "on" : "off"}`);
 };
 const counted = label => page.waitForFunction(l => [...document.querySelectorAll("button")].some(b => new RegExp(`^${l}, \\d+ songs$`).test(b.getAttribute("aria-label") || "")), label);
@@ -40,14 +40,14 @@ let exit = 0;
 try {
   await seed(null);
   await counted("Item songs");
-  await page.getByRole("radio", { name: "Easy" }).click();
+  await page.getByRole("radio", { name: "With singing" }).click();
   await expectPressed(["Any"], "fresh install");
   await shot("cat-01-any");
 
   await chip("Item songs").click();
   await expectPressed(["Item songs"], "after Item");
-  await chip("Mass beats").click();
-  await expectPressed(["Item songs", "Mass beats"], "after Mass");
+  await chip("Mass").click();
+  await expectPressed(["Item songs", "Mass"], "after Mass");
   if (JSON.stringify((await saved(page)).settings.categories) !== '["item","mass"]') fail("categories not saved in config order");
   await shot("cat-02-item-mass");
   await chip("Any").click();
@@ -60,7 +60,7 @@ try {
   await expectPressed(["Item songs"], "after reload");
 
   // Music-only: item songs rarely have a clean instrumental stretch.
-  await page.getByRole("radio", { name: "Medium" }).click();
+  await page.getByRole("radio", { name: "Music only" }).click();
   await page.getByText(/Music.only needs a stretch with no singing/).waitFor();
   const item = chip("Item songs");
   await page.waitForFunction(() => [...document.querySelectorAll("button")].some(b => /^Item songs, \d+ songs$/.test(b.getAttribute("aria-label") || "") && /only \d+/.test(b.textContent)));
@@ -74,8 +74,8 @@ try {
   if (!(n < 10)) fail(`Item chip should show a count below the show's 10 turns: "${text}"`);
 
   // A thin chip on Easy: a long show for a big crowd in one language and era.
-  await page.getByRole("radio", { name: "Easy" }).click();
-  await page.getByRole("radio", { name: "Hindi", exact: true }).click();
+  await page.getByRole("radio", { name: "With singing" }).click();
+  await pickLangs(page, ["Hindi"]);
   await page.getByRole("radio", { name: "2000s" }).click();
   await page.getByRole("radio", { name: "8", exact: true }).click();
   for (const name of ["Anu", "Ravi", "Meera", "Kiran"]){
@@ -102,7 +102,7 @@ try {
   await page.route(u => u.pathname.endsWith("/corpus.json"), r => r.abort("connectionrefused"));
   await seed({ ...base, settings: { ...old, difficulty: "easy", rounds: 3, categories: ["item"] }, players: [{ id: "p1", name: "Solo", members: [] }], game: null });
   await page.getByText(/Categories need the song list/).waitFor();
-  if (!(await chip("Mass beats").isDisabled())) fail("chips enabled without a corpus");
+  if (!(await chip("Mass").isDisabled())) fail("chips enabled without a corpus");
   await shot("cat-05-offline");
   await page.getByRole("button", { name: /Start the show/ }).click();
   await page.getByText(/Couldn't load songs/).waitFor({ timeout: 30000 });
