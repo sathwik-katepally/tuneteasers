@@ -1,12 +1,13 @@
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useState, type ReactNode } from "react";
 import { ChevronDown, Plus, X } from "lucide-react";
 import { ERAS } from "../lib/constants.js";
-import { CATEGORIES, DIFFICULTY, MAX_CAST, MAX_MEMBERS, MIN_CAST, NAME_MAX, ROOM_SONGS_PER_ROUND, ROUND_OPTIONS } from "../lib/config";
+import { CATEGORIES, DIFFICULTY, MAX_CAST, MAX_MEMBERS, MIN_CAST, NAME_MAX, ROOM_SONGS_PER_ROUND, ROUND_OPTIONS, SONGS } from "../lib/config";
+import { LANGUAGES, langLabel, langOf, langsLabel } from "../lib/languages";
 import { cleanName, newId } from "../lib/save";
-import { Seg } from "../components/Seg";
-import { CategoryPicker } from "../components/CategoryPicker";
+import { MultiSeg, Seg } from "../components/Seg";
+import { CategoryPicker, useSetupCounts } from "../components/CategoryPicker";
 import type { HostShow } from "../lib/room";
-import type { Difficulty, GameState, Mix, Mode, Play, RosterEntry, Settings } from "../types";
+import type { Category, Difficulty, GameState, Lang, Mode, Play, RosterEntry, Settings, Songs } from "../types";
 import sh from "./shared.module.css";
 import s from "./Setup.module.css";
 
@@ -35,7 +36,7 @@ const ERA_ALL = "all";
 /* The one line that stands in for the settings most shows never change. */
 function summary(S: Settings){
   const kinds = S.categories.length ? S.categories.map(c => CATEGORIES.find(x => x.id === c)?.label).join(", ") : "any kind";
-  return [S.eras.length === 1 ? S.eras[0] : "All eras", DIFFICULTY[S.difficulty].label, kinds, `${S.rounds} rounds`];
+  return [S.eras.length === 1 ? S.eras[0] : "All eras", DIFFICULTY[S.difficulty].label, SONGS[S.songs].label, kinds, `${S.rounds} rounds`];
 }
 
 export function Setup(p: Props){
@@ -50,6 +51,25 @@ export function Setup(p: Props){
   const [fresh, setFresh] = useState(false);
   // A show that couldn't load came from these picks, so they open for changing.
   const [more, setMore] = useState(!!p.error);
+  const need = S.rounds * (room ? ROOM_SONGS_PER_ROUND : list.length);
+  const counts = useSetupCounts(S, need, p.blocked);
+  // A chosen category the chosen languages don't have at all goes, and says why.
+  const [dropped, setDropped] = useState("");
+  useEffect(() => {
+    const gone = counts ? S.categories.filter(c => !counts.has.includes(c)) : [];
+    if (!gone.length) return;
+    const nouns = gone.map(c => CATEGORIES.find(x => x.id === c)!.label).map(l => (/songs$/i.test(l) ? l : `${l} songs`));
+    setDropped(`No ${nouns.join(" or ")} in ${langsLabel(S.langs)}, so that choice is off.`);
+    upSettings({ categories: S.categories.filter(c => !gone.includes(c)) });
+  }, [counts]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Per-contestant languages stay behind one link until someone uses them, so a first run reads no more.
+  const [perLang, setPerLang] = useState(() => list.some(e => e.lang));
+  const multi = S.langs.length > 1 && !room && (perLang || list.some(e => e.lang));
+  // Offered once someone has a real name: a first run with Player 1 and Player 2 has no one to give a language to.
+  const named = list.some(e => !/^(Player|Team) \d+$/.test(e.name));
+  const langLink = S.langs.length > 1 && !room && !multi && named &&
+    <button type="button" className={`link ${s.langLink}`} onClick={() => setPerLang(true)}>Give someone one language</button>;
+  const setLang = (id: string, lang: Lang | undefined) => setList(list.map(e => (e.id === id ? { ...e, lang } : e)));
 
   const add = (name: string) => setList([...list, { id: newId(), name, members: [] }]);
   const rename = (id: string, name: string) => setList(list.map(e => (e.id === id ? { ...e, name } : e)));
@@ -98,20 +118,26 @@ export function Setup(p: Props){
                 <div className={s.chips}>
                   {list.map(e => (
                     <NameChip key={e.id} name={e.name} canRemove={list.length > MIN_CAST.players}
-                      onRename={n => rename(e.id, n)} onRemove={() => remove(e.id)} />
+                      onRename={n => rename(e.id, n)} onRemove={() => remove(e.id)}
+                      lang={multi ? <LangPick who={e.name} langs={S.langs} value={e.lang} onChange={l => setLang(e.id, l)} /> : null} />
                   ))}
                   {list.length < MAX_CAST && <AddChip label="Add" placeholder="Name" onAdd={add} />}
+                  {multi && <p className={s.hint}>Mix: songs in any chosen language. Tap it to pick one.</p>}
+                  {langLink}
                 </div>
               ) : (
                 <div className={s.teams}>
                   {list.map((e, i) => (
                     <TeamCard key={e.id} team={e} no={i + 1} canRemove={list.length > MIN_CAST.teams}
-                      onChange={changes => patch(e.id, changes)} onRemove={() => remove(e.id)} />
+                      onChange={changes => patch(e.id, changes)} onRemove={() => remove(e.id)}
+                      lang={multi ? <LangPick who={e.name} langs={S.langs} value={e.lang} onChange={l => setLang(e.id, l)} /> : null} />
                   ))}
                   {list.length < MAX_CAST && (
                     <button type="button" className={s.addTeam} onClick={() => add(teamName())}><Plus size={14} strokeWidth={3} /> Add a team</button>
                   )}
                   <p className={s.hint}>Name each team and, if you like, who's on it: the phone then goes round the team.</p>
+                  {multi && <p className={s.hint}>Mix: songs in any chosen language. Tap it to pick one.</p>}
+                  {langLink}
                 </div>
               )}
             </div>
@@ -119,9 +145,10 @@ export function Setup(p: Props){
 
           <div className={s.group}>
             <span className={s.labelText}>Songs in</span>
-            <Seg<Mix> label="Language" value={S.mix}
-              options={[{ value: "bolly", label: "Hindi" }, { value: "telugu", label: "Telugu" }, { value: "both", label: "Both" }]}
-              onChange={v => upSettings({ mix: v })} />
+            <MultiSeg<Lang> label="Languages" value={S.langs}
+              options={LANGUAGES.map(l => ({ value: l.id, label: l.label }))}
+              onChange={v => { setDropped(""); upSettings({ langs: v }); }} />
+            {dropped && <p className={s.hint} role="status">{dropped}</p>}
           </div>
 
           <button type="button" className={s.summary} aria-expanded={more} aria-controls="tt-more" onClick={() => setMore(o => !o)}>
@@ -131,11 +158,19 @@ export function Setup(p: Props){
 
           {more && <div id="tt-more" className={s.more}>
             <div className={s.group}>
-              <span className={s.labelText}>How hard</span>
-              <Seg<Difficulty> label="Difficulty" value={S.difficulty}
+              <span className={s.labelText}>Sound</span>
+              <Seg<Difficulty> label="Sound" value={S.difficulty}
                 options={(Object.keys(DIFFICULTY) as Difficulty[]).map(d => ({ value: d, label: DIFFICULTY[d].label }))}
                 onChange={v => upSettings({ difficulty: v })} />
               <p className={s.hint}>{DIFFICULTY[S.difficulty].note}</p>
+            </div>
+
+            <div className={s.group}>
+              <span className={s.labelText}>Songs</span>
+              <Seg<Songs> label="Songs" value={S.songs}
+                options={(Object.keys(SONGS) as Songs[]).map(k => ({ value: k, label: SONGS[k].label }))}
+                onChange={v => upSettings({ songs: v })} />
+              <p className={s.hint}>{counts ? `About ${counts.songs[S.songs].toLocaleString("en")} ${SONGS[S.songs].note}.` : `${SONGS[S.songs].label}: ${SONGS[S.songs].note.replace(/^songs, /, "")}.`}</p>
             </div>
 
             <div className={s.group}>
@@ -147,7 +182,7 @@ export function Setup(p: Props){
 
             <div className={s.group}>
               <span className={s.labelText}>Kind of songs</span>
-              <CategoryPicker settings={S} need={S.rounds * (room ? ROOM_SONGS_PER_ROUND : list.length)} blocked={p.blocked} onChange={categories => upSettings({ categories })} />
+              <CategoryPicker settings={S} need={need} counts={counts} onChange={(categories: Category[]) => upSettings({ categories })} />
             </div>
 
             <div className={s.group}>
@@ -217,8 +252,8 @@ function RoomResumeCard({ show, onResume, onDiscard }: { show: HostShow; onResum
 /* A team's name is a plain text field, and who is on it one line of names,
    typed freely and split on commas once the field is left (so a comma on its
    way in is never lost). */
-function TeamCard({ team, no, canRemove, onChange, onRemove }: {
-  team: RosterEntry; no: number; canRemove: boolean; onChange: (changes: Partial<RosterEntry>) => void; onRemove: () => void;
+function TeamCard({ team, no, canRemove, onChange, onRemove, lang }: {
+  team: RosterEntry; no: number; canRemove: boolean; onChange: (changes: Partial<RosterEntry>) => void; onRemove: () => void; lang: ReactNode;
 }){
   const [who, setWho] = useState(team.members.join(", "));
   const commitWho = () => {
@@ -243,11 +278,30 @@ function TeamCard({ team, no, canRemove, onChange, onRemove }: {
         <input value={who} maxLength={(NAME_MAX + 2) * MAX_MEMBERS} placeholder="Names, optional" onChange={e => setWho(e.target.value)} onBlur={commitWho}
           onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); }} />
       </label>
+      {lang && <div className={s.teamWho}><span>Songs in</span>{lang}</div>}
     </div>
   );
 }
 
-function NameChip({ name, canRemove, onRename, onRemove }: { name: string; canRemove: boolean; onRename: (n: string) => void; onRemove: () => void }){
+/* Pass the phone with several languages: the one language a contestant's
+   own turns play, or Mix. A choice outside the show's languages reads as Mix
+   (and comes back if that language is picked again). A native select, so a
+   phone shows its own picker, laid invisibly over its label: Safari sizes a
+   select to its longest option, which would push the name chips apart. */
+function LangPick({ who, langs, value, onChange }: { who: string; langs: Lang[]; value: Lang | undefined; onChange: (l: Lang | undefined) => void }){
+  const v = value && langs.includes(value) ? value : "";
+  return (
+    <span className={s.langPick}>
+      <span aria-hidden>{v ? langLabel(v) : "Mix"}</span>
+      <select value={v} aria-label={`${who}'s songs`} onChange={e => onChange(langOf(e.target.value) ?? undefined)}>
+        <option value="">Mix</option>
+        {langs.map(l => <option key={l} value={l}>{langLabel(l)}</option>)}
+      </select>
+    </span>
+  );
+}
+
+function NameChip({ name, canRemove, onRename, onRemove, lang }: { name: string; canRemove: boolean; onRename: (n: string) => void; onRemove: () => void; lang: ReactNode }){
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(name);
   if (editing){
@@ -261,6 +315,7 @@ function NameChip({ name, canRemove, onRename, onRemove }: { name: string; canRe
   return (
     <span className={s.chip}>
       <button type="button" className={s.chipName} onClick={() => { setDraft(name); setEditing(true); }} aria-label={`Rename ${name}`}>{name}</button>
+      {lang}
       {canRemove && (
         <button type="button" className={s.chipX} aria-label={`Remove ${name}`} onClick={onRemove}>
           <X size={14} strokeWidth={3} />

@@ -34,7 +34,7 @@ Everything is optional; with no group, or with the Worker unreachable, the game 
 | `GET /api/group/played` | invite | `{ played: { songKey: ms }, tired: { songKey: ms } }` within the played window |
 | `POST /api/group/rounds` `{ rounds: [{ id, key, kind? }] }` | invite | Records up to 50 plays; `kind` is `played` (default) or `tired` |
 | `GET /api/group/results?before=&limit=` | invite | `{ results, more }`, newest first, 20 per page |
-| `POST /api/group/results` `{ id, finishedAt, mode, difficulty, mix, rounds, songs, cast }` | invite | Records a finished show once |
+| `POST /api/group/results` `{ id, finishedAt, mode, difficulty, mix, rounds, songs, cast }` | invite | Records a finished show once; `mix` is the show's language ids as a comma list (`hindi,english`), and the one word older clients send (`bolly`, `telugu`, `both`) is still accepted |
 | `POST /api/group/import` `{ played, tired? }` | invite | One-time import of a phone's own history (at most 1,000 songs across both kinds) |
 | `DELETE /api/group` | owner | Deletes the group and all its rows |
 

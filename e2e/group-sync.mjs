@@ -62,7 +62,7 @@ const home = page => page.getByRole("button", { name: "Back", exact: true }).cli
 async function setupShow(page){
   await page.getByRole("radio", { name: "Players" }).click();
   await moreSettings(page);
-  await page.getByRole("radio", { name: "Easy", exact: true }).click();
+  await page.getByRole("radio", { name: "With singing", exact: true }).click();
   await page.getByRole("radio", { name: "3", exact: true }).click();
   while (await page.getByRole("button", { name: /^Remove / }).count()) await page.getByRole("button", { name: /^Remove / }).first().click();
 }
@@ -195,7 +195,7 @@ try {
   await row.waitFor();
   const rowText = await row.innerText();
   if (!rowText.includes(String(desktopScore.score))) fail(`past show row "${rowText}" lacks score ${desktopScore.score}`);
-  if (!/Solo · Easy · Hindi \+ Telugu · 3 rounds/.test(await phone.page.locator("body").innerText())) fail("past show settings line wrong");
+  if (!/Solo · With singing · Hindi \+ Telugu · 3 rounds/.test(await phone.page.locator("body").innerText())) fail("past show settings line wrong");
   await shot(phone, "phone-03-past-shows");
   await home(phone.page);
   await phone.page.getByRole("heading", { name: "Past shows" }).waitFor({ state: "detached" });

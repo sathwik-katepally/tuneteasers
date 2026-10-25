@@ -19,7 +19,7 @@ async function setup(page, difficulty){
   await page.evaluate(() => localStorage.clear());
   await page.goto(server.url);
   await moreSettings(page);
-  await page.getByRole("radio", { name:difficulty, exact:false }).click();
+  await page.getByRole("radio", { name:difficulty, exact:true }).click();
   await page.getByRole("radio", { name:"3", exact:true }).click();
   await page.getByRole("button", { name:/Start (the|a new) show/ }).click();
 }
@@ -30,7 +30,7 @@ async function ladder(page, difficulty){
   await page.getByRole("button", { name:"I know this one" }).waitFor({ timeout:30000 });
   await page.waitForFunction(() => window.__ttLastMode, null, { timeout:30000 });
   const mode = await page.evaluate(() => window.__ttLastMode);
-  if (mode !== (difficulty === "Easy" ? "plain" : "snip")) fail(`${difficulty}: played ${mode}`);
+  if (mode !== (difficulty === "With singing" ? "plain" : "snip")) fail(`${difficulty}: played ${mode}`);
   const L = LADDER;
   for (const sec of L.segments.slice(1)){
     await page.getByText("Guess, or hear more").waitFor({ timeout:30000 });
@@ -40,12 +40,12 @@ async function ladder(page, difficulty){
   const state = await saved(page);
   const track = state.game.queue[state.game.trackIdx];
   const end = await page.evaluate(() => window.__testedAudio?.currentTime);
-  if (difficulty !== "Easy" && (!track.snip || end > track.snip.endSec + 0.1))
+  if (difficulty !== "With singing" && (!track.snip || end > track.snip.endSec + 0.1))
     fail(`music clip escaped interval: ${end} > ${track.snip?.endSec}`);
   await page.getByRole("button", { name:"Replay" }).click();
   await page.getByText("Guess, or hear more").waitFor({ timeout:30000 });
   const replayEnd = await page.evaluate(() => window.__testedAudio?.currentTime);
-  if (difficulty !== "Easy" && replayEnd > track.snip.endSec + 0.1)
+  if (difficulty !== "With singing" && replayEnd > track.snip.endSec + 0.1)
     fail(`replay escaped interval: ${replayEnd} > ${track.snip.endSec}`);
   const lastRung = `+${L.segments[L.last]}s · ${L.points[L.last]}`;
   if (!(await page.getByText(lastRung).count())) fail(`missing ${lastRung} final rung`);
@@ -95,7 +95,7 @@ async function run(profile){
     };
   });
   try {
-    for (const difficulty of ["Easy", "Medium"]){
+    for (const difficulty of ["With singing", "Music only"]){
       await setup(page, difficulty);
       await ladder(page, difficulty);
       console.log(`PASS ${profile} ${difficulty} max rung and replay`);
@@ -128,7 +128,7 @@ async function run(profile){
           : { ...index, snips:Object.fromEntries(Object.entries(index.snips).map(([id,e]) => [id,{ ...e, sourceId:"another-recording" }])) };
         return route.fulfill({ contentType:"application/json", body:JSON.stringify(bad) });
       });
-      await setup(page, "Medium");
+      await setup(page, "Music only");
       await page.getByRole("alert").getByText(/Not enough verified music-only clips/).waitFor({ timeout:30000 });
       if (await page.getByRole("button", { name:/It's with me/ }).count()) fail(`${variant}: started an unsafe game`);
       await page.unroute("**/snips.json");

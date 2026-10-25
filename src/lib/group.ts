@@ -28,7 +28,8 @@ export interface GroupResult {
   finishedAt: number;
   mode: "players" | "teams";
   difficulty: "easy" | "medium" | "hard";
-  mix: "bolly" | "telugu" | "both";
+  /* The show's languages as a comma list ("hindi,english"); older results hold "bolly", "telugu" or "both". */
+  mix: string;
   rounds: number;
   songs: number;
   cast: ResultCast[];
@@ -210,7 +211,7 @@ export function recordPlay(title: string){
 export function recordResult(g: GameState){
   if (!g.history.length) return;
   const result: GroupResult = {
-    id: g.id, finishedAt: Date.now(), mode: g.mode, difficulty: g.difficulty, mix: g.mix,
+    id: g.id, finishedAt: Date.now(), mode: g.mode, difficulty: g.difficulty, mix: g.langs.join(","),
     rounds: g.totalRounds, songs: g.history.length,
     cast: g.cast.map(c => ({ name: c.name, score: c.score, members: c.members })),
   };

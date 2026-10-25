@@ -24,7 +24,7 @@ async function check(name, fn){
 }
 const expect = (ok, msg) => { if (!ok) throw new Error(msg); };
 const btn = name => page.getByRole("button", { name, exact: true });
-const landing = () => page.getByRole("heading", { name: "Which film is this song from?" });
+const landing = () => page.getByRole("heading", { name: /Can you name this song in \d+ seconds\?/ });
 const setup = () => page.getByText("Tonight's show");
 const mode = name => page.getByRole("button", { name: new RegExp(`^${name}`) });
 const about = async () => { await btn("Menu").click(); await btn("About the game").click(); };

@@ -4,11 +4,11 @@ import { Qr } from "../components/Qr";
 import { AutoNext } from "../components/AutoNext";
 import { DIFFICULTY, ROOM_AUTO_SECS, ROOM_SONGS_PER_ROUND } from "../lib/config";
 import { roomLink, type Link, type RoomView } from "../lib/room";
+import { langsLabel } from "../lib/languages";
 import type { Settings } from "../types";
 import sh from "../screens/shared.module.css";
 import s from "./Lobby.module.css";
 
-const LANG = { bolly: "Hindi", telugu: "Telugu", both: "Hindi and Telugu" } as const;
 const siteAddress = () => (location.host + location.pathname).replace(/\/(index\.html)?$/, "");
 
 export function Lobby({ code, view, link, settings, error, onStart, onKick, onBack }: {
@@ -61,7 +61,7 @@ export function Lobby({ code, view, link, settings, error, onStart, onKick, onBa
 
         <div className={sh.actions}>
           <div className={`${s.foot} ${sh.muted}`}>
-            <span>{LANG[settings.mix]}, {DIFFICULTY[settings.difficulty].label}</span>
+            <span>{langsLabel(settings.langs)}, {DIFFICULTY[settings.difficulty].label.toLowerCase()}</span>
             <span>{settings.rounds} rounds of {ROOM_SONGS_PER_ROUND} songs</span>
           </div>
           {/* Each phone that sits down starts the countdown over, so the show waits while people are still arriving.

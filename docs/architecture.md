@@ -8,19 +8,20 @@
 - `src/game/usePassTheGame.ts` - the pass-the-phone turn engine: the per-turn state that is not saved (phase, clip, revealed track, verdict, steal) and every handler the game screens call, owning a turn the way `Host` owns a room.
 - `src/room/` - buzz-in rooms (docs/room-mode.md): `Host` (the host screen's state owner, with `Lobby` and `HostPlaying`) and `Phone` (a phone's join, buzzer and answer pad).
 - `src/types.ts` - shared types for saved state, tracks, turns and verdicts.
-- `src/lib/config.ts` - every gameplay number: clip ladder and its rung spans, points per rung, speed bonus, hint cost, round options, difficulty table, the popularity cut, the cooldown days and the buzz-in room's timings (answer clock, grace, the autopilot countdowns); also the song category labels.
+- `src/lib/languages.ts` - the song languages (id = JioSaavn's language name, label, film or pop), shared with the Worker; `langsOf` reads old one-word saves ("both", "bolly").
+- `src/lib/config.ts` - every gameplay number: clip ladder and its rung spans, points per rung, speed bonus, hint cost, round options, the sound table (`DIFFICULTY`), the popularity levels (`SONGS`), the per-language popularity cuts and the draw weights, the cooldown days and the buzz-in room's timings (answer clock, grace, the autopilot countdowns); also the song category labels.
 - `src/lib/save.ts` - the saved game: `loadSaved` (sanitize, migrate v6) and `save`.
 - `src/lib/constants.js` - search queries, language/era tables, exclusion regex.
 - `src/lib/utils.js` - pure helpers (`songKey`, `displayTitle`, `shuffle`, `safeUrl`, ...).
 - `src/lib/storage.ts` - track sanitization, the song history behind the cooldown (`tt_played`, `cooldownOf`) and the blocked-artist store.
 - `src/lib/group.ts` - optional group sync: the group invite, the write outbox, the group cooldown fetch and past results (docs/group-sync.md).
-- `src/lib/crate.ts` - song loading (`buildCrate`) across the 3 source tiers, `withFreshAt` (a room's swap for a song a late phone has heard), and `answerTitles` (the public title list a room phone autocompletes from).
+- `src/lib/crate.ts` - song loading (`buildCrate`) across the 3 source tiers, `setupCounts` (the setup screen's song counts), `withFreshAt` (a room's swap for a song a late phone has heard), `orderForCast` and `withLangAt` (pass-the-phone turns in a contestant's own language), and `answerTitles` (the public title list a room phone autocompletes from).
 - `src/lib/room.ts` - buzz-in room client: `createRoom`, the `#room=` link, `useRoom` (PartySocket), seat and host-show storage.
 - `src/lib/answer.js` - answer folding, matching and autocomplete, shared with the Worker.
 - `src/lib/engine.js` - the audio engine (songs and synthesised sound effects) and screen wake lock.
 - `src/lib/ladder.ts` - `playRung`, which plays a clip ladder rung through the engine, and `useClipPlayer`, the turn record and play sequence (status, started/ended/failed bookkeeping, the stream-error note) that the pass-the-phone game and the room host share.
 - `src/styles/tokens.css`, `src/styles/global.css` - design tokens (colors, fonts, hard shadows) and the few global classes (`.btn*`, `.display`, `.eyebrow`, `.grain`, `.link`, the debug overlay).
-- `src/components/` - the cinema pieces, each with a CSS Module: `Theatre` (marquee, curtains, seat backs, the home and game menus, and an `aside` pinned beside the stage on wide screens), `Bulbs` (bulb rows and frames), `Ticket`, `Curtain`, `Stamp`, `SplitFlap`, `Seg` (segmented radio), `CategoryPicker` (the setup screen's song-category stubs), `ClipStrip` (the clip ladder as a film strip with the clip's progress, shared by `Playing` and `HostPlaying`), `Equalizer`, `Reel`, `GroupPanel` (the home-screen group card), `Qr`, `Stage` (the theatre plus the screen cross-fade, used by every state owner), `AutoNext` (a primary button that moves on by itself after a countdown, with Pause, used by the room's lobby, reveal and box office), and `DebugLog`.
+- `src/components/` - the cinema pieces, each with a CSS Module: `Theatre` (marquee, curtains, seat backs, the home and game menus, and an `aside` pinned beside the stage on wide screens), `Bulbs` (bulb rows and frames), `Ticket`, `Curtain`, `Stamp`, `SplitFlap`, `Seg` (segmented radio, and `MultiSeg`, its toggle-button form for the languages), `CategoryPicker` (the setup screen's song-category stubs), `ClipStrip` (the clip ladder as a film strip with the clip's progress, shared by `Playing` and `HostPlaying`), `Equalizer`, `Reel`, `GroupPanel` (the home-screen group card), `Qr`, `Stage` (the theatre plus the screen cross-fade, used by every state owner), `AutoNext` (a primary button that moves on by itself after a countdown, with Pause, used by the room's lobby, reveal and box office), and `DebugLog`.
 - `src/screens/` - one component and CSS Module per screen: `Landing`, `Setup`, `GroupScreen`, `Loading`, `Handover`, `Countdown`, `Playing`, `Reveal`, `Scoreboard`, `Podium`, `PastGames`.
 - `tsconfig.json` - strict UI type checking; `src/lib/constants.js`, `utils.js`, `answer.js`, `engine.js` and `log.js` stay JavaScript with `allowJs` and `checkJs` off.
 
@@ -38,8 +39,8 @@ A `max-height: 760px` pass tightens spacing so every in-game screen fits a short
 ## State model
 
 `App` holds one persisted `state` object: `{ screen, settings, players, teams, game }`.
-`settings` is `{ play, mix, eras, difficulty, categories, mode, rounds }`; `play` picks pass-the-phone or a buzz-in room (see Screens and phases); `categories` lists the chosen song categories (`[]` is "Any", which is also what saves from before categories load as, and unknown ids are dropped); `players` and `teams` are the setup rosters (`{ id, name, members }`, members only used by teams).
-`game` is `{ id, queue, trackIdx, turn, round, totalRounds, totalSongs, source, mode, difficulty, mix, cast, history, finished }` or null; `id` makes the finished show's group result idempotent.
+`settings` is `{ play, langs, eras, difficulty, songs, categories, mode, rounds }`; `play` picks pass-the-phone or a buzz-in room (see Screens and phases); `langs` lists the chosen languages (at least one; a save from before the list holds one word, `mix`, which loads as its languages); `difficulty` is the sound (`easy` is With singing, the default for a new save, `medium` Music only); `songs` is `hits` (Big hits) or `more` (Less famous too); `categories` lists the chosen song categories (`[]` is "Any", which is also what saves from before categories load as, and unknown ids are dropped); `players` and `teams` are the setup rosters (`{ id, name, members, lang? }`, members only used by teams, `lang` the one language a contestant's own turns play in pass-the-phone).
+`game` is `{ id, queue, trackIdx, turn, round, totalRounds, totalSongs, source, mode, difficulty, langs, cast, history, finished }` or null; `id` makes the finished show's group result idempotent.
 `cast` is a snapshot of the roster with a `score`, taken at game start, so editing the roster on the home screen never disturbs a saved game.
 `history` holds one `{ id, song, points, round }` entry per judged turn; the box office derives each round's gains from it.
 Every `state` change is saved to localStorage (`tuneteasers_v7`) by an effect; `loadSaved` restores and sanitizes it on boot.
@@ -57,7 +58,9 @@ Judging a turn updates the saved game in one step (score, history, next turn and
 `screen` is one of `landing | setup | game | done | group | past | host | buzzer`; `landing` is the poster that explains the game, `done` is the podium, `group` the phone group screen (docs/group-sync.md), `past` the group's Past shows list, and `host` / `buzzer` hand the whole page to `src/room/Host.tsx` or `src/room/Phone.tsx`.
 `settings.play` (`pass | room`) picks the mode: the landing's two buttons ("Pass one phone", "Buzz in from every phone") set it on the way into setup, which keeps a compact switch; a `#room=` link opens `buzzer` directly.
 
-Setup is a quick setup, sized so a first run reads little and a returning player starts in one tap: the mode switch ("How you play"), the roster (pass-the-phone, as Players or Teams) and the languages are up front, and era, difficulty, song kinds, rounds and blocked artists fold behind one summary line ("All eras · Medium · any kind · 5 rounds", with Change).
+Setup is a quick setup, sized so a first run reads little and a returning player starts in one tap: the mode switch ("How you play"), the roster (pass-the-phone, as Players or Teams) and the languages are up front, and era, sound, popularity, song kinds, rounds and blocked artists fold behind one summary line ("All eras · With singing · Big hits · any kind · 5 rounds", with Change).
+The languages are toggle chips (any mix, at least one).
+With two or more languages in pass-the-phone, each name chip (or team card) carries a language picker, Mix by default: a contestant set to one language gets their own turns' songs in it (`orderForCast` orders the queue by turn, `withLangAt` swaps a skipped turn's next song), and the crate must hold rounds x that many of them (`need`) or setup names who ran short.
 Players are name chips; a team is a card with its name as a plain text field and one "Who's on it" line of names (optional members, split on commas when the field is left), and "Add a team" adds a card named Team N straight away.
 The fold opens by itself when a show failed to load, since the picks caused it.
 Start and the "Got a code?" join link stick to the bottom edge, so Start never scrolls away on a phone.
@@ -79,17 +82,19 @@ A skip keeps the same contestant and goes straight to a new countdown (see Skips
 ## Gameplay rules
 
 All numbers are in `src/lib/config.ts`.
-Difficulty: Easy plays the songs with vocals ("full" sound, from a likely hook), Medium the same songs as music only; both draw the top half of the corpus by popularity (`POPULAR_MIN_SCORE`, docs/song-loading.md), so the level changes the sound, not the songs.
-Song categories (Dance & party, Romantic, Sad, Item songs, Mass beats) narrow the pool to corpus songs carrying any chosen tag; they are passed to `buildCrate` as its 6th argument (see docs/song-loading.md).
+Sound: With singing (`easy`) plays the songs with vocals ("full" sound, from a likely hook), Music only (`medium`) the same songs as music only.
+Songs: Big hits draws each language's popular songs (`popularCut`: the top half, English the top quarter), Less famous too draws every corpus song with a plain shuffle (docs/song-loading.md).
+The chosen languages split the show evenly.
+Song categories (Dance & party, Romantic, Sad, Mass, Item songs, Hip hop) narrow the pool to corpus songs carrying any chosen tag (`categories` in `buildCrate`, see docs/song-loading.md); a category shows only when the chosen languages have songs with its tag, and a chosen one the languages lose is turned off with a line saying why.
 On the setup screen "Any" is the empty selection and clears the others; each category shows how many songs it offers for the chosen languages, eras and difficulty, and one with fewer than rounds x contestants is greyed out with "only N" (in Music-only with a note that few dance or item songs have a clean instrumental stretch).
 A chosen category that turns thin stays tappable so it can be turned off.
 Clip ladder: each turn starts with a 5s clip; "Hear 7s more" continues to 12s without replaying what was heard; Replay plays from the top to the current end (docs/audio.md).
 The ladder is the same for both sounds and stops at 12s because Music-only may only play inside a verified 12-second vocal-free window.
 The ladder (`CLIP_LADDER`, and `LADDER` with its `span`, `start` and `end`) is in `src/lib/config.ts` and the play call (`playRung`) with its turn bookkeeping (`useClipPlayer`) in `src/lib/ladder.ts`, so any screen that runs a turn, the room host included, shares them.
 Points: 100 / 60 by rung, plus a speed bonus of up to 20 that stays full while a clip plays and fades over about 13s once it has ended, minus 20 for each hint taken, never below 10.
-Hints come one tap at a time, least telling first (`HINT_ORDER` and `hintsFor` in `src/lib/config.ts`): the year, the music director, the singers, then the film, which goes last because naming the film scores.
+Hints come one tap at a time, least telling first (`HINT_ORDER` and `hintsFor` in `src/lib/config.ts`): for a film song the year, the music director, the singers, then the film, which goes last because naming the film scores; for a pop song (English) the year, the album, then the artist, which scores the same way.
 A detail the song's record lacks is left out, so the link counts what that song has ("Hint 1 of 3, costs 20").
-The player says the song or film aloud, then taps "I know this one" to score the current points, or "Pass to <next>" to hand the song on.
+The player says the song or film (a pop song's artist) aloud, then taps "I know this one" to score the current points, or "Pass to <next>" to hand the song on.
 Either "I know this one" or giving up records the turn and reveals the answer immediately.
 
 ## Passing and steals

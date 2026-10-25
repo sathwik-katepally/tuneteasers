@@ -9,7 +9,7 @@ export const SAAVN_BASES = [
    Each game samples a few, so the list is deliberately broad (singers,
    composers, stars, years, moods) to keep games from repeating. */
 export const SAAVN_QUERIES = {
-  bolly: [
+  hindi: [
     "bollywood hits","hindi hit songs","best of bollywood","bollywood 2000s hits","hindi songs 2010s","hindi songs 2020s",
     "hindi songs 2005","hindi songs 2008","hindi songs 2012","hindi songs 2015","hindi songs 2018","hindi songs 2023",
     "hindi romantic hits","hindi dance hits","hindi party songs","hindi wedding songs","hindi sad songs",
@@ -34,6 +34,18 @@ export const SAAVN_QUERIES = {
     "Vivek Sagar hits","Hesham Abdul Wahab telugu","Bheems Ceciroleo hits","Yuvan Shankar Raja telugu",
     "Mahesh Babu songs","Allu Arjun songs","Jr NTR songs","Prabhas songs","Ram Charan songs","Pawan Kalyan songs",
     "Nani songs","Vijay Deverakonda songs","Chiranjeevi songs","Ravi Teja songs",
+  ],
+  tamil: [
+    "tamil hits","tamil hit songs","top tamil songs","kollywood hits","tamil 2000s hits","tamil songs 2010s","tamil songs 2020s",
+    "tamil songs 2005","tamil songs 2008","tamil songs 2012","tamil songs 2015","tamil songs 2018","tamil songs 2023",
+    "tamil melody hits","tamil kuthu songs","tamil love songs","tamil sad songs",
+    "Sid Sriram tamil","Anirudh hits","Harris Jayaraj hits","Yuvan Shankar Raja hits","A R Rahman tamil","G V Prakash hits",
+    "D Imman hits","Santhosh Narayanan hits","Hiphop Tamizha hits","Vijay songs","Ajith songs","Suriya songs","Dhanush songs","Sivakarthikeyan songs",
+  ],
+  english: [
+    "english hits","top english songs","english pop hits","english songs 2000s","english songs 2010s","english songs 2020s",
+    "Ed Sheeran","Taylor Swift","The Weeknd","Justin Bieber","Dua Lipa","Bruno Mars","Eminem","Rihanna","Coldplay",
+    "Imagine Dragons","Maroon 5","Shawn Mendes","Ariana Grande","Billie Eilish","Post Malone","Charlie Puth",
   ],
 };
 export const SAAVN_PAGES = 2;

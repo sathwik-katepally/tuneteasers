@@ -15,11 +15,18 @@
    node e2e/ladder.mjs --profile=phone|desktop --difficulty=easy|medium [--mix=both] [--window-at=0] [--log] [--shots=<dir>] */
 import fs from "node:fs";
 import path from "node:path";
-import { serve, open, args, saved, moreSettings } from "./harness.mjs";
-import { LADDER } from "../src/lib/config.ts";
+import { serve, open, args, saved, moreSettings, pickLangs } from "./harness.mjs";
+import { DIFFICULTY, LADDER } from "../src/lib/config.ts";
+import { LANGUAGES } from "../src/lib/languages.ts";
 import { SNIP_WINDOW_SEC } from "../src/lib/constants.js";
 
 const A = args({ profile: "desktop", difficulty: "easy", mix: "both", "window-at": "", log: "", shots: "" });
+// --mix: "both" (Hindi and Telugu) or a comma list of language ids.
+const langLabels = mix => (mix === "both" ? "hindi,telugu" : mix).split(",").map(id => {
+  const l = LANGUAGES.find(x => x.id === id);
+  if (!l) throw new Error(`unknown language ${id}`);
+  return l.label;
+});
 const music = A.difficulty !== "easy";
 const L = LADDER;
 const FULL = L.end(L.last);
@@ -87,10 +94,9 @@ const fmt = n => n.toFixed(2);
 let exit = 0;
 try {
   await page.goto(server.url);
-  const mix = { bolly: "Hindi", telugu: "Telugu", both: "Both" }[A.mix];
-  await page.getByRole("radio", { name: mix, exact: true }).click();
+  await pickLangs(page, langLabels(A.mix));
   await moreSettings(page);
-  await page.getByRole("radio", { name: A.difficulty, exact: false }).click();
+  await page.getByRole("radio", { name: DIFFICULTY[A.difficulty].label, exact: true }).click();
   await page.getByRole("radio", { name: "3", exact: true }).click();
   await btn(/Start the show/).click();
   const handover = btn(/^It's with me/);

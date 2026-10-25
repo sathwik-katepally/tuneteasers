@@ -3,6 +3,7 @@ import { LazyMotion, MotionConfig, domAnimation } from "motion/react";
 import * as m from "motion/react-m";
 import { LADDER } from "../lib/config";
 import { markLandingSeen } from "../lib/save";
+import { LANG_IDS, langsLabel } from "../lib/languages";
 import type { Play } from "../types";
 import s from "./Landing.module.css";
 
@@ -27,12 +28,12 @@ export function Landing({ onStart, onJoin }: { onStart: (play: Play) => void; on
             <div className={s.hero}>
               <p className={s.brand}>Tune Teasers</p>
               <h1 className={s.head}>
-                <m.span className={s.line} {...rise(0)}>Which film</m.span>
-                <m.span className={s.line} {...rise(1)}>is this <em>song</em></m.span>
-                <m.span className={s.line} {...rise(2)}>from?</m.span>
+                <m.span className={s.line} {...rise(0)}>Can you name</m.span>
+                <m.span className={s.line} {...rise(1)}>this <em>song</em> in</m.span>
+                <m.span className={s.line} {...rise(2)}>{LADDER.end(0)} seconds?</m.span>
               </h1>
               <m.p className={s.lede} {...rise(3)}>
-                A party game for Hindi and Telugu film songs. Hear a few seconds, then name the song or the film.
+                A party game for {langsLabel(LANG_IDS)} hits. Hear a few seconds, then name the song, the film or the artist.
               </m.p>
             </div>
 

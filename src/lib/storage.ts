@@ -4,6 +4,7 @@
 import { SNIP_WINDOW_SEC, snipMethodOk } from "./constants.js";
 import { songKey, safeUrl } from "./utils.js";
 import { COOLDOWN_DAYS } from "./config";
+import { langOf } from "./languages";
 import type { Track } from "../types";
 
 const LS_PLAYED = "tt_played";   // { titleKey: lastPlayedMs }, songs heard through to the reveal
@@ -24,7 +25,7 @@ export function sanitizeTrack(raw: unknown): Track | null {
     stream,
     duration: parseInt(t.duration)||200,
     year: parseInt(t.year)||0,
-    lang: t.lang==="telugu" ? "telugu" : "bolly",
+    lang: langOf(t.lang) ?? "hindi",
     hook: !!t.hook, // true when the stream is a mid-song preview clip, not the intro
     ...(typeof t.sourceId === "string" && t.sourceId ? { sourceId: t.sourceId } : {}),
     ...(Number.isFinite(parseFloat(t.score)) ? { score: Math.min(1, Math.max(0, parseFloat(t.score))) } : {}),

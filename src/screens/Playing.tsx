@@ -2,6 +2,7 @@ import { Lightbulb, Play, Plus, RotateCcw } from "lucide-react";
 import { ClipStrip, useNow } from "../components/ClipStrip";
 import { Equalizer } from "../components/Equalizer";
 import { HINT_PENALTY, LADDER, SPEED_BONUS_MAX, STEAL_SHARE, hintsFor, pointsNow } from "../lib/config";
+import { isFilmLang } from "../lib/languages";
 import type { Phase, Track, Turn } from "../types";
 import s from "./Playing.module.css";
 import sh from "./shared.module.css";
@@ -76,7 +77,7 @@ export function Playing({ name, track, phase, turn, note, onPlay, onJudge, onHin
             <RotateCcw size={17} strokeWidth={2.75} /> Replay
           </button>
         </div>
-        <p className={s.guessPrompt}>Say the song or film out loud, then choose.</p>
+        <p className={s.guessPrompt}>Say the song or {isFilmLang(track.lang) ? "film" : "artist"} out loud, then choose.</p>
         <div className={`${sh.row2} ${s.judgments}`}>
           <button type="button" className="btn btn-primary" onClick={() => onJudge("correct")} disabled={cueing}><span className={s.judgment}><span>I know</span> <span>this one</span></span></button>
           {passTo

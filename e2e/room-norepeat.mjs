@@ -90,7 +90,7 @@ async function openRoom(h){
   await h.page.goto(url);
   await h.page.getByRole("radio", { name: "Buzz in" }).click();
   await moreSettings(h.page);
-  await h.page.getByRole("radio", { name: "Easy", exact: true }).click();
+  await h.page.getByRole("radio", { name: "With singing", exact: true }).click();
   await h.page.getByRole("radio", { name: "3", exact: true }).click();
   await h.page.getByRole("button", { name: "Open a room" }).click();
   await h.page.getByText("Doors open").waitFor({ timeout: 20000 });

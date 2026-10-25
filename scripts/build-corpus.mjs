@@ -43,7 +43,10 @@ const SAAVN = "https://www.jiosaavn.com/api.php?_format=json&_marker=0&api_versi
 const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36";
 const WD_UA = "tuneteasers-corpus/1.0 (https://github.com/sathwik-katepally/tuneteasers)";
 const LANGS = CFG.languages;
-const LANG_NAMES = Object.keys({ ...LANGS, ...CFG.conflictLanguages });
+// Film-song languages are verified against Wikidata films; the others (English) are pop songs with no film.
+const FILM_LANGS = Object.keys(LANGS).filter(l => LANGS[l].film !== false);
+const isFilmLang = lang => FILM_LANGS.includes(lang);
+const LANG_NAMES = [...FILM_LANGS, ...Object.keys(CFG.conflictLanguages)];
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const de = s => String(s || "")
@@ -52,8 +55,10 @@ const de = s => String(s || "")
   .replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
 
 /* -- fetch with retry and an optional on-disk cache -- */
+const cacheKey = url => CACHE && path.join(CACHE, crypto.createHash("sha1").update(url).digest("hex"));
+const isCached = url => !!CACHE && fs.existsSync(cacheKey(url));
 async function getText(url, headers, tries = 4){
-  const key = CACHE && path.join(CACHE, crypto.createHash("sha1").update(url).digest("hex"));
+  const key = cacheKey(url);
   if (key && fs.existsSync(key)) return fs.readFileSync(key, "utf8");
   let last;
   for (let i = 0; i < tries; i++){
@@ -103,7 +108,7 @@ async function sparql(query){
 async function loadFilms(){
   const byName = new Map(), byLangYear = new Map(), byActor = new Map(), series = new Set();
   const push = (map, k, v) => { if (!k) return; const l = map.get(k) || []; l.push(v); map.set(k, l); };
-  const all = { ...Object.fromEntries(Object.entries(LANGS).map(([k, v]) => [k, v.wikidata])), ...CFG.conflictLanguages };
+  const all = { ...Object.fromEntries(FILM_LANGS.map(l => [l, LANGS[l].wikidata])), ...CFG.conflictLanguages };
   for (const [lang, qid] of Object.entries(all)){
     const films = await sparql(`SELECT ?f ?lab (MIN(YEAR(?d)) AS ?y) WHERE { ?f wdt:P31/wdt:P279* wd:Q11424; wdt:P364 wd:${qid}; wdt:P577 ?d. ?f rdfs:label ?lab FILTER(LANG(?lab)="en") } GROUP BY ?f ?lab`);
     const aliases = await sparql(`SELECT ?f ?alt WHERE { ?f wdt:P31/wdt:P279* wd:Q11424; wdt:P364 wd:${qid}; skos:altLabel ?alt FILTER(LANG(?alt)="en") }`);
@@ -118,9 +123,9 @@ async function loadFilms(){
     console.log(`wikidata ${lang}: ${films.length} films, ${aliases.length} aliases, ${cast.length} cast credits`);
     await sleep(1000);
   }
-  const langQids = Object.values(LANGS).map(v => `wd:${v.wikidata}`).join(" ");
+  const langQids = FILM_LANGS.map(l => `wd:${LANGS[l].wikidata}`).join(" ");
   for (const [, lab] of await sparql(`SELECT ?s ?lab WHERE { VALUES ?lang { ${langQids} } ?s wdt:P31/wdt:P279* wd:Q5398426; wdt:P364 ?lang; rdfs:label ?lab FILTER(LANG(?lab)="en") }`)) series.add(norm(lab));
-  console.log(`wikidata: ${series.size} hindi/telugu tv series`);
+  console.log(`wikidata: ${series.size} tv series`);
   return { byName, byLangYear, byActor, series };
 }
 
@@ -227,6 +232,8 @@ async function harvest(playlists){
 /* -- one song's verdict -- */
 const roles = raw => (raw.more_info?.artistMap?.artists || []);
 const names = (raw, role) => [...new Set(roles(raw).filter(a => a.role === role).map(a => de(a.name).trim()).filter(Boolean))];
+// A pop song's credited artists ("Jennifer Lopez, Pitbull"); its artistMap roles often list only the writers.
+const primaries = raw => [...new Set((raw.more_info?.artistMap?.primary_artists || []).map(a => de(a.name).trim()).filter(Boolean))];
 const yearOf = raw => parseInt(raw.year) || 0;
 const playsOf = raw => parseInt(raw.play_count) || 0;
 const compilationAlbum = raw => COMPILATION_RX.test(cleanAlbum(raw.more_info?.album).name);
@@ -365,6 +372,86 @@ async function classify(raw, M){
   return v;
 }
 
+/* -- pop songs (English): no film, so the checks are the original release
+      and who sings it -- */
+
+/* MusicBrainz's first release of a recording by this artist. Saavn often
+   carries only a later copy (a deluxe edition, a "Best Of"), whose year would
+   put "Without Me" in 2005 and let pre-2000 classics in as remasters.
+   MusicBrainz asks for at most one request a second, so calls queue. */
+const MB = "https://musicbrainz.org/ws/2/recording?fmt=json&limit=25&query=";
+let mbQueue = Promise.resolve();
+const mbSeen = new Map(); // one lookup per song and artist, however many Saavn copies the seed holds
+function firstRelease(title, artist){
+  const q = `recording:"${title.replace(/["\\]/g, "")}" AND artist:"${artist.replace(/["\\]/g, "")}"`;
+  const memo = `${songKey(title)}|${norm(artist)}`;
+  if (mbSeen.has(memo)) return mbSeen.get(memo);
+  const url = MB + encodeURIComponent(q);
+  const run = mbQueue.then(async () => {
+    const cached = isCached(url);
+    let j = null;
+    try { j = JSON.parse(await getText(url, { "user-agent": WD_UA, accept: "application/json" })); } catch {}
+    if (!cached) await sleep(CFG.musicbrainz.gapMs);
+    // null: the lookup failed, which is not the same as no match (the song's year is then unknown).
+    if (!j) return null;
+    // The search also returns same-titled recordings by others ("If I Can't Have You", 2006), so the artist must match too.
+    const key = songKey(title), who = norm(artist);
+    const years = (j?.recordings || []).filter(r => r.score >= CFG.musicbrainz.minScore && songKey(r.title) === key
+      && (r["artist-credit"] || []).some(c => norm(c.name || c.artist?.name) === who))
+      .map(r => parseInt(r["first-release-date"])).filter(y => y > 1900);
+    // MusicBrainz has stray dates too (one "If I Can't Have You" copy is dated 2006), so a year
+    // counts once two recordings back it within a year; a lone recording is taken as it is.
+    years.sort((a, b) => a - b);
+    return years.length === 1 ? years[0] : years.find(y => years.filter(x => x <= y + 1).length >= 2) ?? 0;
+  });
+  mbQueue = run.catch(() => {});
+  mbSeen.set(memo, run);
+  return run;
+}
+
+/* Saavn tags some Indian acts' songs english (Badshah's "Voodoo"). A singer
+   with more film-language songs than English ones in the seed is one; an
+   English act with one film song (Akon, "Chammak Challo") is not. */
+function homeLanguages(seed){
+  const n = new Map();
+  for (const { raw } of seed.values()) for (const a of new Set([...names(raw, "singer"), ...primaries(raw)])){
+    const k = norm(a), e = n.get(k) || { film: 0, pop: 0 };
+    e[isFilmLang(raw.language) ? "film" : "pop"]++;
+    n.set(k, e);
+  }
+  return a => { const e = n.get(norm(a)); return e && e.film > e.pop ? "film" : "pop"; };
+}
+
+async function classifyPop(raw, home){
+  const title = cleanTitle(raw.title);
+  if (!title) return { reject: "no-title" };
+  if (EXCLUDE_RX.test(de(raw.title))) return { reject: "excluded-title" };
+  if (!playsOf(raw)) return { reject: "no-plays" };
+  const lead = primaries(raw)[0] || names(raw, "singer")[0];
+  if (!lead) return { reject: "no-artist" };
+  if (home(lead) === "film") return { reject: "indian-act" };
+  const copies = [raw, ...await siblings(raw)];
+  // The album the song came out on: the earliest copy that is not a compilation or a bare single.
+  // Edition notes ("Meteora (DMD Album + 3 Bonus Tracks)", "Divide (Deluxe)") are not the album's name.
+  const album = c => {
+    const a = cleanAlbum(c.more_info?.album).name.replace(/(\s*[([][^)\]]*[)\]])+$/, "").trim();
+    return a && !COMPILATION_RX.test(a) && norm(a) !== norm(title) ? a : "";
+  };
+  const canonical = copies.filter(c => album(c)).sort((a, b) => yearOf(a) - yearOf(b))[0] || raw;
+  const years = copies.map(yearOf).filter(Boolean);
+  const saavnYear = years.length ? Math.min(...years) : 0;
+  // The play floor first: it is free, and MusicBrainz is one request a second.
+  if (playsOf(canonical) < CFG.minPlays) return { reject: "low-plays" };
+  if (saavnYear && saavnYear < CFG.minYear) return { reject: "pre-" + CFG.minYear };
+  const mbYear = await firstRelease(title, lead);
+  // Without MusicBrainz a later copy's year could let a pre-2000 classic in; a long outage
+  // leaves too few English songs and the build keeps the last corpus (minSongsPerLanguage).
+  if (mbYear === null) return { reject: "musicbrainz-failed" };
+  const year = mbYear ? Math.min(mbYear, saavnYear || mbYear) : saavnYear;
+  if (year < CFG.minYear) return { reject: "pre-" + CFG.minYear };
+  return { copy: canonical, film: album(canonical), year, yv: !!mbYear, source: mbYear ? "musicbrainz" : "saavn" };
+}
+
 /* -- scoring -- */
 const decadeOf = y => `${Math.floor(y / 10) * 10}s`;
 function percentiles(values){
@@ -440,7 +527,8 @@ async function playlistTags(songs){
     e.strong ||= l.strong; e.n++;
     raw[l.cat].set(s, e);
   }
-  const tagged = Object.fromEntries(CAT_IDS.map(c => [c, new Set([...raw[c]].filter(([, e]) => e.strong || e.n >= CAT.minLists).map(([s]) => s))]));
+  const inLangs = (cat, s) => !CAT.tags[cat].languages || CAT.tags[cat].languages.includes(s.language);
+  const tagged = Object.fromEntries(CAT_IDS.map(c => [c, new Set([...raw[c]].filter(([s, e]) => inLangs(c, s) && (e.strong || e.n >= CAT.minLists)).map(([s]) => s))]));
   for (const cat of CAT_IDS) for (const other of CAT.tags[cat].unless || [])
     for (const s of tagged[other]) tagged[cat].delete(s);
   const used = lists.filter(l => members.get(l.id)?.size);
@@ -525,7 +613,8 @@ function applyOverrides(songs, tags){
 
 async function tagSongs(songs){
   const tags = new Map(songs.map(s => [s, new Set()]));
-  const sources = [await playlistTags(songs), wikipediaTags(songs, await filmArticles(songs))];
+  const films = songs.filter(s => isFilmLang(s.language));
+  const sources = [await playlistTags(songs), wikipediaTags(films, await filmArticles(films))];
   for (const src of sources) for (const cat of CAT_IDS) for (const s of src[cat] || []) tags.get(s).add(cat);
   applyOverrides(songs, tags);
   for (const s of songs) s.tags = CAT_IDS.filter(c => tags.get(s).has(c));
@@ -545,12 +634,13 @@ const COLS = ["id", "title", "film", "year", "yearVerified", "language", "singer
   const seed = await harvest(playlists);
   console.log(`seed: ${seed.size} unique songs`);
 
+  const home = homeLanguages(seed);
   const reasons = {}, report = [];
   const byKey = new Map(); // language + title key -> best entry
   let done = 0;
   await mapLimit([...seed.entries()], CFG.concurrency, async ([id, e]) => {
     let v;
-    try { v = await classify(e.raw, M); }
+    try { v = await (isFilmLang(e.raw.language) ? classify(e.raw, M) : classifyPop(e.raw, home)); }
     catch (err){ v = { reject: "error:" + String(err.message || err).slice(0, 60) }; }
     if (++done % 200 === 0) console.log(`  classified ${done}/${seed.size}`);
     if (v.reject){
@@ -561,7 +651,7 @@ const COLS = ["id", "title", "film", "year", "yearVerified", "language", "singer
     const c = v.copy, mi = c.more_info || {};
     const song = {
       id: c.id, title: cleanTitle(c.title), film: v.film, year: v.year, yearVerified: v.yv, language: c.language,
-      singers: names(c, "singer"), composers: names(c, "music"), lyricists: names(c, "lyricist"), starring: names(c, "starring"),
+      singers: isFilmLang(c.language) ? names(c, "singer") : primaries(c), composers: names(c, "music"), lyricists: names(c, "lyricist"), starring: names(c, "starring"),
       albumId: String(mi.album_id || ""), plays: playsOf(c), playlists: e.pls,
     };
     if (REPORT) report.push({ id, resolvedId: c.id, title: song.title, film: song.film, year: song.year, yv: song.yearVerified, source: v.source, lang: song.language, album: de(mi.album) });

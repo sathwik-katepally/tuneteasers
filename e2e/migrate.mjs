@@ -35,8 +35,10 @@ try {
   await page.getByRole("button", { name: /Start a new show instead/ }).click();
   await moreSettings(page);
   for (const n of ["Priya", "Rahul", "Anu"]) await page.getByRole("button", { name: `Rename ${n}` }).waitFor();
-  if (await page.getByRole("radio", { name: "Easy" }).getAttribute("aria-checked") !== "true") fail("old With-vocals setting did not map to Easy");
-  if (await page.getByRole("radio", { name: "Hindi" }).getAttribute("aria-checked") !== "true") fail("mix lost");
+  if (await page.getByRole("radio", { name: "With singing" }).getAttribute("aria-checked") !== "true") fail("old With-vocals setting did not map to With singing");
+  const langs = page.getByRole("group", { name: "Languages" });
+  if (await langs.getByRole("button", { name: "Hindi" }).getAttribute("aria-pressed") !== "true"
+    || await langs.getByRole("button", { name: "Telugu" }).getAttribute("aria-pressed") !== "false") fail("old Hindi-only mix did not load as Hindi");
 
   await page.getByRole("button", { name: "Resume" }).click();
   await page.getByRole("button", { name: "It's with me, Rahul" }).click();

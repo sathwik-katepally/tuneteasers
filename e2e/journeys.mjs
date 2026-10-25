@@ -1,7 +1,7 @@
 /* How much a person has to tap, read and decide on the way to the first song,
    counted the way the UX audit did (docs/testing-and-deploy.md): words summed
    over every screen before the first song, choices on the busiest screen, and
-   a radio group counts as one choice. Fails when first run grows past its
+   a radio group (or the language chips' toggle group) counts as one choice. Fails when first run grows past its
    budget or a returning player needs more than one tap to start.
    Usage: node e2e/journeys.mjs [--shots=<dir>] */
 import fs from "node:fs";
@@ -27,7 +27,7 @@ function tally(journey, profile){
       const m = await page.evaluate(() => {
         const vis = el => { const r = el.getBoundingClientRect(); const cs = getComputedStyle(el); return r.width > 0 && r.height > 0 && cs.visibility !== "hidden" && cs.display !== "none"; };
         const ctl = [...document.querySelectorAll("button, input, a[href], select, textarea")].filter(e => vis(e) && !e.disabled && !e.closest("[aria-hidden=true]"));
-        const choices = new Set(ctl.map(e => e.closest("[role=radiogroup]") || e)).size;
+        const choices = new Set(ctl.map(e => e.closest("[role=radiogroup], [role=group]") || e)).size;
         const words = (document.body.innerText.match(/[\p{L}\p{N}'’]+/gu) || []).length;
         return { words, choices, scroll: +(document.documentElement.scrollHeight / innerHeight).toFixed(2) };
       });

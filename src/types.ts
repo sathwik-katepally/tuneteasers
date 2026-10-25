@@ -1,4 +1,6 @@
-export type Lang = "bolly" | "telugu";
+import type { Lang } from "./lib/languages";
+
+export type { Lang };
 
 export interface Track {
   title: string;
@@ -19,15 +21,17 @@ export interface Track {
 
 export type Difficulty = "easy" | "medium";
 export type Mode = "players" | "teams";
-export type Mix = "bolly" | "telugu" | "both";
-export type Category = "dance" | "romantic" | "sad" | "item" | "mass";
+/* "hits": the popular songs only; "more": the less famous ones as well. */
+export type Songs = "hits" | "more";
+export type Category = "dance" | "romantic" | "sad" | "item" | "mass" | "hiphop";
 export type Play = "pass" | "room";
 
 export interface Settings {
   play: Play;
-  mix: Mix;
+  langs: Lang[];
   eras: string[];
   difficulty: Difficulty;
+  songs: Songs;
   categories: Category[];
   mode: Mode;
   rounds: number;
@@ -37,6 +41,8 @@ export interface RosterEntry {
   id: string;
   name: string;
   members: string[];
+  /* Pass the phone: the language this contestant's own turns play; absent, any chosen language. */
+  lang?: Lang;
 }
 
 export interface CastMember extends RosterEntry {
@@ -61,7 +67,7 @@ export interface GameState {
   source: string;
   mode: Mode;
   difficulty: Difficulty;
-  mix: Mix;
+  langs: Lang[];
   cast: CastMember[];
   history: HistoryEntry[];
   finished: boolean;
