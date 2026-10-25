@@ -209,14 +209,20 @@ export const engine = {
      has played inside a tap, and the unlock survives a new src. A buzz-in
      room's big screen plays song after song from timers with nobody touching
      it, so each tap tops up a pool of unlocked elements that later songs load
-     into. Only elements whose silent play went through join the pool. */
+     into. The unlock happens at the play() call, so an element joins the
+     pool at once: a reveal right after a Resume tap takes one before the
+     silent play has settled, and the settling then leaves it alone. A
+     refused play takes its element back out. */
   unlock(){
     this.ac();
     for (let i = this.pool.length; i < POOL_SIZE; i++){
       const el = new Audio(SILENCE);
       el.muted = true;
-      const keep = () => { el.pause(); el.muted = false; el.removeAttribute("src"); if (this.pool.length < POOL_SIZE) this.pool.push(el); };
-      try { const p = el.play(); if (p) p.then(keep, () => {}); else keep(); } catch(e){}
+      this.pool.push(el);
+      const pooled = () => this.pool.includes(el);
+      const keep = () => { if (pooled()){ el.pause(); el.muted = false; el.removeAttribute("src"); } };
+      const drop = () => { if (pooled()) this.pool.splice(this.pool.indexOf(el), 1); };
+      try { const p = el.play(); if (p) p.then(keep, drop); else keep(); } catch(e){ drop(); }
     }
   },
   _fresh(){ return this.pool.pop() || new Audio(); },

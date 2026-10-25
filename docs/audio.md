@@ -95,7 +95,8 @@ If a browser still refuses (`play()` rejects with `NotAllowedError`), the engine
 `e2e/autoplay.mjs` emulates the iOS rule in Chromium and checks both paths.
 
 A buzz-in room's big screen moves from song to song on timers with nobody touching it (docs/room-mode.md), so there is no tap to prime the next song in.
-The unlock belongs to the element object and survives a new `src`, so `engine.unlock()` keeps a pool of unlocked elements: called inside a tap ("Open a room", Resume, "Start the show", "Same crowd again"), it plays up to `POOL_SIZE` (40) elements on a silent data URI, muted, and keeps those whose play went through.
+The unlock belongs to the element object and survives a new `src`, so `engine.unlock()` keeps a pool of unlocked elements: called inside a tap ("Open a room", Resume, "Start the show", "Same crowd again"), it plays up to `POOL_SIZE` (40) elements on a silent data URI, muted.
+An element joins the pool at its `play()` call, since that is when iOS unlocks it, so a reveal straight after a Resume tap already finds one; a refused play takes its element back out.
 Every element the engine loads a song into (`_el`, `prefetch`) comes from that pool while it lasts, then from `new Audio()`, which falls back to "Tap to play" on a strict browser.
 The room host primes only after a tap; a timer-started move skips the prime, since a prime outside a tap only races the clip.
 `e2e/room.mjs` runs the host under the same emulated rule and fails on any refused play.
