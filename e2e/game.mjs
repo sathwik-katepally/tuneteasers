@@ -15,7 +15,7 @@ import { serve, open, args, saved, moreSettings, pickLangs } from "./harness.mjs
 import { displayTitle, songKey } from "../src/lib/utils.js";
 import { SAAVN_BASES } from "../src/lib/constants.js";
 import { CATEGORIES, DIFFICULTY, HINT_PENALTY, SPEED_BONUS_FADE_SECS, SPEED_BONUS_MAX } from "../src/lib/config.ts";
-import { LANGUAGES } from "../src/lib/languages.ts";
+import { LANGUAGES, isFilmLang } from "../src/lib/languages.ts";
 
 const A = args({ profile: "phone", mode: "players", mix: "both", difficulty: "medium", rounds: "3" });
 // --mix: "both" (Hindi and Telugu) or a comma list of language ids.
@@ -199,7 +199,10 @@ try {
     if (!hinted && turns === 1){
       // Every hint on one song: each one shows up and takes HINT_PENALTY off what it is worth.
       const g = (await saved(page)).game, t = g.queue[g.trackIdx];
-      const want = [t.year > 0 && `Released in ${t.year}`, t.music && `Music by ${t.music}`, t.artist && `Sung by ${t.artist}`, t.album && `From ${t.album}`].filter(Boolean);
+      // A film song names its film last, an English song its artist.
+      const want = (isFilmLang(t.lang)
+        ? [t.year > 0 && `Released in ${t.year}`, t.music && `Music by ${t.music}`, t.artist && `Sung by ${t.artist}`, t.album && `From ${t.album}`]
+        : [t.year > 0 && `Released in ${t.year}`, t.album && `From the album ${t.album}`, t.artist && `By ${t.artist}`]).filter(Boolean);
       for (let i = 0; i < want.length; i++){
         const hint = btn(new RegExp(`^Hint ${i + 1} of ${want.length}, costs ${HINT_PENALTY}$`));
         const before = Number((await page.getByText(/^Worth /).textContent()).match(/\d+/)[0]);
@@ -212,7 +215,8 @@ try {
       await shot("05c-hint", 300);
       hinted = true;
     }
-    await page.getByText("Say the song or film out loud, then choose.").waitFor();
+    const now = (await saved(page)).game, nowTrack = now.queue[now.trackIdx];
+    await page.getByText(`Say the song or ${isFilmLang(nowTrack.lang) ? "film" : "artist"} out loud, then choose.`).waitFor();
     await btn(/^I don.t know this one$|^Pass to /).waitFor();
     if (!taken.has("11-menu")){
       await btn("Game menu").click();

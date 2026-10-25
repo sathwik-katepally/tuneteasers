@@ -5,20 +5,21 @@ import type { Category, Settings } from "../types";
 import s from "./CategoryPicker.module.css";
 
 /* The setup screen's song counts for these settings (setupCounts): undefined
-   while they load, null when the song list didn't load. */
+   until the first ones load, null when the song list didn't load. While a
+   change recounts, the last counts stay up, so the chips don't flicker. */
 export function useSetupCounts(S: Settings, need: number, blocked: string[]): SetupCounts | null | undefined {
-  const [loaded, setLoaded] = useState<{ key: string; counts: SetupCounts | null } | null>(null);
+  const [counts, setCounts] = useState<SetupCounts | null | undefined>(undefined);
   const sound = DIFFICULTY[S.difficulty].sound;
   const key = JSON.stringify([S.langs, S.eras, sound, S.songs, S.categories, need, blocked]);
   useEffect(() => {
     let live = true;
     const timer = setTimeout(() => {
       setupCounts({ langs: S.langs, eras: S.eras, sound, songs: S.songs, minSongs: need, categories: S.categories }, CATEGORIES.map(c => c.id))
-        .then(c => { if (live) setLoaded({ key, counts: c }); });
+        .then(c => { if (live) setCounts(c); });
     }, 200);
     return () => { live = false; clearTimeout(timer); };
   }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
-  return loaded?.key === key ? loaded.counts : undefined;
+  return counts;
 }
 
 interface Props {

@@ -107,7 +107,7 @@ try {
   await page.getByRole("status").getByText("No Item songs in English, so that choice is off.").waitFor();
   await counted("Hip hop");
   if (await chip("Item songs").count() || await chip("Mass").count()) fail("Item or Mass shown for an English show");
-  await expectPressed(["Any"], "Item dropped for English");
+  if (!(await pressed("Any")) || await pressed("Hip hop")) fail("Item dropped for English: Any should be the only pick");
   if (JSON.stringify((await saved(page)).settings.categories) !== "[]") fail("dropped category still saved");
   await pickLangs(page, ["Hindi", "English"]);
   await counted("Item songs");
