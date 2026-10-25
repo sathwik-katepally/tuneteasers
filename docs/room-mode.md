@@ -23,10 +23,10 @@ Autocomplete offers every known title in the show's languages; if she is right s
 
 ## Secrecy
 
-- The host sends each song's title, film, year and singers to the room when its countdown starts; stream URLs never leave the host.
+- The host sends each song's title, film (a pop song's lead artist, with `half: "artist"`), year and singers to the room when its countdown starts; stream URLs never leave the host.
 - A phone's view carries the answer only once the song is revealed (`song.answer` is null before that), and the results list only holds revealed songs.
 - No title of the show reaches a phone before that song's reveal, in any frame, autocomplete included.
-  A phone builds its autocomplete itself from the site's public `corpus.json` and `catalog.json` for the show's languages (`answerTitles` in `src/lib/crate.ts`; the room tells phones only the language mix).
+  A phone builds its autocomplete itself from the site's public `corpus.json` and `catalog.json` for the show's languages (`answerTitles` in `src/lib/crate.ts`; the room tells phones only the show's languages).
   The list is the same for every show in those languages, so it says nothing about which songs are coming. Songs from the live-search tiers may be missing from it; those are typed in full.
 - Judging needs the titles that fold close to the answer (so a guess that is exactly another song is wrong even when it is a typo away). The host picks them from the same public list (`nearTitles`) and sends them with each `song`; the room keeps them for judging and never puts them in a view.
 - A phone's song history (below) goes to the room and on to the host only, merged with the other seats'; no phone ever receives another phone's history or the merged list.
@@ -110,8 +110,8 @@ The first message must be a hello; anything else is refused until then, and a co
 | From | Message | Does |
 | --- | --- | --- |
 | host | `host { token }` | Authenticates with the host secret from `POST /api/rooms` |
-| host | `start { mix, total, perRound, answerSecs, filmShare }` | Lobby (or a finished show) to a new show; scores reset. `filmShare` (0 to 1, `ROOM_FILM_SHARE`) is what naming the film scores; a host that sends none gives the film nothing |
-| host | `song { n, title, film, year, artist, near }` | Arms song `n` (buzzing shut). `n` must be one past the number of results and at most `total`, so a re-cue can restart an unfinished song but never replay a scored one |
+| host | `start { langs, total, perRound, answerSecs, filmShare }` | Lobby (or a finished show) to a new show; scores reset. `langs` is the show's language ids (a host from before sends one word, `mix`). `filmShare` (0 to 1, `ROOM_FILM_SHARE`) is what naming the film or artist scores; a host that sends none gives it nothing |
+| host | `song { n, title, film, half, year, artist, near }` | Arms song `n` (buzzing shut). `n` must be one past the number of results and at most `total`, so a re-cue can restart an unfinished song but never replay a scored one |
 | host | `clip { rung, points }` | A clip is playing; buzzing open at these points |
 | host | `reveal` / `end` / `kick { id }` | Nobody got it / show over / remove a player (lobby only) |
 | host | `skip { cue }` | Skips the song straight away (clip live, nobody has buzzed) |
@@ -160,9 +160,10 @@ Near titles leave out the song's own film, where a look-alike is the same song s
 So "Main Hu Na" matches "Main Hoon Na" and "kesaria" matches "Kesariya", while "Kesari" does not, and picking "Chhaliya" (Tashan) for "Chaleya" (Jawan) is wrong.
 
 Naming the film instead scores `ROOM_FILM_SHARE` (half) of the points (`isFilm`: the same folding, but at most one vowel slip from the film the host sent, since sequels and look-alike films sit a digit or a letter apart, Stree / Stree 2, Gabbar Singh / Kabir Singh, and no list guards them); the phone then reads "You named the film, so half the points" and the big screen "+50 for Asha (the film)".
+For a pop song (English) the half-points answer is the lead artist instead of a film (`halfAnswer`, `half: "artist"`): the phone reads "You named the artist" and the big screen "(the artist)", and before a reveal a phone's pad says only what the show's languages allow ("half for the film or artist").
 The host sends the film cleaned by `filmOf` in `src/lib/crate.ts`: `Sitaare (From "Ikkis") - Single` is Ikkis (round or square brackets), and a soundtrack album loses "(Original Motion Picture Soundtrack)" and its variants.
 
-The phone's list (`answerTitles`) has one entry per title with every film it is from, shown under the title with the year when there is one film ("Chaleya / Jawan, 2023" against "Chhaliya / Tashan, 2008"), and one entry per film, marked "The film · half points", ranked after songs.
+The phone's list (`answerTitles`) has one entry per title with every film it is from, shown under the title with the year when there is one film ("Chaleya / Jawan, 2023" against "Chhaliya / Tashan, 2008"), and one entry per film, marked "The film · half points" (per pop artist, "The artist · half points"), ranked after songs.
 A film that is also a song's title is left to that song's entry.
 `suggest` matches a whole-title prefix, then word prefixes, then letters anywhere, plainly and folded, and last by consonants only, closest first, so "nuvvos" still finds "Nuvvasthanante".
 

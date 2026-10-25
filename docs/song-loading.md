@@ -1,20 +1,24 @@
 # Song loading
 
-`buildCrate(mix, eras, sound, minSongs, cooldown, categories, heardBy)` in `src/lib/crate.ts` assembles the game queue; it returns `{ queue, source }` or `{ error: "load" | "thin" | "safe" }`.
-The level (`settings.difficulty`, `"easy" | "medium"`) picks only the `sound`: both levels draw the same songs.
-The corpus tier keeps the popular songs, those whose `score` (the popularity percentile within the song's language and decade) is at least `POPULAR_MIN_SCORE` (0.5, `src/lib/config.ts`), so the top half; when they hold fewer than `minSongs` songs for the chosen languages, eras and categories the crate widens to every song before reporting `thin` (not in Music-only, where the shortage shows as `safe`).
+`buildCrate({ langs, eras, sound, songs, minSongs, need, cooldown, categories, heardBy })` in `src/lib/crate.ts` assembles the game queue; it returns `{ queue, source }` or `{ error: "load" | "thin" | "safe", lang? }`.
+`langs` are ids from `src/lib/languages.ts`, which are JioSaavn's language names (`hindi`, `telugu`, `tamil`, `english`).
+The sound (`settings.difficulty`, `"easy" | "medium"`) picks only `sound`: both draw the same songs.
+`songs` picks the songs: with `"hits"` (Big hits) the corpus tier keeps the popular songs, those whose `score` (the popularity percentile within the song's language and decade) is at least the language's `popularCut` (`src/lib/config.ts`: 0.5, so the top half, and 0.75 for English, whose long tail on JioSaavn is songs Indian listeners do not know); when they hold fewer than `minSongs` songs for the chosen languages, eras and categories the crate widens to every song before reporting `thin` (not in Music-only, where the shortage shows as `safe`).
+With `"more"` (Less famous too) there is no cut.
 `minSongs` is the caller's rounds times contestants (the code default is 10).
+`need` is, per language, how many songs the contestants who chose it need (pass the phone: rounds times those contestants); a language that cannot bring them widens alone, and if it still cannot the crate returns `thin` (or `safe`) with that `lang`, which setup turns into "Not enough English songs for Erik".
+The chosen languages split the queue evenly: the corpus tier draws each language's candidates separately, and the final queue takes turns between the languages' weighted shuffles (`interleave`).
 The uncurated fallback tiers carry no score and ignore the cut.
-`categories` is a list of corpus tags (`dance`, `romantic`, `sad`, `item`, `mass`; `[]` means every song): a corpus song passes when it carries any of them, and the widening above happens inside that set.
+`categories` is a list of corpus tags (`dance`, `romantic`, `sad`, `mass`, `item`, `hiphop`; `[]` means every song): a corpus song passes when it carries any of them, and the widening above happens inside that set.
 The fallback tiers carry no tags, so with categories set they never run: an unreachable corpus returns `load` and too few tagged songs return `thin` (or `safe` in Music-only).
-`categoryCounts` in the same file counts each category's songs the way the corpus tier picks them, for the setup screen's chips.
+`setupCounts` in the same file counts, the way the corpus tier picks them, each category's songs and each popularity level's songs for the setup screen, and lists the categories the chosen languages have at all (the others are hidden).
 
 ## Source tiers
 
 1. **Curated corpus** (`loadFromCorpus`) - `public/corpus.json`, the verified film-song pool built offline by `scripts/build-corpus.mjs` (below).
    The crate filters it by language, era, the popularity cut and the device blocklist, orders fresh songs before ones still cooling down, draws `CORPUS_DRAW` candidates and resolves them to streams with one batch request per `CORPUS_BATCH` ids (`GET /songs?ids=`, served by our Worker and by any saavn.dev-compatible mirror in `SAAVN_BASES`).
-   The draw is weighted by popularity (`DRAW_WEIGHT` in `src/lib/config.ts`): a song's chance is proportional to `(score + floor) ^ power`, with `score` its percentile within its language and decade, so the hits of a tier come up several times as often as its long tail without ever leaving it out; the final queue order is drawn the same way (`weightedShuffle`), and songs without a score (the fallback tiers) draw as if they sat in the middle.
-   Tracks carry `album` = film, `year` = the film's verified year and `score`.
+   The draw is weighted by popularity (`DRAW_WEIGHT` in `src/lib/config.ts`, per popularity level): a song's chance is proportional to `(score + floor) ^ power`, with `score` its percentile within its language and decade, so with Big hits the hits of a tier come up several times as often as its long tail without ever leaving it out; Less famous too uses power 0, a plain shuffle, so a regular's show is not mostly hits they already know. The final queue order is drawn the same way (`weightedShuffle`), and songs without a score (the fallback tiers) draw as if they sat in the middle.
+   Tracks carry `album` = film (an English song's album), `year` = the film's verified year (an English song's first release) and `score`.
    If the corpus file is missing or the ids cannot be resolved (worker and mirror down), the tiers below take over; if the corpus loads but fewer than `minSongs` songs match the filters, the crate returns `{ error: "thin" }` rather than playing unverified songs.
 2. **Saavn search** (`loadFromSaavn`) - JioSaavn search APIs listed in `SAAVN_BASES`; full songs, so snippets start at the intro.
    The first base is our own Cloudflare Worker (`worker/`, see docs/testing-and-deploy.md); the public nandanvarma mirror follows as a fallback.
@@ -34,10 +38,11 @@ Catalog tracks are 30-second mid-song "hook" clips and carry `hook: true`.
 ## The corpus (`public/corpus.json`)
 
 Built by `node scripts/build-corpus.mjs` (weekly in CI, see docs/testing-and-deploy.md) from `scripts/corpus.config.json`, which holds everything that changes: playlist search queries, the editorial owner uid, Wikidata language ids, the year floor and tolerance, the play-count floor, score weights and tier cut-offs.
-The rule is film songs only, with the film's real release year:
+Its `languages` block lists the corpus languages: film languages (Hindi, Telugu, Tamil) carry a Wikidata language id, and a pop language (English, `film: false`) carries none.
+The rule for a film language is film songs only, with the film's real release year:
 
-1. **Seed** - JioSaavn's own editorial playlists (owner uid `phulki_user`, e.g. "Hindi 2000s", "Chartbusters 2019 - Telugu") found through the configured playlist searches, plus the per-language charts.
-   Only songs whose Saavn `language` is hindi or telugu are kept; titles matching `EXCLUDE_RX` (remixes, lofi, unplugged, ...) are dropped.
+1. **Seed** - JioSaavn's own editorial playlists (owner uid `phulki_user`, e.g. "Hindi 2000s", "Chartbusters 2019 - Telugu", "English 2010s") found through the configured playlist searches, plus the per-language charts.
+   Only songs whose Saavn `language` is one of the configured languages are kept; titles matching `EXCLUDE_RX` (remixes, lofi, unplugged, ...) are dropped.
 2. **Film match** - the album name is cleaned ("(Original Motion Picture Soundtrack)", language markers such as "- Telugu", `From "X"` clauses, brackets) and looked up in a Wikidata index of films by original language (labels and aliases, min publication year).
    A film of the song's language released within ±1 year of the copy's year verifies the song; the corpus stores Wikidata's canonical film label and year.
    An album marked as a dub ("Coolie (Telugu)", a marker anywhere on the album name) matches a film of any language instead, and an unmarked copy whose album is exactly the name of a film of another language in that window counts as a dub too; a dub keeps the album's own name, the one its audience knows, with the original film's year.
@@ -53,22 +58,33 @@ The rule is film songs only, with the film's real release year:
 
 6. **Categories** - see below.
 
+An English song has no film, so steps 2 to 4 are replaced (`classifyPop`):
+
+- **Who sings it** - JioSaavn tags some Indian acts' songs English (Badshah's "Voodoo"); a lead artist with more film-language songs than English ones in the seed is rejected (`indian-act`), while an English act with one film song (Akon) is kept.
+- **Original release** - the song's copies (a title search, same play count within 1%) give the earliest JioSaavn year and the album: the earliest copy whose album is neither a compilation nor a bare single, so the hint names the real album.
+  MusicBrainz's first release of a recording with that title by that artist (`recording` search, score at least `musicbrainz.minScore`, one request per `musicbrainz.gapMs`) gives the year when it is earlier; JioSaavn often carries only a later deluxe or "Best Of" copy ("Without Me" shows 2005, released 2002), and a remaster of a pre-2000 classic would otherwise pass as new.
+  A song MusicBrainz does not find keeps JioSaavn's earliest year with `yearVerified: false`.
+- The year floor and the play-count floor apply as for film songs; the `film` column holds the album (empty for a single).
+
 The file is compact: `{ v, built, tiers, cols, songs: [[...], ...] }`, one row per song with columns `id, title, film, year, yearVerified, language, singers, composers, lyricists, starring, albumId, plays, score, tier, tags`; the client expands rows by `cols` and carries composers as `music` for the reveal.
 Songs are deduped by language + `songKey(title)` (highest play count wins); snips are keyed separately by Saavn ID so similarly titled recordings cannot share an interval.
-The script refuses to write a corpus with fewer than `minSongsPerLanguage` songs in either language.
+The script refuses to write a corpus with fewer than `minSongsPerLanguage` songs in any language.
 
 ## Song categories (`tags`)
 
 Each song's `tags` column lists the categories it belongs to, set at build time from the `categories` block of `scripts/corpus.config.json` (queries, title regexes, thresholds) with no AI and no human step, so the weekly refresh keeps them current on its own.
 Where a source is too noisy to trust, the rule drops the tag rather than guessing.
 
-- **Moods and mass** (`dance`, `romantic`, `sad`, `mass`) come from JioSaavn's editorial theme playlists (owner `playlistOwner`), found with each category's `queries` and kept when the title matches its `titleRx` and not `playlistExcludeRx` (lofi, remixes, retro decades, ...).
+- **Moods, mass and hip hop** (`dance`, `romantic`, `sad`, `mass`, `hiphop`) come from JioSaavn's editorial theme playlists (owner `playlistOwner`), found with each category's `queries` and kept when the title matches its `titleRx` and not `playlistExcludeRx` (lofi, remixes, retro decades, ...).
   Playlist songs map to corpus songs by id or by language + `songKey(title)`.
   A song gets the tag when it is on one strong list or on `minLists` (2) lists of any kind.
   Weak lists are titles matching `weakTitleRx` (folk and city "beats" lists for `mass`) and artist lists ("Arijit Singh - Sad Songs", "Best Of Romance - Arijit Singh"): a list whose title contains the name of anyone credited on `artistListMinSongs` corpus songs picks songs by who is on them, not by mood.
   `unless` then removes overlaps: `dance` drops songs also tagged `sad`, and `romantic` drops `dance` and `sad`.
+  A tag with `languages` only tags songs in those languages: `hiphop` is English only, since Hindi "desi hip hop" lists are a different scene.
+  Tamil kuthu and gaana lists feed `mass` (kuthu, mass and folk barely overlap in Tamil, and two of three kuthu songs are also dance songs, so a separate chip would mostly repeat Dance).
+  English has no `mass` or `item` songs, so those chips stay hidden for an English-only show.
   Occasion lists (wedding, Holi, rain) were measured and left out: they hold what gets played at a wedding, not songs about one.
-- **Item songs** (`item`) come from the film's English Wikipedia article (found by the usual "Film (2012 film)" title patterns, accepted only with a film infobox naming the film's year): a cast-list bullet line that names the song and matches `wikipediaRx` ("item number", "bar dancer", "special song", ...).
+- **Item songs** (`item`, film languages only) come from the film's English Wikipedia article (found by the usual "Film (2012 film)" title patterns, accepted only with a film infobox naming the film's year): a cast-list bullet line that names the song and matches `wikipediaRx` ("item number", "bar dancer", "special song", ...).
   Prose sentences are ignored because they often name two songs of which only one is the item number.
 - **Overrides** - `scripts/category-overrides.json` is a fixed list of corrections applied last (`add` / `remove` per song, matched by id or by language + title).
   It was seeded once from the owner-decided item-song list (the Wikipedia set plus songs Wikipedia does not phrase as item numbers, minus "Besharam", where a choreographer is credited "as a dancer").
