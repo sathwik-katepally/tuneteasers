@@ -2,12 +2,13 @@ import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 
 import { DIFFICULTY, LADDER, hookOffset, pointsNow } from "../lib/config";
 import { useClipPlayer } from "../lib/ladder";
 import { cooldownOf, loadHistory, markPlayed, loadBlocked, saveBlocked, normArtist, isBlocked } from "../lib/storage";
-import { buildCrate, refreshMusicQueue } from "../lib/crate";
+import { buildCrate, orderForCast, refreshMusicQueue, withLangAt } from "../lib/crate";
+import { langLabel } from "../lib/languages";
 import { engine, keepAwake } from "../lib/engine.js";
 import { log } from "../lib/log.js";
 import { displayTitle } from "../lib/utils.js";
 import { groupCooldown, randomId, recordPlay, recordResult, useGroup } from "../lib/group";
-import type { AppState, CastMember, GameState, Phase, Track, Verdict } from "../types";
+import type { AppState, CastMember, GameState, Lang, Phase, Track, Verdict } from "../types";
 
 const primaryArtistOf = (t: Track | null) => (t ? String(t.artist || "").split(",")[0].trim() : "");
 
@@ -73,24 +74,34 @@ export function usePassTheGame(state: AppState, setState: Dispatch<SetStateActio
     engine.stop();
     setLoading(true); setError("");
     const mode = cast ? g?.mode ?? S.mode : S.mode;
-    const roster = cast ?? (mode === "teams" ? state.teams : state.players);
+    // A contestant's language counts only while it is one of the show's.
+    const roster = (cast ?? (mode === "teams" ? state.teams : state.players))
+      .map(r => ({ ...r, lang: r.lang && S.langs.includes(r.lang) ? r.lang : undefined }));
+    const need: Partial<Record<Lang, number>> = {};
+    for (const r of roster) if (r.lang) need[r.lang] = (need[r.lang] || 0) + S.rounds;
     const cooldown = (groupSnap.group ? await groupCooldown() : null) ?? cooldownOf(loadHistory());
-    const crate = await buildCrate(S.mix, S.eras, DIFFICULTY[S.difficulty].sound, S.rounds * roster.length, cooldown, S.categories);
+    const crate = await buildCrate({ langs: S.langs, eras: S.eras, sound: DIFFICULTY[S.difficulty].sound, songs: S.songs,
+      minSongs: S.rounds * roster.length, need, cooldown, categories: S.categories });
     setLoading(false);
     if ("error" in crate){
-      setError(crate.error === "safe" ? "Not enough verified music-only clips for this show. Try Easy or fewer rounds, or widen your song picks."
+      const who = crate.lang ? roster.filter(r => r.lang === crate.lang).map(r => r.name).join(" and ") : "";
+      setError(crate.error === "safe" ? "Not enough verified music-only clips for this show. Try With singing or fewer rounds, or widen your song picks."
+        : crate.error === "thin" && crate.lang
+        ? `Not enough ${langLabel(crate.lang)} songs for ${who}. Try more eras${S.categories.length ? ", another kind of song" : ""}, or Mix for ${who}.`
         : crate.error === "thin"
         ? `Not enough songs match your picks. Try more eras${S.categories.length ? ", another kind of song" : ""}, or unblock a few artists.`
         : "Couldn't load songs. Check your connection and try again.");
       setState(st => ({ ...st, screen: "setup" }));
       return;
     }
+    const castNow: CastMember[] = roster.map(r => ({ id: r.id, name: r.name, members: [...r.members], ...(r.lang ? { lang: r.lang } : {}), score: 0 }));
+    const queue = orderForCast(crate.queue, castNow);
     const game: GameState = {
       id: randomId(),
-      queue: crate.queue, trackIdx: 0, turn: 0, round: 1, totalRounds: S.rounds,
-      totalSongs: crate.queue.length, source: crate.source,
-      mode, difficulty: S.difficulty, mix: S.mix,
-      cast: roster.map(r => ({ id: r.id, name: r.name, members: [...r.members], score: 0 })),
+      queue, trackIdx: 0, turn: 0, round: 1, totalRounds: S.rounds,
+      totalSongs: queue.length, source: crate.source,
+      mode, difficulty: S.difficulty, langs: S.langs,
+      cast: castNow,
       history: [], finished: false,
     };
     resetTurn();
@@ -108,7 +119,7 @@ export function usePassTheGame(state: AppState, setState: Dispatch<SetStateActio
         setError("Not enough verified music-only clips remain to resume. Start a new show with Easy or fewer rounds.");
         return;
       }
-      setState(st => ({ ...st, screen:"game", game:{ ...g, queue, trackIdx:0, totalSongs:queue.length } }));
+      setState(st => ({ ...st, screen:"game", game:{ ...g, queue: withLangAt(queue, 0, g.cast[g.turn]?.lang), trackIdx:0, totalSongs:queue.length } }));
     } else setState(st => ({ ...st, screen:"game" }));
     resetTurn(); setPhase("handover");
   }
@@ -156,6 +167,7 @@ export function usePassTheGame(state: AppState, setState: Dispatch<SetStateActio
     else engine.sfx("projector");
     setState(st => ({ ...st, game: {
       ...g, cast, trackIdx, finished,
+      queue: finished ? g.queue : withLangAt(g.queue, trackIdx, cast[nextTurn].lang),
       turn: finished ? g.turn : nextTurn,
       round: roundOver && !finished ? g.round + 1 : g.round,
       history: [...g.history, { id: scorer.id, song: displayTitle(track.title), points, round: g.round }],
@@ -202,9 +214,10 @@ export function usePassTheGame(state: AppState, setState: Dispatch<SetStateActio
       return;
     }
     log("skip", { title: String(track.title).slice(0, 28) });
-    primeCurrent(g.queue[trackIdx]);
+    const queue = withLangAt(g.queue, trackIdx, who?.lang);
+    primeCurrent(queue[trackIdx]);
     setSkipped(displayTitle(track.title));
-    setState(st => ({ ...st, game: { ...g, trackIdx } }));
+    setState(st => ({ ...st, game: { ...g, queue, trackIdx } }));
     setPhase("countdown");
   }
 

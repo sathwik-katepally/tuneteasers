@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { DIFFICULTY } from "../lib/config";
 import { GroupError, fetchResults, type Group, type GroupResult } from "../lib/group";
+import { langLabel, langsOf } from "../lib/languages";
 import sh from "./shared.module.css";
 import s from "./PastGames.module.css";
 
-const MIX = { bolly: "Hindi", telugu: "Telugu", both: "Hindi + Telugu" } as const;
 
 function when(ms: number){
   const d = new Date(ms);
@@ -84,7 +84,7 @@ function ResultRow({ r }: { r: GroupResult }){
       <div className={s.resultHead}>
         <span className={s.date}>{when(r.finishedAt)}</span>
         <span className={s.settings}>
-          {r.mode === "teams" ? "Teams" : "Solo"} · {r.difficulty === "hard" ? "Hard" : DIFFICULTY[r.difficulty].label} · {MIX[r.mix] ?? r.mix} · {r.rounds} rounds
+          {r.mode === "teams" ? "Teams" : "Solo"} · {r.difficulty === "hard" ? "Hard" : DIFFICULTY[r.difficulty].label} · {langsOf(r.mix)?.map(langLabel).join(" + ") ?? r.mix} · {r.rounds} rounds
         </span>
       </div>
       <ol className={s.standings}>

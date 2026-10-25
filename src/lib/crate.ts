@@ -4,11 +4,12 @@
    Fallback 1: raw JioSaavn search (unverified years, no scores).
    Fallback 2: catalog.json baked into the site (rebuilt weekly by CI, 30s hook clips). */
 import { SAAVN_BASES, SAAVN_QUERIES, SAAVN_PAGES, SAAVN_MIN_PLAYS, CORPUS_DRAW, CORPUS_BATCH, EXCLUDE_RX, ERAS, eraOf, SNIP_ACCEPTED, SNIP_WINDOW_SEC, SNIP_MAX_AGE_MS } from "./constants.js";
-import { COOLDOWN_MIN_FRESH, DRAW_WEIGHT, POPULAR_MIN_SCORE } from "./config";
+import { COOLDOWN_MIN_FRESH, DRAW_WEIGHT, popularCut } from "./config";
+import { isFilmLang, langOf } from "./languages";
 import { de, songKey, shuffle, safeUrl, displayTitle } from "./utils.js";
 import { sanitizeTrack, loadHistory, cooldownOf, loadBlocked, normArtist, isBlocked, type Cooldown } from "./storage";
 import { log, ms } from "./log.js";
-import type { Category, Lang, Mix, Track } from "../types";
+import type { Category, Lang, Songs, Track } from "../types";
 
 type Sound = "full" | "inst";
 /* Song key -> how many of the people present heard it (a room's seated phones). */
@@ -17,7 +18,22 @@ type Snip = NonNullable<Track["snip"]>;
 
 type CrateError = "load" | "thin" | "safe";
 type CrateSource = "corpus" | "saavn" | "catalog";
-export type Crate = { queue: Track[]; source: CrateSource } | { error: CrateError };
+/* lang: the language a contestant chose that ran short (pass the phone). */
+export type Crate = { queue: Track[]; source: CrateSource } | { error: CrateError; lang?: Lang };
+/* Songs each language must bring at least (contestants who chose it x rounds). */
+type Need = Partial<Record<Lang, number>>;
+
+export interface CrateOpts {
+  langs: Lang[];
+  eras: string[];
+  sound: Sound;
+  songs: Songs;
+  minSongs?: number;
+  need?: Need;
+  cooldown?: Cooldown;
+  categories?: Category[];
+  heardBy?: HeardBy;
+}
 
 let saavnBase: string | null = null;
 /* JioSaavn's JSON as the Worker or a mirror returns it; nothing in it is
@@ -88,9 +104,6 @@ async function fetchCorpus(): Promise<CorpusSong[] | null> {
     return songs;
   } catch(e){ return null; }
 }
-const CORPUS_LANG: Record<string, Lang> = { hindi:"bolly", telugu:"telugu" };
-
-const langsOf = (mix: Mix): Lang[] => mix==="both" ? ["bolly","telugu"] : [mix];
 
 /* Corpus songs in the chosen languages and eras, not blocked, and (Music-only)
    in the snips index. */
@@ -98,8 +111,8 @@ function corpusEligible(corpus: CorpusSong[], langs: Lang[], eras: string[], blo
   const eraSet = Array.isArray(eras) && eras.length && eras.length < ERAS.length ? new Set(eras) : null;
   const eligible: CorpusPick[] = [];
   for (const s of corpus){
-    const lang = CORPUS_LANG[s.language];
-    if (!langs.includes(lang)) continue;
+    const lang = langOf(s.language);
+    if (!lang || !langs.includes(lang)) continue;
     if (safeIds && !safeIds.has(s.id)) continue;
     if (eraSet && !eraSet.has(eraOf(s.year))) continue;
     const artist = (s.singers || []).slice(0,3).join(", ") || "Unknown artist";
@@ -109,27 +122,54 @@ function corpusEligible(corpus: CorpusSong[], langs: Lang[], eras: string[], blo
   return eligible;
 }
 
-/* The popular songs (POPULAR_MIN_SCORE), widened to every song when they are
-   too few (not in Music-only, whose shortage the user has to see). */
-function popularCands(eligible: CorpusPick[], safeIds: Set<string> | null, minSongs: number): CorpusPick[] {
-  const cands = eligible.filter(s => s.score >= POPULAR_MIN_SCORE);
-  return !safeIds && cands.length < minSongs ? eligible : cands;
+/* Big hits: each language's popular songs (popularCut), widened to every
+   song when they are too few for the show or for the contestants who chose
+   that language (not in Music-only, whose shortage the user has to see). */
+function popularCands(eligible: CorpusPick[], safeIds: Set<string> | null, minSongs: number, songs: Songs, need: Need = {}): CorpusPick[] {
+  if (songs === "more") return eligible;
+  const cands = eligible.filter(s => s.score >= popularCut(s.lang));
+  if (safeIds) return cands;
+  if (cands.length < minSongs) return eligible;
+  const short = new Set((Object.keys(need) as Lang[]).filter(l => cands.filter(s => s.lang === l).length < (need[l] || 0)));
+  return short.size ? eligible.filter(s => short.has(s.lang) || s.score >= popularCut(s.lang)) : cands;
 }
+
+/* An even split: each language's list (already in draw order) takes turns,
+   starting from a random one, so a show with English and Hindi plays about
+   as many of each however many songs either has. */
+function interleave<T>(lists: T[][]): T[] {
+  const live = lists.filter(l => l.length).map(l => l.slice());
+  const out: T[] = [];
+  let i = Math.floor(Math.random() * Math.max(1, live.length));
+  while (live.length){
+    i %= live.length;
+    out.push(live[i].shift()!);
+    if (!live[i].length) live.splice(i, 1); else i++;
+  }
+  return out;
+}
+const byLang = <T extends { lang: Lang }>(list: T[], langs: Lang[]) => langs.map(l => list.filter(t => t.lang === l));
 
 const inCategories = (s: CorpusSong, categories: Category[]) => !categories.length || (Array.isArray(s.tags) && s.tags.some(t => categories.includes(t)));
 
 /* Returns { status: "ok" | "none" | "thin" | "unresolved", pool }.
    "none" (no corpus) and "unresolved" (ids could not be turned into streams)
    fall through to the uncurated tiers; "thin" is a filter problem the user
-   must widen, not a reason to play unverified songs. */
-async function loadFromCorpus(langs: Lang[], eras: string[], blocked: Set<string>, cooldown: Cooldown, heardBy: HeardBy, safeIds: Set<string> | null, minSongs: number, categories: Category[]): Promise<{ status: "ok" | "none" | "thin" | "unresolved"; pool: Track[] }> {
+   must widen, not a reason to play unverified songs. Each language draws its
+   own candidates, so a big language never crowds a small one out. */
+async function loadFromCorpus(o: Required<CrateOpts>, blocked: Set<string>, safeIds: Set<string> | null): Promise<{ status: "ok" | "none" | "thin" | "unresolved"; pool: Track[]; lang?: Lang }> {
   const corpus = await loadCorpus();
   if (!corpus) return { status:"none", pool:[] };
-  const eligible = corpusEligible(corpus, langs, eras, blocked, safeIds).filter(s => inCategories(s, categories));
-  const cands = popularCands(eligible, safeIds, minSongs);
-  if (cands.length < minSongs) return { status:"thin", pool:[] };
-  const { fresh, stale } = splitCooldown(cands, s => songKey(s.title), cooldown, heardBy);
-  const draw: CorpusPick[] = weightedShuffle(fresh, s => s.score).concat(stale).slice(0, Math.max(CORPUS_DRAW, minSongs * 2));
+  const eligible = corpusEligible(corpus, o.langs, o.eras, blocked, safeIds).filter(s => inCategories(s, o.categories));
+  const cands = popularCands(eligible, safeIds, o.minSongs, o.songs, o.need);
+  if (cands.length < o.minSongs) return { status:"thin", pool:[] };
+  const short = o.langs.find(l => cands.filter(s => s.lang === l).length < (o.need[l] || 0));
+  if (short) return { status:"thin", pool:[], lang:short };
+  const draw: CorpusPick[] = byLang(cands, o.langs).flatMap((list, i) => {
+    const { fresh, stale } = splitCooldown(list, s => songKey(s.title), o.cooldown, o.heardBy);
+    const per = Math.max(Math.ceil(CORPUS_DRAW / o.langs.length), Math.ceil(o.minSongs * 2 / o.langs.length), (o.need[o.langs[i]] || 0) * 2);
+    return weightedShuffle(fresh, s => s.score, o.songs).concat(stale).slice(0, per);
+  });
   const batches: CorpusPick[][] = [];
   for (let i = 0; i < draw.length; i += CORPUS_BATCH) batches.push(draw.slice(i, i + CORPUS_BATCH));
   const results = await Promise.allSettled(batches.map(b => saavnFetch(`/songs?ids=${b.map(s=>s.id).join(",")}`)));
@@ -152,13 +192,13 @@ async function loadFromCorpus(langs: Lang[], eras: string[], blocked: Set<string
     }));
   }
   const ok = pool.filter(t => t !== null);
-  return { status: ok.length >= minSongs ? "ok" : "unresolved", pool: ok };
+  return { status: ok.length >= o.minSongs ? "ok" : "unresolved", pool: ok };
 }
 
 async function loadFromSaavn(langs: Lang[]): Promise<Track[]> {
   const jobs: { q: string; page: number; lang: Lang }[] = [];
   for (const lang of langs){
-    const all = SAAVN_QUERIES[lang].flatMap(q => Array.from({ length:SAAVN_PAGES }, (_,i)=>({ q, page:i+1, lang })));
+    const all = (SAAVN_QUERIES[lang] || []).flatMap((q: string) => Array.from({ length:SAAVN_PAGES }, (_,i)=>({ q, page:i+1, lang })));
     jobs.push(...shuffle(all).slice(0,7));
   }
   const seen = new Set<string>(); const pool: (Track | null)[] = [];
@@ -172,7 +212,7 @@ async function loadFromSaavn(langs: Lang[]): Promise<Track[]> {
     for (const s of list){
       const name = de(s.name || s.title || "");
       if (!name) continue;
-      if ((s.language||"").toLowerCase() !== (lang==="bolly"?"hindi":"telugu")) continue;
+      if ((s.language||"").toLowerCase() !== lang) continue;
       const year = parseInt(s.year) || 0;
       if (year < 2000) continue;
       const plays = parseInt(s.playCount) || 0;
@@ -245,14 +285,14 @@ export async function refreshMusicQueue(queue: Track[]): Promise<Track[]> {
   return queue.map(t => ({ ...t, snip:verifiedSnip(t, index) || undefined })).filter(t => t.snip);
 }
 
-/* A shuffle that favours the songs people know (DRAW_WEIGHT): each song's
+/* A shuffle that can favour the songs people know (DRAW_WEIGHT): each song's
    chance of coming first is proportional to (score + floor) ^ power, with
    score its popularity percentile within its language and decade. Songs
    without a score (the fallback tiers) draw as if they sat in the middle.
    (Each song gets the key random ^ (1 / weight); sorting by key is a
    weighted draw without replacement.) */
-function weightedShuffle<T>(list: T[], scoreOf: (t: T) => number | undefined): T[] {
-  const { power, floor } = DRAW_WEIGHT;
+function weightedShuffle<T>(list: T[], scoreOf: (t: T) => number | undefined, songs: Songs): T[] {
+  const { power, floor } = DRAW_WEIGHT[songs];
   const weight = (t: T) => ((scoreOf(t) ?? 0.5) + floor) ** power;
   return list.map(t => ({ t, k: Math.random() ** (1 / weight(t)) })).sort((a, b) => b.k - a.k).map(x => x.t);
 }
@@ -267,34 +307,37 @@ function splitCooldown<T>(list: T[], keyOf: (t: T) => string, cooldown: Cooldown
   return { fresh, stale };
 }
 
-/* Returns { queue, source } or { error: "load" | "thin" | "safe" }.
-   The corpus tier draws the popular songs (POPULAR_MIN_SCORE); the uncurated
-   fallback tiers carry no score and ignore it.
+/* Returns { queue, source } or { error: "load" | "thin" | "safe", lang? }.
+   The corpus tier draws the big hits (popularCut) or, with songs "more",
+   every song; the uncurated fallback tiers carry no score and ignore it.
+   The queue splits evenly across the chosen languages (interleave).
    cooldown: song key -> the time it may come back (cooldownOf), this
    phone's own unless the caller merged a group's or a room's in;
-   heardBy: song key -> how many of the people present heard it.
+   heardBy: song key -> how many of the people present heard it;
+   need: songs a language must bring (contestants who chose it x rounds).
    categories: corpus tags, any of which a song must carry; [] means every
    song. The fallback tiers carry no tags, so with categories set they never
    run and an unreachable corpus is a load error. */
-export async function buildCrate(mix: Mix, eras: string[], sound: Sound, minSongs = 10, cooldown: Cooldown = cooldownOf(loadHistory()), categories: Category[] = [], heardBy: HeardBy = {}): Promise<Crate> {
+export async function buildCrate(opts: CrateOpts): Promise<Crate> {
+  const o: Required<CrateOpts> = { minSongs: 10, need: {}, cooldown: cooldownOf(loadHistory()), categories: [], heardBy: {}, ...opts };
+  const { langs, eras, sound, minSongs, cooldown, categories, heardBy } = o;
   const t0 = performance.now();
-  const langs = langsOf(mix);
   const key = (t: Track) => songKey(t.title);
   const snips = await loadSnips();
   if (sound === "inst" && (!snips || !Object.keys(snips.snips).length)){
-    log("crate", { mix, sound, source:"index", snips:"none", snipped:0, ms:ms(t0) });
+    log("crate", { langs, sound, source:"index", snips:"none", snipped:0, ms:ms(t0) });
     return { error:"safe" };
   }
   const blocked = new Set(loadBlocked().map(normArtist));
   const safeIds = sound === "inst" ? new Set(Object.keys(snips?.snips || {})) : null;
-  const corpus = await loadFromCorpus(langs, eras, blocked, cooldown, heardBy, safeIds, minSongs, categories);
+  const corpus = await loadFromCorpus(o, blocked, safeIds);
   const tiers: Record<string, number | string> = { corpus: corpus.status === "ok" ? corpus.pool.length : corpus.status };
   if (corpus.status === "thin"){
-    log("crate", { mix, sound, categories, source:"corpus", ...tiers, ms: ms(t0) });
-    return { error:sound === "inst" ? "safe" : "thin" };
+    log("crate", { langs, sound, categories, source:"corpus", ...tiers, ms: ms(t0) });
+    return { error:sound === "inst" ? "safe" : "thin", ...(corpus.lang ? { lang: corpus.lang } : {}) };
   }
   if (categories.length && corpus.status !== "ok"){
-    log("crate", { mix, sound, categories, source:"corpus", ...tiers, ms: ms(t0) });
+    log("crate", { langs, sound, categories, source:"corpus", ...tiers, ms: ms(t0) });
     return { error:"load" };
   }
   let pool = corpus.pool;
@@ -325,78 +368,102 @@ export async function buildCrate(mix: Mix, eras: string[], sound: Sound, minSong
     const verified = verifiedSnip(t, snips);
     if (verified){ t.snip = verified; snipped++; }
   }
-  log("crate", { mix, sound, categories, source, ...tiers, snips: snips ? "ok" : "none", snipped, cooldown: Object.keys(cooldown).length, ms: ms(t0) });
+  log("crate", { langs, sound, songs: o.songs, categories, source, ...tiers, snips: snips ? "ok" : "none", snipped, cooldown: Object.keys(cooldown).length, ms: ms(t0) });
   if (pool.length < minSongs && sound !== "inst") return { error:"load" };
   if (Array.isArray(eras) && eras.length && eras.length < ERAS.length)
     pool = pool.filter(t => eras.includes(eraOf(t.year)));
   if (blocked.size) pool = pool.filter(t => !isBlocked(t, blocked));
   if (sound === "inst") pool = pool.filter(t => t.snip);
   if (pool.length < minSongs) return { error:sound === "inst" ? "safe" : "thin" };
+  const short = langs.find(l => pool.filter(t => t.lang === l).length < (o.need[l] || 0));
+  if (short) return { error:sound === "inst" ? "safe" : "thin", lang:short };
   // Songs still cooling down (this phone, the group, a room's phones) sit out; when the fresh pool
   // runs thin, or can't fill the show on its own, repeats come back after all fresh songs (splitCooldown).
   const { fresh, stale } = splitCooldown(pool, key, cooldown, heardBy);
-  const drawn = weightedShuffle(fresh, t => t.score);
-  let queue: Track[] = fresh.length >= Math.max(COOLDOWN_MIN_FRESH, minSongs) ? drawn : drawn.concat(stale);
+  const drawn = interleave(byLang(fresh, langs).map(l => weightedShuffle(l, t => t.score, o.songs)));
+  const enough = fresh.length >= Math.max(COOLDOWN_MIN_FRESH, minSongs) && langs.every(l => fresh.filter(t => t.lang === l).length >= (o.need[l] || 0));
+  let queue: Track[] = enough ? drawn : drawn.concat(stale);
   // A full show's worth of verified tracks is required before the game starts.
   if (queue.length < minSongs) return { error:sound === "inst" ? "safe" : "thin" };
   return { queue, source };
 }
 
-/* How many corpus songs each category offers the corpus tier for these
-   settings, counted the way loadFromCorpus picks them. null when the corpus
-   (or, for Music-only, the snips index) is unavailable. */
-export async function categoryCounts(mix: Mix, eras: string[], sound: Sound, minSongs: number, categories: Category[]): Promise<Record<string, number> | null> {
+/* What the setup screen shows for these settings, counted the way
+   loadFromCorpus picks songs: how many songs each category offers (and
+   "any"), which categories the chosen languages have at all, and how many
+   songs each popularity level offers. null when the corpus (or, for
+   Music-only, the snips index) is unavailable. */
+export interface SetupCounts { cats: Record<string, number>; has: Category[]; songs: Record<Songs, number> }
+export async function setupCounts(o: Pick<CrateOpts, "langs" | "eras" | "sound" | "songs" | "minSongs" | "categories">, ids: Category[]): Promise<SetupCounts | null> {
   const corpus = await loadCorpus();
   if (!corpus) return null;
   let safeIds: Set<string> | null = null;
-  if (sound === "inst"){
+  if (o.sound === "inst"){
     const index = await loadSnips();
     if (!index) return null;
     safeIds = new Set(Object.keys(index.snips).filter(id => verifiedSnip({ sourceId:id, duration:Infinity }, index)));
   }
+  const minSongs = o.minSongs ?? 10, cats = o.categories ?? [];
   const blocked = new Set(loadBlocked().map(normArtist));
-  const eligible = corpusEligible(corpus, langsOf(mix), eras, blocked, safeIds);
-  const count = (cats: Category[]) => popularCands(eligible.filter(s => inCategories(s, cats)), safeIds, minSongs).length;
-  return Object.fromEntries([...categories.map(c => [c, count([c])]), ["any", count([])]]);
+  const eligible = corpusEligible(corpus, o.langs, o.eras, blocked, safeIds);
+  const count = (c: Category[], songs: Songs) => popularCands(eligible.filter(s => inCategories(s, c)), safeIds, minSongs, songs).length;
+  const inLangs = corpus.filter(s => { const l = langOf(s.language); return l && o.langs.includes(l); });
+  return {
+    cats: Object.fromEntries([...ids.map(c => [c, count([c], o.songs)]), ["any", count([], o.songs)]]),
+    has: ids.filter(c => inLangs.some(s => Array.isArray(s.tags) && s.tags.includes(c))),
+    songs: { hits: count(cats, "hits"), more: count(cats, "more") },
+  };
 }
 
 /* One entry of a buzz-in phone's answer list: a song title with the films
-   it is from, or (film: true) a film, which scores part of the points. */
-export interface AnswerEntry { title: string; films: string[]; year: number; film?: true }
+   (a pop song's artists) it is from, or (film: true) a film or an artist,
+   which scores part of the points. */
+export interface AnswerEntry { title: string; films: string[]; year: number; film?: true; artist?: true }
 
 /* The film a track is from: "Sitaare (From "Ikkis") - Single" is Ikkis, and
    a soundtrack album loses "(Original Motion Picture Soundtrack)". Anything
    else (a compilation, a single) stays as it is and is not offered as a film. */
 const FROM = /[([]From "([^"]+)"[)\]]/i;
 const OST = /\s*[([](?:Original )?(?:Motion Pictures? )?Soundtrack[)\]]/i;
-export function filmOf(album: string, title = ""): string {
+function filmOf(album: string, title = ""): string {
   const from = FROM.exec(album) || FROM.exec(title);
   return from ? from[1].trim() : album.replace(OST, "").replace(/\s+-\s+(?:Single|EP)$/i, "").trim();
 }
 // Credits and soundtrack notes in a title only make a suggestion longer; judging ignores brackets anyway.
 const CREDITS = /\s*[([](?:feat\.?|ft\.?|with|original|from)\b[^)\]]*[)\]]/gi;
 const isFilmAlbum = (album: string, title: string) => FROM.test(album) || FROM.test(title) || OST.test(album);
+const leadArtist = (artist: string) => artist.split(",")[0].trim();
 
-/* Every song and film a buzz-in phone can pick from: the public corpus and
-   the baked catalog for the show's languages. It never depends on the show,
-   so the list says nothing about which songs are coming. A title from
-   several films is one entry naming them all, since a title is judged as a
-   title; a film that is also a song title is left to the song's entry. */
-export async function answerTitles(mix: Mix): Promise<AnswerEntry[]> {
-  const langs = langsOf(mix);
+/* What scores part of the points for a song: its film, or a pop song's lead artist. */
+export const halfAnswer = (t: Track) => (isFilmLang(t.lang) ? filmOf(t.album || "", t.title) : leadArtist(t.artist || ""));
+
+/* Every song, film and pop artist a buzz-in phone can pick from: the public
+   corpus and the baked catalog for the show's languages. It never depends
+   on the show, so the list says nothing about which songs are coming. A
+   title from several films is one entry naming them all, since a title is
+   judged as a title; a film that is also a song title is left to the song's entry. */
+export async function answerTitles(langs: Lang[]): Promise<AnswerEntry[]> {
   const [corpus, catalog] = await Promise.all([loadCorpus(), loadCatalog(langs)]);
   const songs = new Map<string, AnswerEntry>(), films = new Map<string, AnswerEntry>();
-  const add = (title: string, film: string, year: number, isFilm: boolean) => {
+  const add = (title: string, film: string, year: number, isFilm: boolean, artist = false) => {
     const d = displayTitle(title).replace(CREDITS, "").trim(), k = songKey(d), fk = songKey(film);
     if (!k) return;
     let e = songs.get(k);
     if (!e) songs.set(k, e = { title: d, films: [], year: year || 0 });
     if (fk && !e.films.some(f => songKey(f) === fk)) e.films.push(film);
     if (year > 0 && (!e.year || year < e.year)) e.year = year;
-    if (isFilm && fk && !films.has(fk)) films.set(fk, { title: film, films: [], year: year || 0, film: true });
+    if (isFilm && fk && !films.has(fk)) films.set(fk, { title: film, films: [], year: artist ? 0 : year || 0, film: true, ...(artist ? { artist: true as const } : {}) });
   };
-  for (const s of corpus || []) if (langs.includes(CORPUS_LANG[s.language])) add(s.title, s.film, s.year, true);
-  for (const t of catalog) add(t.title, filmOf(t.album, t.title), t.year, isFilmAlbum(t.album, t.title));
+  for (const s of corpus || []){
+    const l = langOf(s.language);
+    if (!l || !langs.includes(l)) continue;
+    if (isFilmLang(l)) add(s.title, s.film, s.year, true);
+    else if (s.singers?.[0]) add(s.title, s.singers[0], s.year, true, true);
+  }
+  for (const t of catalog){
+    if (isFilmLang(t.lang)) add(t.title, filmOf(t.album, t.title), t.year, isFilmAlbum(t.album, t.title));
+    else if (t.artist) add(t.title, leadArtist(t.artist), t.year, true, true);
+  }
   return [...songs.values(), ...[...films].filter(([k]) => !songs.has(k)).map(([, f]) => f)];
 }
 
@@ -408,6 +475,30 @@ export function withFreshAt(queue: Track[], idx: number, cooldown: Cooldown): Tr
   const cooling = (t: Track) => (cooldown[songKey(t.title)] || 0) > now;
   if (!queue[idx] || !cooling(queue[idx])) return queue;
   const j = queue.findIndex((t, i) => i > idx && !cooling(t));
+  if (j < 0) return queue;
+  const q = queue.slice();
+  [q[idx], q[j]] = [q[j], q[idx]];
+  return q;
+}
+
+/* Pass the phone with contestants who chose a language: the queue in turn
+   order, each turn's song in its contestant's language (any for the rest). */
+export function orderForCast(queue: Track[], cast: { lang?: Lang }[]): Track[] {
+  if (!cast.some(c => c.lang)) return queue;
+  const left = queue.slice(), out: Track[] = [];
+  for (let i = 0; left.length; i++){
+    const want = cast[i % cast.length].lang;
+    const j = want ? left.findIndex(t => t.lang === want) : 0;
+    out.push(left.splice(Math.max(0, j), 1)[0]);
+  }
+  return out;
+}
+
+/* The queue with the song at idx in the language of the contestant up next,
+   swapped in from later in the queue when a skip put another one there. */
+export function withLangAt(queue: Track[], idx: number, lang: Lang | undefined): Track[] {
+  if (!lang || !queue[idx] || queue[idx].lang === lang) return queue;
+  const j = queue.findIndex((t, i) => i > idx && t.lang === lang);
   if (j < 0) return queue;
   const q = queue.slice();
   [q[idx], q[j]] = [q[j], q[idx]];

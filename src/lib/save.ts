@@ -5,8 +5,9 @@
 import { ERAS } from "./constants.js";
 import { sanitizeTrack } from "./storage";
 import { isResultId, randomId } from "./group";
+import { langOf, langsOf } from "./languages";
 import { CATEGORIES, DEFAULT_ROUNDS, LEGACY_SCORE_SCALE, MAX_CAST, MAX_MEMBERS, NAME_MAX, ROUND_OPTIONS } from "./config";
-import type { AppState, CastMember, Category, Difficulty, GameState, HistoryEntry, Mix, Mode, Play, RosterEntry, Settings, Track } from "../types";
+import type { AppState, CastMember, Category, Difficulty, GameState, HistoryEntry, Lang, Mode, Play, RosterEntry, Settings, Songs, Track } from "../types";
 
 const KEY = "tuneteasers_v7";
 const LEGACY_KEY = "tuneteasers_v6";
@@ -28,7 +29,7 @@ export const cleanName = (v: unknown, fallback: string) => String(v ?? "").trim(
 
 const DEFAULTS: AppState = {
   screen: "setup",
-  settings: { play: "pass", mix: "both", eras: [...ERAS], difficulty: "medium", categories: [], mode: "players", rounds: DEFAULT_ROUNDS },
+  settings: { play: "pass", langs: ["hindi", "telugu"], eras: [...ERAS], difficulty: "easy", songs: "hits", categories: [], mode: "players", rounds: DEFAULT_ROUNDS },
   players: [
     { id: "p1", name: "Player 1", members: [] },
     { id: "p2", name: "Player 2", members: [] },
@@ -52,12 +53,16 @@ function parseCategories(v: unknown): Category[] {
   return CATEGORIES.map(c => c.id).filter(id => arr(v).includes(id));
 }
 
+/* Saves from before the language list hold one word, `mix` ("both" was Hindi and Telugu). */
+const parseLangs = (raw: Raw, fallback: Lang[]): Lang[] => langsOf(raw.langs ?? raw.mix) ?? fallback;
+
 function parseSettings(raw: Raw): Settings {
   return {
     play: oneOf<Play>(raw.play, ["pass", "room"], "pass"),
-    mix: oneOf<Mix>(raw.mix, ["bolly", "telugu", "both"], "both"),
+    langs: parseLangs(raw, DEFAULTS.settings.langs),
     eras: parseEras(raw.eras),
-    difficulty: oneOf<Difficulty>(raw.difficulty, ["easy", "medium"], "medium"),
+    difficulty: oneOf<Difficulty>(raw.difficulty, ["easy", "medium"], "easy"),
+    songs: oneOf<Songs>(raw.songs, ["hits", "more"], "hits"),
     categories: parseCategories(raw.categories),
     mode: oneOf<Mode>(raw.mode, ["players", "teams"], "players"),
     rounds: (ROUND_OPTIONS as readonly number[]).includes(raw.rounds as number) ? raw.rounds as number : DEFAULT_ROUNDS,
@@ -71,10 +76,12 @@ function parseRoster(v: unknown, fallback: RosterEntry[], prefix: string): Roste
     let id = typeof r.id === "string" && r.id ? r.id.slice(0, 16) : `${prefix}${i + 1}`;
     if (seen.has(id)) id = newId();
     seen.add(id);
+    const lang = langOf(r.lang);
     return {
       id,
       name: cleanName(r.name, `${prefix === "t" ? "Team" : "Player"} ${i + 1}`),
       members: arr(r.members).map(m => cleanName(m, "")).filter(Boolean).slice(0, MAX_MEMBERS),
+      ...(lang ? { lang } : {}),
     };
   });
   return list.length ? list : fallback;
@@ -88,7 +95,7 @@ function parseQueue(raw: Raw): { queue: Track[]; trackIdx: number } | null {
 
 const sourceOf = (v: unknown) => oneOf(v, ["corpus", "saavn", "catalog"], "catalog");
 
-function parseGame(raw: Raw, mode: Mode, difficulty: Difficulty, mix: Mix): GameState | null {
+function parseGame(raw: Raw, mode: Mode, difficulty: Difficulty, langs: Lang[]): GameState | null {
   const q = parseQueue(raw);
   if (!q) return null;
   const cast: CastMember[] = parseRoster(raw.cast, [], "c").map((c, i) => ({
@@ -111,7 +118,7 @@ function parseGame(raw: Raw, mode: Mode, difficulty: Difficulty, mix: Mix): Game
     source: sourceOf(raw.source),
     mode: oneOf<Mode>(raw.mode, ["players", "teams"], mode),
     difficulty: oneOf<Difficulty>(raw.difficulty, ["easy", "medium"], difficulty),
-    mix: oneOf<Mix>(raw.mix, ["bolly", "telugu", "both"], mix),
+    langs: parseLangs(raw, langs),
     cast,
     history,
     finished: false,
@@ -145,7 +152,7 @@ function migrateLegacy(raw: Raw): AppState {
       source: sourceOf(g.source),
       mode: "players",
       difficulty,
-      mix: settings.mix,
+      langs: settings.langs,
       cast,
       history: [],
       finished: false,
@@ -167,7 +174,7 @@ export function loadSaved(): AppState {
     settings,
     players: parseRoster(r.players, DEFAULTS.players, "p"),
     teams: parseRoster(r.teams, DEFAULTS.teams, "t"),
-    game: parseGame(obj(r.game), settings.mode, settings.difficulty, settings.mix),
+    game: parseGame(obj(r.game), settings.mode, settings.difficulty, settings.langs),
   };
 }
 

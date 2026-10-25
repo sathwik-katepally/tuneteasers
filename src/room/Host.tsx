@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { DIFFICULTY, LADDER, ROOM_ANSWER_SECS, ROOM_AUTO_SECS, ROOM_FILM_SHARE, ROOM_GRACE_SECS, ROOM_SONGS_PER_ROUND, ROOM_WRONG_BEAT_MS, hookOffset } from "../lib/config";
 import { nearTitles } from "../lib/answer.js";
 import { useClipPlayer } from "../lib/ladder";
-import { answerTitles, buildCrate, filmOf, withFreshAt, type AnswerEntry } from "../lib/crate";
+import { answerTitles, buildCrate, halfAnswer, withFreshAt, type AnswerEntry } from "../lib/crate";
+import { isFilmLang } from "../lib/languages";
 import { engine, keepAwake } from "../lib/engine.js";
 import { cooldownOf, loadHistory, markPlayed, type Cooldown } from "../lib/storage";
 import { displayTitle } from "../lib/utils.js";
@@ -17,7 +18,7 @@ import { Scoreboard } from "../screens/Scoreboard";
 import { Podium } from "../screens/Podium";
 import { JoinTag, Lobby, RoomTrouble } from "./Lobby";
 import { HostPlaying, type Audio } from "./HostPlaying";
-import type { GameState, Mix, Settings, Track, Verdict } from "../types";
+import type { GameState, Lang, Settings, Track, Verdict } from "../types";
 
 type Phase = "opening" | "lobby" | "loading" | "countdown" | "song" | "reveal" | "board" | "done" | "failed";
 interface Revealed { track: Track; verdict: Verdict }
@@ -69,7 +70,7 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
     createRoom().then(({ code, host }) => {
       if (!on) return;
       setShow({ code, host, queue: [], idx: 0, songNo: 0, total: settings.rounds * ROOM_SONGS_PER_ROUND, perRound: ROOM_SONGS_PER_ROUND,
-        plain: DIFFICULTY[settings.difficulty].sound === "full", difficulty: settings.difficulty, mix: settings.mix, eras: settings.eras, categories: settings.categories, started: false, skipsSeen: 0 });
+        plain: DIFFICULTY[settings.difficulty].sound === "full", difficulty: settings.difficulty, langs: settings.langs, songs: settings.songs, eras: settings.eras, categories: settings.categories, started: false, skipsSeen: 0 });
       setPhase("lobby");
     }, e => { if (on){ log("room-create-fail", { msg: String(e?.message || e).slice(0, 60) }); setPhase("failed"); } });
     return () => { on = false; };
@@ -108,9 +109,10 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
   }, [view, show]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The public title list, for the near-miss titles sent with each song.
-  const pool = useRef<{ mix: Mix; titles: Promise<AnswerEntry[]> } | null>(null);
-  const titlePool = (mix: Mix) => {
-    if (pool.current?.mix !== mix) pool.current = { mix, titles: answerTitles(mix).catch(() => []) };
+  const pool = useRef<{ key: string; titles: Promise<AnswerEntry[]> } | null>(null);
+  const titlePool = (langs: Lang[]) => {
+    const key = langs.join(",");
+    if (pool.current?.key !== key) pool.current = { key, titles: answerTitles(langs).catch(() => []) };
     return pool.current.titles;
   };
 
@@ -137,18 +139,19 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
     setError("");
     own.current = (await groupCooldown()) ?? cooldownOf(loadHistory());
     const { cooldown, heardBy } = withRoomHeard(own.current, live.current.heard);
-    const crate = await buildCrate(show.mix, show.eras, show.plain ? "full" : "inst", show.total, cooldown, show.categories, heardBy);
+    const crate = await buildCrate({ langs: show.langs, eras: show.eras, sound: show.plain ? "full" : "inst", songs: show.songs,
+      minSongs: show.total, cooldown, categories: show.categories, heardBy });
     if ("error" in crate){
-      setError(crate.error === "safe" ? "Not enough verified music-only clips for this show. Go back and pick Easy or fewer rounds."
+      setError(crate.error === "safe" ? "Not enough verified music-only clips for this show. Go back and pick With singing or fewer rounds."
         : crate.error === "thin" ? `Not enough songs match your picks. Go back and pick more eras${show.categories.length ? " or another kind of song" : ""}.`
         : "Couldn't load songs. Check the connection and try again.");
       setPhase("lobby");
       return;
     }
     const queue = crate.queue;
-    await titlePool(show.mix);
+    await titlePool(show.langs);
     // No titles go to the room here: phones load the public list themselves.
-    room.send({ t: "start", mix: show.mix, total: show.total, perRound: show.perRound, answerSecs: ROOM_ANSWER_SECS, filmShare: ROOM_FILM_SHARE });
+    room.send({ t: "start", langs: show.langs, total: show.total, perRound: show.perRound, answerSecs: ROOM_ANSWER_SECS, filmShare: ROOM_FILM_SHARE });
     // A phone that sat down while the crate loaded is only in the latest heard.
     const next = freshCue({ ...show, queue, idx: 0, songNo: 0, started: true, skipsSeen: 0 });
     setShow(next);
@@ -173,10 +176,10 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
   useEffect(() => {
     if (phase !== "countdown" || !show || !track) return;
     const n = show.songNo + 1;
-    titlePool(show.mix).then(titles => {
+    titlePool(show.langs).then(titles => {
       if (live.current.track !== track) return;
-      const film = filmOf(track.album || "", track.title);
-      room.send({ t: "song", n, title: track.title, film, year: track.year || 0, artist: track.artist || "",
+      const film = halfAnswer(track);
+      room.send({ t: "song", n, title: track.title, film, half: isFilmLang(track.lang) ? "film" : "artist", year: track.year || 0, artist: track.artist || "",
         near: nearTitles(track.title, film, titles) });
     });
   }, [phase, room.link, show?.idx]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -230,10 +233,10 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
     const cued = v?.song?.n === n;
     const heard = a === "playing" || a === "listened";
     if (cued && (v!.song!.state !== "cue" || !heard)) return;
-    titlePool(sh.mix).then(titles => {
+    titlePool(sh.langs).then(titles => {
       if (live.current.track !== t || live.current.phase !== "song") return;
-      const film = filmOf(t.album || "", t.title);
-      if (!cued) room.send({ t: "song", n, title: t.title, film, year: t.year || 0, artist: t.artist || "", near: nearTitles(t.title, film, titles) });
+      const film = halfAnswer(t);
+      if (!cued) room.send({ t: "song", n, title: t.title, film, half: isFilmLang(t.lang) ? "film" : "artist", year: t.year || 0, artist: t.artist || "", near: nearTitles(t.title, film, titles) });
       if (heard) room.send({ t: "clip", rung: c.rung, points: ladder.points[c.rung] });
     });
   }, [room.link]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -299,7 +302,7 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
     const finished = s.songNo >= s.total || s.idx >= s.queue.length;
     const winner = v.players.find(p => p.id === song.winner);
     setRevealed({ track: t, verdict: {
-      name: winner ? (song.guesses.some(g => g.id === winner.id && g.ok && g.film) ? `${winner.name} (the film)` : winner.name) : "anyone", result: winner ? "correct" : "wrong", points: song.won, total: winner?.score ?? 0,
+      name: winner ? (song.guesses.some(g => g.id === winner.id && g.ok && g.film) ? `${winner.name} (the ${isFilmLang(t.lang) ? "film" : "artist"})` : winner.name) : "anyone", result: winner ? "correct" : "wrong", points: song.won, total: winner?.score ?? 0,
       roundOver: finished || s.songNo % s.perRound === 0, finished, completedRound: Math.ceil(s.songNo / s.perRound),
     } });
     if (winner) setTimeout(() => engine.sfx("stamp"), 90);
@@ -438,7 +441,7 @@ function asGame(view: RoomView | null, show: HostShow | null): GameState | null 
   return {
     id: view.code, queue: [], trackIdx: show.idx, turn: 0, round: round(Math.max(1, show.songNo)),
     totalRounds: Math.ceil(show.total / show.perRound), totalSongs: show.total, source: "room",
-    mode: "players", difficulty: show.difficulty, mix: show.mix,
+    mode: "players", difficulty: show.difficulty, langs: show.langs,
     cast: view.players.map(p => ({ id: p.id, name: p.name, members: [], score: p.score })),
     history: view.results.map(r => ({ id: r.winner ?? "", song: displayTitle(r.title), points: r.points, round: round(r.n) })),
     finished: view.phase === "over",

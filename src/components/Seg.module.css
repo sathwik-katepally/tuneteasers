@@ -43,3 +43,13 @@
 .teal .pill {
   background: var(--teal);
 }
+
+.fill {
+  background: var(--vermilion);
+  color: var(--cream);
+}
+
+.many .opt {
+  font-size: 13px;
+  letter-spacing: 0.03em;
+}

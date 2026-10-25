@@ -9,7 +9,8 @@ import { ROOM_HEARD, WORKER_API } from "./constants.js";
 import { cooldownOf, loadHistory, markPlayed, sanitizeTrack } from "./storage";
 import { songKey } from "./utils.js";
 import { randomId } from "./group";
-import type { Category, Difficulty, Mix, Track } from "../types";
+import type { Category, Difficulty, Lang, Songs, Track } from "../types";
+import { langsOf } from "./languages";
 
 const ROOM_ORIGIN = String(WORKER_API).replace(/\/api$/, "");
 const CODE_RX = /^[BCDFGHJKLMNPQRSTVWXZ]{4}$/;
@@ -21,7 +22,8 @@ type SongState = "cue" | "live" | "answering" | "missed" | "revealed" | "skipped
 interface RoomPlayer { id: string; name: string; score: number; online: boolean }
 /* film: right by naming the film, for part of the points. */
 interface Guess { id: string; text: string; ok: boolean; timeout: boolean; film?: boolean }
-interface RoomAnswer { title: string; film: string; year: number; artist: string }
+/* film holds the film, or for a pop song (half: "artist") its artist; naming it scores part of the points. */
+interface RoomAnswer { title: string; film: string; half?: "film" | "artist"; year: number; artist: string }
 export interface RoomSong {
   n: number;
   /* This cue of song n; a re-cue after a skip gets a new one. */
@@ -45,7 +47,7 @@ interface RoomResult { n: number; title: string; winner: string | null; points: 
 export interface RoomView {
   phase: "lobby" | "show" | "over";
   code: string;
-  mix: Mix;
+  langs: Lang[];
   total: number;
   perRound: number;
   answerSecs: number;
@@ -106,7 +108,8 @@ export interface HostShow {
   perRound: number;
   plain: boolean;
   difficulty: Difficulty;
-  mix: Mix;
+  langs: Lang[];
+  songs: Songs;
   eras: string[];
   categories: Category[];
   started: boolean;
@@ -118,7 +121,10 @@ export function loadHostShow(): HostShow | null {
   const s = lsGet(LS_HOST) as HostShow | null;
   if (!s || !isCode(s.code) || typeof s.host !== "string" || !Array.isArray(s.queue)) return null;
   const queue = s.queue.map(t => sanitizeTrack(t)).filter(Boolean) as Track[];
-  return { ...s, queue, categories: Array.isArray(s.categories) ? s.categories : [], skipsSeen: Number.isInteger(s.skipsSeen) ? s.skipsSeen : 0 };
+  // A show saved before the language list holds one word, mix, and no songs setting.
+  const old = s as HostShow & { mix?: unknown };
+  return { ...s, queue, langs: langsOf(old.langs ?? old.mix) ?? ["hindi", "telugu"], songs: s.songs === "more" ? "more" : "hits",
+    categories: Array.isArray(s.categories) ? s.categories : [], skipsSeen: Number.isInteger(s.skipsSeen) ? s.skipsSeen : 0 };
 }
 export const saveHostShow = (s: HostShow | null) => (s ? lsSet(LS_HOST, s) : lsDel(LS_HOST));
 

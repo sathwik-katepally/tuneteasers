@@ -320,3 +320,20 @@
     font-size: 34px;
   }
 }
+
+.langPick {
+  align-self: stretch;
+  margin-left: 2px;
+  padding: 0 18px 0 6px;
+  border: 0;
+  border-left: 2px dashed var(--ink);
+  border-radius: 0;
+  appearance: none;
+  background: transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%230f6e64' stroke-width='2'/%3E%3C/svg%3E") no-repeat right 6px center;
+  color: var(--teal);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
