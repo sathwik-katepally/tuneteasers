@@ -373,6 +373,8 @@ export function filmOf(album: string, title = ""): string {
   const from = FROM.exec(album) || FROM.exec(title);
   return from ? from[1].trim() : album.replace(OST, "").replace(/\s+-\s+(?:Single|EP)$/i, "").trim();
 }
+// Credits and soundtrack notes in a title only make a suggestion longer; judging ignores brackets anyway.
+const CREDITS = /\s*[([](?:feat\.?|ft\.?|with|original|from)\b[^)\]]*[)\]]/gi;
 const isFilmAlbum = (album: string, title: string) => FROM.test(album) || FROM.test(title) || OST.test(album);
 
 /* Every song and film a buzz-in phone can pick from: the public corpus and
@@ -385,7 +387,7 @@ export async function answerTitles(mix: Mix): Promise<AnswerEntry[]> {
   const [corpus, catalog] = await Promise.all([loadCorpus(), loadCatalog(langs)]);
   const songs = new Map<string, AnswerEntry>(), films = new Map<string, AnswerEntry>();
   const add = (title: string, film: string, year: number, isFilm: boolean) => {
-    const d = displayTitle(title), k = songKey(d), fk = songKey(film);
+    const d = displayTitle(title).replace(CREDITS, "").trim(), k = songKey(d), fk = songKey(film);
     if (!k) return;
     let e = songs.get(k);
     if (!e) songs.set(k, e = { title: d, films: [], year: year || 0 });

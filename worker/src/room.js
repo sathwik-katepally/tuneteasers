@@ -515,7 +515,7 @@ const PLAYER = {
     if (!text) return "empty";
     // The alarm is at-least-once and may run late; the clock is the rule.
     if (s.deadline && Date.now() > s.deadline) return void this.judge(me, "", false);
-    if (isCorrect(text, s.answer.title, s.near)) return void this.judge(me, text, true);
+    if (isCorrect(text, s.answer.title, s.near, s.answer.film)) return void this.judge(me, text, true);
     const film = !!r.rules.filmShare && isFilm(text, s.answer.film);
     this.judge(me, text, film, film);
   },

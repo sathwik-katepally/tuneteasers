@@ -9,7 +9,7 @@ import { songKey, displayTitle } from "./utils.js";
    only makes two different titles look closer; the exact-other-title rule in
    isCorrect keeps that from scoring a wrong pick. */
 const FOLDS = [
-  [/(^| )y(?=e)/g, "$1"], [/ph/g, "f"], [/chh|ch/g, "c"], [/([kgjtdbs])h/g, "$1"],
+  [/(^| )y(?=e)/g, "$1"], [/(^| )nahi?n?(?= |$)/g, "$1nai"], [/ph/g, "f"], [/chh|ch/g, "c"], [/([kgjtdbs])h/g, "$1"],
   [/w/g, "v"], [/z/g, "j"], [/q/g, "k"],
   [/ee|ii|ie/g, "i"], [/oo|uu/g, "u"], [/aa/g, "a"], [/ai|ei|ay/g, "e"],
   [/([a-z])\1+/g, "$1"],
@@ -56,14 +56,32 @@ const slack = len => (len <= 4 ? 0 : len <= 8 ? 1 : len <= 14 ? 2 : 3);
 /* Right when the folded guess is the title or a version of it, or a typo
    away from it, unless the guess is exactly another title on the show's list
    (a deliberate wrong pick that happens to look alike). */
-export function isCorrect(guess, title, others = []){
-  const g = squash(guess), t = squash(title);
-  if (!g || !t) return false;
+function matches(guess, g, title, others){
+  const t = squash(title);
+  if (!t) return false;
   if (g === t) return true;
   const bt = base(title);
   if (bt && base(guess) === bt) return true;
   if (others.some(o => { const k = squash(o); return k && k !== t && k === g; })) return false;
   return distance(g, t) <= slack(t.length);
+}
+
+/* songKey keeps only what comes before " - " ('Song - Reprise'), but some
+   titles have the dash inside ("Dard - E - Disco") or come as
+   "Film - Song" ("Dhurandhar The Revenge - Aari Aari"), so the whole title
+   counts too, and the part after a film's name. */
+const DASH = /\s+[-\u2013\u2014|]\s+/;
+export function isCorrect(guess, title, others = [], film = ""){
+  const g = squash(guess);
+  if (!g) return false;
+  const shown = displayTitle(String(title || ""));
+  const forms = [title];
+  if (DASH.test(shown)){
+    const [head, ...rest] = shown.split(DASH);
+    forms.push(shown.split(DASH).join(" "));
+    if (film && squash(head) === squash(film)) forms.push(rest.join(" "));
+  }
+  return forms.some(t => matches(guess, g, t, others));
 }
 
 /* The film, for part of the points: its name or a typo away from it.
@@ -104,11 +122,13 @@ export const prepareTitles = entries => entries.map(e => {
   return { ...e, forms: [plain(e.title), f, bones(f)] };
 });
 
-function rankIn(form, q){
+/* A run of letters anywhere is matched on the plain form only: folded,
+   "shake it like shammi" holds "kesa". */
+function rankIn(form, q, anywhere = true){
   if (form.startsWith(q)) return 0;
   const words = q.split(" "), fw = form.split(" ");
   if (words.every(w => fw.some(x => x.startsWith(w)))) return 1;
-  return form.replace(/ /g, "").includes(q.replace(/ /g, "")) ? 2 : 3;
+  return anywhere && form.replace(/ /g, "").includes(q.replace(/ /g, "")) ? 2 : 3;
 }
 
 /* Entries matching what was typed, best first: whole-title prefix, then every
@@ -120,7 +140,7 @@ export function suggest(query, prepared, limit = 6){
   const fq = f.replace(/ /g, ""), loose = b.replace(/ /g, "").length >= 3;
   const scored = [];
   for (const e of prepared){
-    const rank = Math.min(rankIn(e.forms[0], p || f), rankIn(e.forms[1], f || p));
+    const rank = Math.min(rankIn(e.forms[0], p || f), rankIn(e.forms[1], f || p, false));
     if (rank < 3) scored.push({ e, rank: rank * 2 + (e.film ? 1 : 0), near: 0, len: e.forms[0].length });
     // Through a swapped vowel: closest to what was typed first.
     else if (loose && e.forms[2].replace(/ /g, "").startsWith(b.replace(/ /g, "")))
