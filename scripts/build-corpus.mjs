@@ -392,6 +392,8 @@ function firstRelease(title, artist){
     let j = null;
     try { j = JSON.parse(await getText(url, { "user-agent": WD_UA, accept: "application/json" })); } catch {}
     if (!cached) await sleep(CFG.musicbrainz.gapMs);
+    // null: the lookup failed, which is not the same as no match (the song's year is then unknown).
+    if (!j) return null;
     // The search also returns same-titled recordings by others ("If I Can't Have You", 2006), so the artist must match too.
     const key = songKey(title), who = norm(artist);
     const years = (j?.recordings || []).filter(r => r.score >= CFG.musicbrainz.minScore && songKey(r.title) === key
@@ -442,6 +444,9 @@ async function classifyPop(raw, home){
   if (playsOf(canonical) < CFG.minPlays) return { reject: "low-plays" };
   if (saavnYear && saavnYear < CFG.minYear) return { reject: "pre-" + CFG.minYear };
   const mbYear = await firstRelease(title, lead);
+  // Without MusicBrainz a later copy's year could let a pre-2000 classic in; a long outage
+  // leaves too few English songs and the build keeps the last corpus (minSongsPerLanguage).
+  if (mbYear === null) return { reject: "musicbrainz-failed" };
   const year = mbYear ? Math.min(mbYear, saavnYear || mbYear) : saavnYear;
   if (year < CFG.minYear) return { reject: "pre-" + CFG.minYear };
   return { copy: canonical, film: album(canonical), year, yv: !!mbYear, source: mbYear ? "musicbrainz" : "saavn" };
