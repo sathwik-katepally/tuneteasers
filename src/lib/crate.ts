@@ -360,20 +360,44 @@ export async function categoryCounts(mix: Mix, eras: string[], sound: Sound, min
   return Object.fromEntries([...categories.map(c => [c, count([c])]), ["any", count([])]]);
 }
 
-/* Every title a buzz-in phone can pick from: the public corpus and the
-   baked catalog for the show's languages. It never depends on the show, so
-   the list says nothing about which songs are coming. */
-export async function answerTitles(mix: Mix): Promise<string[]> {
+/* One entry of a buzz-in phone's answer list: a song title with the films
+   it is from, or (film: true) a film, which scores part of the points. */
+export interface AnswerEntry { title: string; films: string[]; year: number; film?: true }
+
+/* The film a track is from: "Sitaare (From "Ikkis") - Single" is Ikkis, and
+   a soundtrack album loses "(Original Motion Picture Soundtrack)". Anything
+   else (a compilation, a single) stays as it is and is not offered as a film. */
+const FROM = /[([]From "([^"]+)"[)\]]/i;
+const OST = /\s*[([](?:Original )?(?:Motion Pictures? )?Soundtrack[)\]]/i;
+export function filmOf(album: string, title = ""): string {
+  const from = FROM.exec(album) || FROM.exec(title);
+  return from ? from[1].trim() : album.replace(OST, "").replace(/\s+-\s+(?:Single|EP)$/i, "").trim();
+}
+// Credits and soundtrack notes in a title only make a suggestion longer; judging ignores brackets anyway.
+const CREDITS = /\s*[([](?:feat\.?|ft\.?|with|original|from)\b[^)\]]*[)\]]/gi;
+const isFilmAlbum = (album: string, title: string) => FROM.test(album) || FROM.test(title) || OST.test(album);
+
+/* Every song and film a buzz-in phone can pick from: the public corpus and
+   the baked catalog for the show's languages. It never depends on the show,
+   so the list says nothing about which songs are coming. A title from
+   several films is one entry naming them all, since a title is judged as a
+   title; a film that is also a song title is left to the song's entry. */
+export async function answerTitles(mix: Mix): Promise<AnswerEntry[]> {
   const langs = langsOf(mix);
   const [corpus, catalog] = await Promise.all([loadCorpus(), loadCatalog(langs)]);
-  const seen = new Set<string>(), out: string[] = [];
-  const add = (title: string) => {
-    const d = displayTitle(title), k = songKey(d);
-    if (k && !seen.has(k)){ seen.add(k); out.push(d); }
+  const songs = new Map<string, AnswerEntry>(), films = new Map<string, AnswerEntry>();
+  const add = (title: string, film: string, year: number, isFilm: boolean) => {
+    const d = displayTitle(title).replace(CREDITS, "").trim(), k = songKey(d), fk = songKey(film);
+    if (!k) return;
+    let e = songs.get(k);
+    if (!e) songs.set(k, e = { title: d, films: [], year: year || 0 });
+    if (fk && !e.films.some(f => songKey(f) === fk)) e.films.push(film);
+    if (year > 0 && (!e.year || year < e.year)) e.year = year;
+    if (isFilm && fk && !films.has(fk)) films.set(fk, { title: film, films: [], year: year || 0, film: true });
   };
-  for (const s of corpus || []) if (langs.includes(CORPUS_LANG[s.language])) add(s.title);
-  for (const t of catalog) add(t.title);
-  return out;
+  for (const s of corpus || []) if (langs.includes(CORPUS_LANG[s.language])) add(s.title, s.film, s.year, true);
+  for (const t of catalog) add(t.title, filmOf(t.album, t.title), t.year, isFilmAlbum(t.album, t.title));
+  return [...songs.values(), ...[...films].filter(([k]) => !songs.has(k)).map(([, f]) => f)];
 }
 
 /* The queue with the song at idx swapped for the first later one that is not

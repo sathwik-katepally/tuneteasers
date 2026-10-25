@@ -10,7 +10,7 @@
    they are kept per seat and only the host gets them, merged, to leave those
    songs out of its crate. */
 import { Server } from "partyserver";
-import { isCorrect } from "../../src/lib/answer.js";
+import { isCorrect, isFilm } from "../../src/lib/answer.js";
 import { ROOM_HEARD } from "../../src/lib/constants.js";
 
 const CODE_ALPHABET = "BCDFGHJKLMNPQRSTVWXZ";
@@ -340,15 +340,16 @@ export class Room extends Server {
 
   /* One answer from the player at the head of the queue: right ends the song,
      wrong (or out of time) locks them out and hands over to the next buzzer. */
-  judge(seat, text, ok){
+  judge(seat, text, ok, film = false){
     const r = this.room, s = r.song;
     const entry = s.queue.find(q => q.id === seat);
     s.queue = s.queue.filter(q => q.id !== seat);
-    s.guesses.push({ id: seat, text, ok, timeout: !text });
+    s.guesses.push({ id: seat, text, ok, timeout: !text, ...(film ? { film } : {}) });
     r.seq++;
     if (ok){
       const p = r.players.find(x => x.id === seat);
-      const pts = entry?.points ?? s.points;
+      const full = entry?.points ?? s.points;
+      const pts = film ? Math.max(1, Math.round(full * r.rules.filmShare)) : full;
       if (p) p.score += pts;
       s.winner = seat; s.won = pts;
       this.finishSong();
@@ -411,6 +412,9 @@ const HOST = {
     if (!MIXES.includes(m.mix)) return "bad-mix";
     if (!intIn(m.total, 1, LIMITS.songs) || !intIn(m.perRound, 1, LIMITS.songs)) return "bad-length";
     if (!intIn(m.answerSecs, ...LIMITS.answerSecs)) return "bad-rules";
+    // A host from before film answers sends none, and the film then scores nothing.
+    const filmShare = m.filmShare ?? 0;
+    if (typeof filmShare !== "number" || !(filmShare >= 0 && filmShare <= 1)) return "bad-rules";
     // Whoever left on the final screen is not in the next show.
     r.players = r.players.filter(p => !p.left);
     if (!r.players.length) return "no-players";
@@ -418,7 +422,7 @@ const HOST = {
     r.mix = m.mix;
     r.total = m.total;
     r.perRound = m.perRound;
-    r.rules = { answerSecs: m.answerSecs };
+    r.rules = { answerSecs: m.answerSecs, filmShare };
     r.song = null;
     r.results = [];
     r.skips = 0;
@@ -511,7 +515,9 @@ const PLAYER = {
     if (!text) return "empty";
     // The alarm is at-least-once and may run late; the clock is the rule.
     if (s.deadline && Date.now() > s.deadline) return void this.judge(me, "", false);
-    this.judge(me, text, isCorrect(text, s.answer.title, s.near));
+    if (isCorrect(text, s.answer.title, s.near, s.answer.film)) return void this.judge(me, text, true);
+    const film = !!r.rules.filmShare && isFilm(text, s.answer.film);
+    this.judge(me, text, film, film);
   },
   leave(conn){
     const r = this.room, me = conn.state.seat;

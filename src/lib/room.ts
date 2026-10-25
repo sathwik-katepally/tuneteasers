@@ -19,7 +19,8 @@ const LS_NAME = "tt_room_name";
 
 type SongState = "cue" | "live" | "answering" | "missed" | "revealed" | "skipped";
 interface RoomPlayer { id: string; name: string; score: number; online: boolean }
-interface Guess { id: string; text: string; ok: boolean; timeout: boolean }
+/* film: right by naming the film, for part of the points. */
+interface Guess { id: string; text: string; ok: boolean; timeout: boolean; film?: boolean }
 interface RoomAnswer { title: string; film: string; year: number; artist: string }
 export interface RoomSong {
   n: number;

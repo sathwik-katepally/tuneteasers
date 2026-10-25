@@ -6,7 +6,7 @@ import { Stage } from "../components/Stage";
 import { Ticket } from "../components/Ticket";
 import { NAME_MAX } from "../lib/config";
 import { prepareTitles, suggest } from "../lib/answer.js";
-import { answerTitles } from "../lib/crate";
+import { answerTitles, type AnswerEntry } from "../lib/crate";
 import { displayTitle } from "../lib/utils.js";
 import { cleanCode, dropSeat, heardPayload, isCode, lastName, loadSeat, newSeat, playerName, rememberName, setRoomUrl, useMsLeft,
   useRecordHeard, useRoom, type RoomView, type Seat } from "../lib/room";
@@ -248,14 +248,18 @@ function Buzzer({ view, send, online, error }: {
           <span className={s.label}>Name the song</span>
           {secs !== null && answering && <span className={`${s.secs} ${secs <= 5 ? s.secsLow : ""}`}>{secs}s</span>}
         </div>
-        {answering && <p className={s.worth}>Worth {song?.points ?? 0} if you're right. One try.</p>}
+        {answering && <p className={s.worth}>Worth {song?.points ?? 0} if you're right, half for the film. One try.</p>}
         <input ref={input} className={s.input} value={text} onChange={e => setText(e.target.value)} disabled={!!sent}
           placeholder="Start typing the song" autoComplete="off" autoCorrect="off" autoCapitalize="words" spellCheck={false}
           enterKeyHint="go" aria-label="Your answer" tabIndex={answering ? 0 : -1} maxLength={80} />
         {answering && !sent && hints.length > 0 && (
           <div className={s.hints} role="listbox" aria-label="Songs">
             {hints.map(h => (
-              <button key={h} type="button" role="option" aria-selected={false} className={s.hint_} onClick={() => answer(h)}>{h}</button>
+              <button key={(h.film ? "film:" : "") + h.title} type="button" role="option" aria-selected={false} className={s.hint_} onClick={() => answer(h.title)}
+                aria-label={[h.title, entryMeta(h)].filter(Boolean).join(", ")}>
+                <span className={s.hintTitle}>{h.title}</span>
+                <span className={s.hintMeta}>{entryMeta(h)}</span>
+              </button>
             ))}
           </div>
         )}
@@ -272,7 +276,9 @@ function Buzzer({ view, send, online, error }: {
             {answer_ && (answer_.film || answer_.year > 0) && <p className={s.resultFilm}>{[answer_.film, answer_.year || ""].filter(Boolean).join(", ")}</p>}
             {won && <div className={s.resultStamp}><Stamp text={`+${song.won}`} sub="Housefull" rotate={-7} /></div>}
           </div>
-          <p className={s.sub}>{lastGuess && !lastGuess.ok ? (lastGuess.timeout ? "You ran out of time on this one." : `You said “${lastGuess.text}”.`) : "Next song in a moment."}</p>
+          <p className={s.sub}>{lastGuess && !lastGuess.ok ? (lastGuess.timeout ? "You ran out of time on this one." : `You said “${lastGuess.text}”.`)
+            : won && lastGuess?.film ? "You named the film, so half the points."
+            : song.n >= view.total ? "That was the last song." : song.n % view.perRound === 0 ? "The box office is on the big screen." : "Next song in a moment."}</p>
         </div>
       ) : !answering && (
         <div className={s.buzzWrap}>
@@ -296,8 +302,17 @@ function Buzzer({ view, send, online, error }: {
 
 /* The phone loads the public title list itself: the room never sends one,
    so nothing a phone receives hints at the show's songs. */
+/* Films and a year tell apart titles that look alike ("Chaleya", Jawan, 2023
+   and "Chhaliya", Tashan, 2008). */
+function entryMeta(e: AnswerEntry){
+  if (e.film) return `The film${e.year ? `, ${e.year}` : ""} · half points`;
+  const films = e.films.length > 2 ? `${e.films.slice(0, 2).join(", ")} +${e.films.length - 2}` : e.films.join(", ");
+  // One year for several films would read as the first film's year.
+  return [films, e.films.length === 1 && e.year || ""].filter(Boolean).join(", ");
+}
+
 function useAnswerTitles(mix: RoomView["mix"]){
-  const [list, setList] = useState<{ title: string; forms: string[] }[]>([]);
+  const [list, setList] = useState<(AnswerEntry & { forms: string[] })[]>([]);
   useEffect(() => {
     let live = true;
     answerTitles(mix).then(t => { if (live) setList(prepareTitles(t)); }, () => {});
