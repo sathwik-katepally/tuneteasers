@@ -3,6 +3,7 @@
    ("<groupId>.<secret>") and only its SHA-256 is stored. The creating phone
    also gets an owner secret, the only thing that can delete the group.
    Never stores audio or stream URLs: song keys, timestamps, names, scores. */
+import { LANG_IDS } from "../../src/lib/languages.ts";
 
 const TOKEN_RX = /^([a-z2-7]{12})\.([A-Za-z0-9_-]{22})$/;
 const EVENT_ID_RX = /^[A-Za-z0-9_-]{8,40}$/;
@@ -109,6 +110,16 @@ function int(v, lo, hi, what){
 
 function oneOf(v, options, what){
   if (!options.includes(v)) throw new HttpError(400, `${what} must be one of ${options.join(", ")}`);
+  return v;
+}
+
+/* A show's languages as a comma list of language ids ("hindi,english"), or
+   the one word a client from before the language list sends. */
+function mixOf(v){
+  if (["bolly", "telugu", "both"].includes(v)) return v;
+  const langs = typeof v === "string" ? v.split(",") : [];
+  if (!langs.length || langs.length > LANG_IDS.length || new Set(langs).size !== langs.length || !langs.every(l => LANG_IDS.includes(l)))
+    throw new HttpError(400, `mix must be a comma list of ${LANG_IDS.join(", ")}`);
   return v;
 }
 
@@ -234,7 +245,7 @@ async function postResult(request, env, auth){
     body.id, finishedAt,
     oneOf(body.mode, ["players", "teams"], "mode"),
     oneOf(body.difficulty, ["easy", "medium", "hard"], "difficulty"),
-    oneOf(body.mix, ["bolly", "telugu", "both"], "mix"),
+    mixOf(body.mix),
     int(body.rounds, 1, LIMITS.rounds, "rounds"),
     int(body.songs, 0, LIMITS.songs, "songs"),
     JSON.stringify(cast),
