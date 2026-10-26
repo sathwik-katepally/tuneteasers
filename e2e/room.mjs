@@ -481,8 +481,7 @@ try {
   if (!song().guesses.some(g => g.id === raviId && g.timeout)) fail("timeout was not recorded");
   // Meena names the film (an English song's artist), not the song, for part of
   // the points (unless the song is named after it, when that is the title, or
-  // it shares a name with a song in this show: a guess goes to every phone,
-  // and the secrecy check below would rightly flag it).
+  // it shares a name with another song in this show).
   const show3 = await hostShow(), track3 = show3.queue[show3.idx];
   const kind3 = isFilmLang(track3.lang) ? "film" : "artist";
   const half3 = kind3 === "film" ? filmOf(track3) : String(track3.artist || "").split(",")[0].trim();
@@ -664,9 +663,16 @@ try {
           shown.add(songKey(m.song.answer.title));
         }
       }
+      // A revealed song names its film and artist, and every phone sees what
+      // the others typed. A later song can share either name ("Tere Naam" is
+      // a song and the film it comes from), so those are not searched.
+      const searched = m.t === "state" && m.song ? JSON.stringify({ ...m, song: { ...m.song,
+        guesses: (m.song.guesses || []).map(g => ({ ...g, text: "" })),
+        answer: m.song.answer && { ...m.song.answer, film: "", artist: "" } } }) : f.data;
       for (const t of show.queue){
         if (shown.has(songKey(t.title))) continue;
-        if ([...quoted(t.title), JSON.stringify(songKey(t.title))].some(q => f.data.includes(q))) fail(`${p.label} saw "${t.title}" before its reveal: ${f.data.slice(0, 160)}`);
+        const q = [...quoted(t.title), JSON.stringify(songKey(t.title))].find(q => searched.includes(q));
+        if (q) fail(`${p.label} saw "${t.title}" before its reveal: ...${searched.slice(Math.max(0, searched.indexOf(q) - 80), searched.indexOf(q) + 80)}...`);
       }
     }
   }
