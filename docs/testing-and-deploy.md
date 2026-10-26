@@ -58,6 +58,8 @@ Which runner a suite gets is decided by where its browser plays these AAC/MP4 st
 - Chromium on the macOS runners plays media at about half speed (the same with `--disable-audio-output` or Google Chrome), so a 20-second Easy replay outlasts the suites' waits.
   Desktop suites run on `ubuntu-latest`, where Playwright's own Chromium decodes AAC and plays in real time, so no Chrome channel is needed.
 - The buzz room runs on Linux: only its desktop host plays audio, and the WebKit phones there only render and send frames.
+  Its jobs run in Playwright's Docker image (`mcr.microsoft.com/playwright`, tagged with the Playwright version in `package-lock.json` by a small `playwright-image` job), which ships WebKit's and Chromium's system libraries.
+  Installing those from Ubuntu's mirror on every run took 13 to 30 minutes on slow days in October 2026, past the job's time limit.
 - Two checks stay off CI because the 3-core macOS runners are too loaded for them: the phone Easy ladder (its 150ms "Now playing" hand-off check missed by 170-290ms in 2 of 5 runs) and the buzz room with a phone host (4 WebKit pages; a phone's "You're in" timed out in 2 of 3 runs). Run them locally.
 - A fresh macOS runner indexes its disk for Spotlight for the first minutes (load averages above 20 on 3 cores), which starves the timers the hand-off checks measure; the setup action turns indexing off.
 

@@ -35,11 +35,15 @@ runs:
       run: |
         echo "version=$(node -p 'require("playwright/package.json").version')" >> "$GITHUB_OUTPUT"
         echo "dir=${{ runner.os == 'macOS' && '~/Library/Caches/ms-playwright' || '~/.cache/ms-playwright' }}" >> "$GITHUB_OUTPUT"
+        # Playwright's Docker image ships the browsers and their system libraries.
+        echo "preinstalled=${PLAYWRIGHT_BROWSERS_PATH:+true}" >> "$GITHUB_OUTPUT"
       shell: bash
-    - uses: actions/cache@v6
+    - if: steps.pw.outputs.preinstalled != 'true'
+      uses: actions/cache@v6
       with:
         path: ${{ steps.pw.outputs.dir }}
         key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.pw.outputs.version }}-${{ inputs.browsers }}
     # --with-deps adds the Linux system libraries; macOS needs none.
-    - run: npx playwright install ${{ runner.os == 'Linux' && '--with-deps' || '' }} ${{ inputs.browsers }}
+    - if: steps.pw.outputs.preinstalled != 'true'
+      run: npx playwright install ${{ runner.os == 'Linux' && '--with-deps' || '' }} ${{ inputs.browsers }}
       shell: bash

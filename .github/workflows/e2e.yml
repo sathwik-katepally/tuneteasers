@@ -9,7 +9,7 @@ name: E2E
 # backend stops delivering audio after any seek once a stream has played.
 # Desktop Chromium runs on Linux: on the macOS runners its media clock runs at
 # about half speed, so a clip outlasts every wait. The buzz room runs on Linux
-# too, since only its desktop host plays audio.
+# too, since only its desktop host plays audio, in Playwright's Docker image.
 on:
   pull_request:
   push:
@@ -62,11 +62,6 @@ jobs:
             run: >-
               npm run e2e:ladder -- --profile=desktop --difficulty=easy &&
               npm run e2e:ladder -- --profile=desktop --difficulty=medium
-          - name: buzz room
-            os: ubuntu-latest
-            browsers: webkit chromium
-            worker: true
-            run: npm run e2e:room && npm run e2e:room-background
           - name: group sync
             os: macos-latest
             worker: true
@@ -86,10 +81,45 @@ jobs:
       - run: uptime
       - run: ${{ matrix.run }}
 
+  # Playwright's Docker image, tagged with the Playwright version in
+  # package-lock.json: an image from another release has no matching browsers.
+  playwright-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      image: mcr.microsoft.com/playwright:v${{ steps.v.outputs.version }}-noble
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: package-lock.json
+          sparse-checkout-cone-mode: false
+      - id: v
+        run: echo "version=$(node -p 'require("./package-lock.json").packages["node_modules/playwright"].version')" >> "$GITHUB_OUTPUT"
+
+  # The buzz room runs in that image, which ships WebKit's and Chromium's
+  # system libraries: installing them from Ubuntu's mirror on every run
+  # sometimes outlasted the job's time limit.
+  room:
+    name: buzz room
+    needs: playwright-image
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    container:
+      image: ${{ needs.playwright-image.outputs.image }}
+      # Chromium needs more shared memory than Docker's default 64MB.
+      options: --ipc=host
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/e2e-setup
+        with:
+          worker: true
+      - run: cat /proc/loadavg
+      - run: npm run e2e:room && npm run e2e:room-background
+
   # Phone alert when main or the nightly run breaks (ntfy, topic in the
   # NTFY_TOPIC repo secret). Pull requests show their own red check.
   alert:
-    needs: [key]
+    needs: [key, room]
     if: failure() && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 2
