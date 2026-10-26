@@ -7,7 +7,7 @@
    node e2e/categories.mjs [--profile=phone|desktop] [--shots=dir] */
 import fs from "node:fs";
 import path from "node:path";
-import { serve, open, args, saved, moreSettings, pickLangs } from "./harness.mjs";
+import { serve, open, args, saved, moreSettings, pickLangs, countsSettled } from "./harness.mjs";
 
 const A = args({ profile: "phone" });
 const shotsDir = A.shots && A.shots !== "true" ? A.shots : null;
@@ -82,6 +82,7 @@ try {
     await page.getByRole("button", { name: "Add", exact: true }).click();
     await page.keyboard.type(name); await page.keyboard.press("Enter");
   }
+  await countsSettled(page);
   await page.getByText(/not enough songs for 48 turns/).waitFor();
   if (!(await chip("Item songs").isDisabled())) fail("Item not greyed for 48 turns of Hindi 2000s");
   if (await chip("Dance & party").isDisabled()) fail("Dance & party greyed for 48 turns of Hindi 2000s");
