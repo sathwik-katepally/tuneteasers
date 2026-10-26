@@ -27,7 +27,7 @@ const squash = s => fold(s).replace(/ /g, "");
 /* A version of a song is still that song: "Dus Bahane 2.0" is "Dus Bahane",
    "Dhadak Title Track" is "Dhadak". songKey already drops bracketed and
    " - Reprise" style suffixes; these are the markers left inside the title. */
-const VERSION = /\b(?:title track|feat\b.*|ft\b.*|remix|reprise|unplugged|version|lofi|male|female|sad|duet|\d+)\b/g;
+const VERSION = /\b(?:title track|title song|feat\b.*|ft\b.*|remix|reprise|unplugged|version|lofi|male|female|sad|happy|duet|\d+)\b/g;
 const base = s => foldKey(plain(s).replace(VERSION, " ")).replace(/ /g, "");
 
 /* Romanised vowels are the least fixed part of a spelling ("Nuvvasthanante"
