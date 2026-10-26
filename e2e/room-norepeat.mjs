@@ -172,8 +172,10 @@ try {
   if (Object.keys(bad).some(k => k in H())) fail(`the room kept a malformed entry: ${Object.keys(bad).filter(k => k in H())}`);
   if (H()["zz raw 000"][1] !== 1 || seeds.asha.some(k => H()[k][1] !== 1)) fail("seat counts are off");
   // Neither probe, a phone as far as the room knows, heard anyone's history.
+  const lobbyFields = roomFields(traffic.host);
   for (const c of [probe, odd]) for (const f of c.frames){
-    if (f.includes('"t":"heard"') || f.includes("zz meena") || seeds.asha.some(k => f.includes(JSON.stringify(k)))) fail(`a phone socket received another phone's history: ${f.slice(0, 120)}`);
+    const got = sentStrings(JSON.parse(f), lobbyFields);
+    if (f.includes('"t":"heard"') || f.includes("zz meena") || seeds.asha.some(k => got.has(k))) fail(`a phone socket received another phone's history: ${f.slice(0, 120)}`);
   }
   // Seats that leave the lobby take their songs with them.
   await probe.send({ t: "leave" });
