@@ -33,7 +33,7 @@ jobs:
             os: macos-latest
             browsers: webkit
             run: >-
-              npm run e2e:game -- --profile=phone --mode=teams --mix=bolly --difficulty=easy --rounds=5 &&
+              npm run e2e:game -- --profile=phone --mode=teams --mix=hindi --difficulty=easy --rounds=5 &&
               npm run e2e:game -- --profile=phone --mix=telugu --difficulty=medium &&
               npm run e2e:game -- --profile=phone --reduced &&
               npm run e2e:game -- --profile=phone --categories=item --difficulty=easy
@@ -41,7 +41,7 @@ jobs:
             os: ubuntu-latest
             browsers: chromium
             run: >-
-              npm run e2e:game -- --profile=desktop --mix=bolly --difficulty=medium &&
+              npm run e2e:game -- --profile=desktop --mix=hindi --difficulty=medium &&
               npm run e2e:game -- --profile=desktop --mix=telugu --difficulty=medium --rounds=5 &&
               npm run e2e:game -- --profile=desktop --no-worker &&
               npm run e2e:game -- --profile=desktop --difficulty=easy --no-saavn &&
