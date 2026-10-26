@@ -6,26 +6,28 @@ import s from "./CategoryPicker.module.css";
 
 /* The setup screen's song counts for these settings (setupCounts): undefined
    until the first ones load, null when the song list didn't load. While a
-   change recounts, the last counts stay up, so the chips don't flicker. */
-export function useSetupCounts(S: Settings, need: number, blocked: string[]): SetupCounts | null | undefined {
-  const [counts, setCounts] = useState<SetupCounts | null | undefined>(undefined);
+   change recounts, the last counts stay up, so the chips don't flicker, and
+   recounting is true. */
+export function useSetupCounts(S: Settings, need: number, blocked: string[]): { counts: SetupCounts | null | undefined; recounting: boolean } {
+  const [loaded, setLoaded] = useState<{ key: string; counts: SetupCounts | null }>();
   const sound = DIFFICULTY[S.difficulty].sound;
   const key = JSON.stringify([S.langs, S.eras, sound, S.songs, S.categories, need, blocked]);
   useEffect(() => {
     let live = true;
     const timer = setTimeout(() => {
       setupCounts({ langs: S.langs, eras: S.eras, sound, songs: S.songs, minSongs: need, categories: S.categories }, CATEGORIES.map(c => c.id))
-        .then(c => { if (live) setCounts(c); });
+        .then(c => { if (live) setLoaded({ key, counts: c }); });
     }, 200);
     return () => { live = false; clearTimeout(timer); };
   }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
-  return counts;
+  return { counts: loaded?.counts, recounting: loaded?.key !== key };
 }
 
 interface Props {
   settings: Settings;
   need: number;
   counts: SetupCounts | null | undefined;
+  recounting: boolean;
   onChange: (categories: Category[]) => void;
 }
 
@@ -34,7 +36,7 @@ interface Props {
    languages have show. A category with fewer songs than the show needs is
    greyed out with its count; a chosen one stays tappable so it can be
    turned off. */
-export function CategoryPicker({ settings: S, need, counts, onChange }: Props){
+export function CategoryPicker({ settings: S, need, counts, recounting, onChange }: Props){
   const sound = DIFFICULTY[S.difficulty].sound;
   const chosen = new Set(S.categories);
   const shown = CATEGORIES.filter(c => !counts || counts.has.includes(c.id) || chosen.has(c.id));
@@ -44,7 +46,7 @@ export function CategoryPicker({ settings: S, need, counts, onChange }: Props){
 
   return (
     <>
-      <div className={s.grid} role="group" aria-label="Song categories">
+      <div className={s.grid} role="group" aria-label="Song categories" aria-busy={recounting}>
         <button type="button" className={`${s.stub} ${chosen.size ? "" : s.on}`} aria-pressed={!chosen.size} onClick={() => onChange([])}
           aria-label={counts ? `Any, ${counts.cats.any} songs` : "Any"}>
           <span className={s.name}>Any</span>
