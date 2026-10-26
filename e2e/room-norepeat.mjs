@@ -16,7 +16,7 @@
    node e2e/room-norepeat.mjs [--worker=https://...] */
 import fs from "node:fs";
 import { chromium, webkit, devices } from "playwright";
-import { serve, args, localWorker, silence, skipLanding, moreSettings, wireWorker, MUTE_ARGS } from "./harness.mjs";
+import { serve, args, localWorker, silence, skipLanding, moreSettings, wireWorker, MUTE_ARGS, roomFields, sentStrings } from "./harness.mjs";
 import { displayTitle, songKey, shuffle } from "../src/lib/utils.js";
 import { ROOM_HEARD } from "../src/lib/constants.js";
 
@@ -301,6 +301,7 @@ try {
     ...(label !== "Asha" ? seeds.asha : []), ...(label !== "Ravi" ? seeds.ravi : []), ...(label !== "Meena" ? ["zz meena 000", "zz meena 150"] : []),
     ...(label !== "Dev" ? [songKey(upNext.title)] : []), "zz raw 000",
   ];
+  const fields = roomFields([...traffic.host, ...traffic.host2]);
   let frames = 0;
   for (const p of [...phones, dev]){
     const shown = new Set();
@@ -316,13 +317,14 @@ try {
         if (m.song?.answer && m.song.state !== "revealed") fail(`${p.label} got song ${m.song.n}'s answer early`);
         if (m.song?.answer) shown.add(songKey(m.song.answer.title));
       }
-      for (const k of others(p.label)) if (!shown.has(k) && f.data.includes(JSON.stringify(k))) fail(`${p.label} received another phone's song "${k}"`);
+      const sent = sentStrings(m, fields);
+      for (const k of others(p.label)) if (!shown.has(k) && sent.has(k)) fail(`${p.label} received another phone's song "${k}"`);
       // A revealed song's film is public, and a title track shares its name with its film.
-      const data = JSON.stringify(m, (k, v) => (k === "film" ? "" : v));
+      const unrevealed = sentStrings(JSON.parse(JSON.stringify(m, (k, v) => (k === "film" ? "" : v))), fields);
       for (const t of queue){
         const k = songKey(t.title);
         if (shown.has(k)) continue;
-        if ([JSON.stringify(t.title), JSON.stringify(displayTitle(t.title)), JSON.stringify(k)].some(q => data.includes(q))) fail(`${p.label} saw "${t.title}" before its reveal`);
+        if ([t.title, displayTitle(t.title), k].some(q => unrevealed.has(q))) fail(`${p.label} saw "${t.title}" before its reveal`);
       }
     }
   }

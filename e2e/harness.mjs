@@ -195,3 +195,25 @@ export async function pickLangs(page, labels){
 /* Waits until the setup screen's song counts match its settings. The last
    counts stay up while a change recounts, so a count on screen can be stale. */
 export const countsSettled = page => page.locator('[role="group"][aria-label="Song categories"][aria-busy="false"]').waitFor();
+
+/* The room's own field names: every object key in the host's state frames,
+   which hold no song keys as keys. A song key can be one ("me" is ME! and
+   every phone's seat). */
+export function roomFields(frames){
+  const out = new Set();
+  const walk = v => { if (v && typeof v === "object") for (const [k, x] of Object.entries(v)){ if (!Array.isArray(v)) out.add(k); walk(x); } };
+  for (const f of frames) if (f.dir === "in"){ const m = JSON.parse(f.data); if (m.t === "state") walk(m); }
+  return out;
+}
+
+/* Every string one parsed frame carries: its string values, and its object
+   keys other than the room's field names. */
+export function sentStrings(frame, fields){
+  const out = new Set();
+  const walk = v => {
+    if (typeof v === "string") out.add(v);
+    else if (v && typeof v === "object") for (const [k, x] of Object.entries(v)){ if (!Array.isArray(v) && !fields.has(k)) out.add(k); walk(x); }
+  };
+  walk(frame);
+  return out;
+}
