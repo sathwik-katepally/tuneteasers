@@ -11,7 +11,7 @@
    check the skip after a stream error moves on the same way and records nothing. */
 import fs from "node:fs";
 import path from "node:path";
-import { serve, open, args, saved, moreSettings, pickLangs } from "./harness.mjs";
+import { serve, open, args, saved, moreSettings, pickLangs, countsSettled } from "./harness.mjs";
 import { displayTitle, songKey } from "../src/lib/utils.js";
 import { SAAVN_BASES } from "../src/lib/constants.js";
 import { CATEGORIES, DIFFICULTY, HINT_PENALTY, SPEED_BONUS_FADE_SECS, SPEED_BONUS_MAX } from "../src/lib/config.ts";
@@ -59,8 +59,8 @@ try {
   await pickLangs(page, langLabels(A.mix));
   await moreSettings(page);
   await page.getByRole("radio", { name: DIFFICULTY[A.difficulty].label, exact: true }).click();
-  // Counts for the new sound land a moment later and push the rounds control down; the old ones stay up meanwhile.
-  await page.locator('[role="group"][aria-label="Song categories"][aria-busy="false"]').waitFor();
+  // Counts for the new sound land a moment later and push the rounds control down.
+  await countsSettled(page);
   await page.getByRole("radio", { name: A.rounds, exact: true }).click();
   const categories = A.categories ? A.categories.split(",") : [];
   for (const id of categories){

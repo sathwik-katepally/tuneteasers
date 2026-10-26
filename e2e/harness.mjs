@@ -191,3 +191,7 @@ export async function pickLangs(page, labels){
   for (const name of all) if (want.has(name.toLowerCase()) && !(await on(name))) await group.getByRole("button", { name, exact: true }).click();
   for (const name of all) if (!want.has(name.toLowerCase()) && (await on(name))) await group.getByRole("button", { name, exact: true }).click();
 }
+
+/* Waits until the setup screen's song counts match its settings. The last
+   counts stay up while a change recounts, so a count on screen can be stale. */
+export const countsSettled = page => page.locator('[role="group"][aria-label="Song categories"][aria-busy="false"]').waitFor();
