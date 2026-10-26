@@ -19,7 +19,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { chromium, webkit, devices } from "playwright";
-import { serve, args, localWorker, silence, skipLanding, moreSettings, pickLangs, wireWorker, MUTE_ARGS } from "./harness.mjs";
+import { serve, args, localWorker, silence, skipLanding, moreSettings, pickLangs, wireWorker, MUTE_ARGS, roomFields, sentStrings } from "./harness.mjs";
 import { displayTitle } from "../src/lib/utils.js";
 import { CATEGORIES, DIFFICULTY, LADDER, ROOM_ANSWER_SECS, ROOM_AUTO_SECS, ROOM_FILM_SHARE } from "../src/lib/config.ts";
 import { songKey } from "../src/lib/utils.js";
@@ -644,7 +644,7 @@ try {
   // No phone received any title of this show before that song's reveal, in
   // any kind of frame (welcome, state, error, reconnect snapshots), a title
   // list of any kind, or anything that looks like a stream.
-  const quoted = t => [JSON.stringify(t), JSON.stringify(displayTitle(t))];
+  const fields = roomFields(traffic.host);
   const typed = new Set(Object.values(traffic).flat().filter(f => f.dir === "out").map(f => JSON.parse(f.data)).filter(m => m.t === "answer").map(m => m.text));
   let frames = 0;
   for (const p of phones){
@@ -667,13 +667,16 @@ try {
       // A revealed song names its film and artist, and every phone sees what
       // the phones here typed. A later song can share either name ("Tere Naam"
       // is a song and the film it comes from), so those are not searched.
-      const searched = m.t === "state" && m.song ? JSON.stringify({ ...m, song: { ...m.song,
+      const searched = m.t === "state" && m.song ? { ...m, song: { ...m.song,
         guesses: (m.song.guesses || []).map(g => (typed.has(g.text) ? { ...g, text: "" } : g)),
-        answer: m.song.answer && { ...m.song.answer, film: "", artist: "" } } }) : f.data;
+        answer: m.song.answer && { ...m.song.answer, film: "", artist: "" } } } : m;
+      const sent = sentStrings(searched, fields);
       for (const t of show.queue){
         if (shown.has(songKey(t.title))) continue;
-        const q = [...quoted(t.title), JSON.stringify(songKey(t.title))].find(q => searched.includes(q));
-        if (q) fail(`${p.label} saw "${t.title}" before its reveal: ...${searched.slice(Math.max(0, searched.indexOf(q) - 80), searched.indexOf(q) + 80)}...`);
+        const q = [t.title, displayTitle(t.title), songKey(t.title)].find(q => sent.has(q));
+        if (!q) continue;
+        const s = JSON.stringify(searched), at = s.indexOf(JSON.stringify(q));
+        fail(`${p.label} saw "${t.title}" before its reveal: ...${s.slice(Math.max(0, at - 80), at + 80)}...`);
       }
     }
   }
