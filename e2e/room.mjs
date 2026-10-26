@@ -645,6 +645,7 @@ try {
   // any kind of frame (welcome, state, error, reconnect snapshots), a title
   // list of any kind, or anything that looks like a stream.
   const quoted = t => [JSON.stringify(t), JSON.stringify(displayTitle(t))];
+  const typed = new Set(Object.values(traffic).flat().filter(f => f.dir === "out").map(f => JSON.parse(f.data)).filter(m => m.t === "answer").map(m => m.text));
   let frames = 0;
   for (const p of phones){
     const shown = new Set();
@@ -664,10 +665,10 @@ try {
         }
       }
       // A revealed song names its film and artist, and every phone sees what
-      // the others typed. A later song can share either name ("Tere Naam" is
-      // a song and the film it comes from), so those are not searched.
+      // the phones here typed. A later song can share either name ("Tere Naam"
+      // is a song and the film it comes from), so those are not searched.
       const searched = m.t === "state" && m.song ? JSON.stringify({ ...m, song: { ...m.song,
-        guesses: (m.song.guesses || []).map(g => ({ ...g, text: "" })),
+        guesses: (m.song.guesses || []).map(g => (typed.has(g.text) ? { ...g, text: "" } : g)),
         answer: m.song.answer && { ...m.song.answer, film: "", artist: "" } } }) : f.data;
       for (const t of show.queue){
         if (shown.has(songKey(t.title))) continue;
