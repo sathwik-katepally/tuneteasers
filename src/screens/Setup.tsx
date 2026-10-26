@@ -52,7 +52,7 @@ export function Setup(p: Props){
   // A show that couldn't load came from these picks, so they open for changing.
   const [more, setMore] = useState(!!p.error);
   const need = S.rounds * (room ? ROOM_SONGS_PER_ROUND : list.length);
-  const counts = useSetupCounts(S, need, p.blocked);
+  const { counts, recounting } = useSetupCounts(S, need, p.blocked);
   // A chosen category the chosen languages don't have at all goes, and says why.
   const [dropped, setDropped] = useState("");
   useEffect(() => {
@@ -182,7 +182,7 @@ export function Setup(p: Props){
 
             <div className={s.group}>
               <span className={s.labelText}>Kind of songs</span>
-              <CategoryPicker settings={S} need={need} counts={counts} onChange={(categories: Category[]) => upSettings({ categories })} />
+              <CategoryPicker settings={S} need={need} counts={counts} recounting={recounting} onChange={(categories: Category[]) => upSettings({ categories })} />
             </div>
 
             <div className={s.group}>

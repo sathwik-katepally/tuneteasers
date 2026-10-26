@@ -59,8 +59,8 @@ try {
   await pickLangs(page, langLabels(A.mix));
   await moreSettings(page);
   await page.getByRole("radio", { name: DIFFICULTY[A.difficulty].label, exact: true }).click();
-  // The category counts load a moment after the fold opens and push the rounds control down.
-  await page.getByRole("button", { name: /^Any, \d+ songs$/ }).waitFor();
+  // Counts for the new sound land a moment later and push the rounds control down; the old ones stay up meanwhile.
+  await page.locator('[role="group"][aria-label="Song categories"][aria-busy="false"]').waitFor();
   await page.getByRole("radio", { name: A.rounds, exact: true }).click();
   const categories = A.categories ? A.categories.split(",") : [];
   for (const id of categories){
