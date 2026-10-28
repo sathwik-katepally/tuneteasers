@@ -116,19 +116,11 @@ jobs:
       - run: cat /proc/loadavg
       - run: npm run e2e:room && npm run e2e:room-background
 
-  # Phone alert when main or the nightly run breaks (ntfy, topic in the
-  # NTFY_TOPIC repo secret). Pull requests show their own red check.
+  # Slack #jobs alert when main or the nightly run breaks, through alert.yml.
+  # Pull requests show their own red check.
   alert:
     needs: [key, room]
     if: failure() && github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 2
-    steps:
-      - env:
-          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
-        run: >-
-          curl -s --max-time 20
-          -H "Title: ${{ github.repository }}/${{ github.workflow }} failed"
-          -H "Priority: high" -H "Tags: x"
-          -d "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          "https://ntfy.sh/$NTFY_TOPIC"
+    uses: ./.github/workflows/alert.yml
+    secrets:
+      SLACK_WEBHOOK_JOBS: ${{ secrets.SLACK_WEBHOOK_JOBS }}

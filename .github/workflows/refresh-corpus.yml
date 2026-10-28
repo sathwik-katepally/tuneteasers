@@ -38,19 +38,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh workflow run refresh-snips.yml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME"
 
-  # Phone alert on failure (ntfy, topic in the NTFY_TOPIC repo secret).
+  # Slack #jobs alert on failure, through alert.yml.
   # failure() is false for a cancelled run, so a superseded run stays quiet.
   alert:
     needs: [refresh, snips]
     if: failure()
-    runs-on: ubuntu-latest
-    timeout-minutes: 2
-    steps:
-      - env:
-          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
-        run: >-
-          curl -s --max-time 20
-          -H "Title: ${{ github.repository }}/${{ github.workflow }} failed"
-          -H "Priority: high" -H "Tags: x"
-          -d "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          "https://ntfy.sh/$NTFY_TOPIC"
+    uses: ./.github/workflows/alert.yml
+    secrets:
+      SLACK_WEBHOOK_JOBS: ${{ secrets.SLACK_WEBHOOK_JOBS }}

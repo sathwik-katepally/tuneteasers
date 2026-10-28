@@ -1,0 +1,27 @@
+# The one place a failed run posts to Slack #jobs; each caller's `if:` decides when.
+# SLACK_WEBHOOK_JOBS is a repo secret holding the incoming webhook for #jobs, passed in by name.
+# Inside a called workflow the github context is the caller's, so the text names the run that failed.
+# Run it by hand to check the webhook still posts.
+name: Slack alert test
+
+on:
+  workflow_call:
+    secrets:
+      SLACK_WEBHOOK_JOBS:
+        required: true
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - env:
+          SLACK_WEBHOOK_JOBS: ${{ secrets.SLACK_WEBHOOK_JOBS }}
+          TEXT: ${{ github.repository }}/${{ github.workflow }} failed ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          : "${SLACK_WEBHOOK_JOBS:?is not set, so nobody was told}"
+          jq -n --arg text "$TEXT" '{text: $text}' |
+            curl -sS --fail --max-time 20 -H 'Content-Type: application/json' --data-binary @- "$SLACK_WEBHOOK_JOBS"
