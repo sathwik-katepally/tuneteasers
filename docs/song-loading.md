@@ -37,7 +37,7 @@ Catalog tracks are 30-second mid-song "hook" clips and carry `hook: true`.
 
 ## The corpus (`public/corpus.json`)
 
-Built by `node scripts/build-corpus.mjs` (weekly in CI, see docs/testing-and-deploy.md) from `scripts/corpus.config.json`, which holds everything that changes: playlist search queries, the editorial owner uid, Wikidata language ids, the year floor and tolerance, the play-count floor, score weights and tier cut-offs.
+Built by `node scripts/build-corpus.mjs` (weekly on the owner's Mac, see docs/testing-and-deploy.md) from `scripts/corpus.config.json`, which holds everything that changes: playlist search queries, the editorial owner uid, Wikidata language ids, the year floor and tolerance, the play-count floor, score weights and tier cut-offs.
 Its `languages` block lists the corpus languages: film languages (Hindi, Telugu, Tamil) carry a Wikidata language id, and a pop language (English, `film: false`) carries none.
 The rule for a film language is film songs only, with the film's real release year:
 

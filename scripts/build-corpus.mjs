@@ -22,7 +22,7 @@
       theme playlists, item songs from the film's Wikipedia cast list, then the
       fixed overrides file. Fully automatic; nothing waits on a human.
 
-   Run: node scripts/build-corpus.mjs   (CI: .github/workflows/refresh-corpus.yml)
+   Run: node scripts/build-corpus.mjs   (weekly: the tuneteasers-corpus job in the ops repo)
    Env:
      CORPUS_OUT     output path override (default public/corpus.json)
      CORPUS_CACHE   directory to cache upstream responses for local reruns
