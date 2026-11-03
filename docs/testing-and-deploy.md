@@ -98,24 +98,27 @@ The refresh workflows push with a deploy key instead: a write deploy key on the 
 The jobs that commit check out with `actions/checkout@v7`, `ssh-key: ${{ secrets.DATA_DEPLOY_KEY }}` and `fetch-depth: 0`, then run `scripts/push-data-commit.sh <message> <paths...>`, which commits the changed files as github-actions[bot], rebases on the branch tip and pushes to the branch the run came from (three tries, in case another push lands in between).
 A push over the key is an ordinary push to main, so it starts `deploy.yml`, `e2e.yml` and `e2e-release.yml` by itself: the data is deployed and checked by the whole E2E matrix at once.
 A failed refresh leaves no branch or pull request behind, only the workflow's alert.
-The refresh workflows run with `permissions: contents: read`; only the `snips` job in `refresh-corpus.yml` keeps `actions: write`, to dispatch `refresh-snips.yml`.
+The refresh workflows run with `permissions: contents: read`.
 
 `.github/workflows/refresh-catalog.yml` runs `scripts/build-catalog.mjs` weekly (Mon 03:00 UTC) and commits `public/catalog.json` if changed and lands it on main (see Landing data commits).
 The script must stay sequential with delays (iTunes rate limit) and refuses to write a catalog with fewer than 100 tracks.
 The script holds its own iTunes search terms and genre-to-language map, and imports `EXCLUDE_RX` from `src/lib/constants.js`, so it shares the page-side title filter described in docs/song-loading.md.
 
-## Corpus refresh CI
+## Corpus refresh
 
-`.github/workflows/refresh-corpus.yml` runs `scripts/build-corpus.mjs` weekly (Tue 02:00 UTC) and commits `public/corpus.json` if changed and lands it on main.
+The `tuneteasers-corpus` job in the ops repo (`bin/tuneteasers-corpus`, a launchd job on the owner's Mac) runs `scripts/build-corpus.mjs` weekly (Tue 09:00 Stockholm) from its own clone of main, and lands a changed `public/corpus.json` as a PR that merges itself once `verify` passes.
+It does not run in GitHub Actions because JioSaavn answers by country: from GitHub's US runners its English playlists come back with no songs and its search hides English originals, so a build there finds almost no English songs and refuses to write (October and November 2026).
+From Sweden and India the playlists come back whole.
 Play counts move every week, so the file practically always changes.
-When it does, the `snips` job dispatches `refresh-snips.yml` (`gh workflow run`), so the snips index scores the newly added songs the same night.
+The nightly snips refresh scores the newly added songs.
+A failed run turns the job's Gatus check red, and the morning brief names it.
 The script calls the Wikidata SPARQL endpoint (two queries per configured language, ~1 minute total), JioSaavn's `api.php` (a few hundred playlist fetches and roughly one title search per compilation copy, at concurrency 4) and English Wikipedia for the song categories (one title lookup per 50 candidate titles and one raw article per film, about 1,200); a full build takes about 15 minutes.
 It refuses to write a corpus with fewer than `minSongsPerLanguage` songs in either language, or with a song category below its `minTagged`, so a broken upstream leaves the last good corpus in place.
 Run it locally with `CORPUS_CACHE=<dir>` to cache upstream responses across reruns and `CORPUS_REPORT=<file>` for a per-song decision log (the input for hand checks).
 
 ## Snips refresh CI
 
-`.github/workflows/refresh-snips.yml` runs `scripts/build-snips.mjs` nightly (04:30 UTC; the weekly corpus refresh also dispatches it) and commits `public/snips.json` and `scripts/voice-curves.json` if changed and lands it on main.
+`.github/workflows/refresh-snips.yml` runs `scripts/build-snips.mjs` nightly (04:30 UTC) and commits `public/snips.json` and `scripts/voice-curves.json` if changed and lands it on main.
 Its `plan` job counts the corpus songs without vocal-stem curves (`SNIP_PLAN=1`, no network) and starts one scoring runner per 35 of them, at most 40 and 20 at a time; a night with nothing to score skips scoring and only refreshes the index.
 Each runner scores its share (`SNIP_SHARD=i/n`, at most `limit` songs) and stops taking songs after 5 hours (`SNIP_BUDGET_MIN`), well inside GitHub's 6-hour job limit, so whatever it scored is kept; the rest wait for the next night.
 A `merge` job on the branch tip combines the shards' curves (`SNIP_MERGE=<dir>`), judges every corpus song from them, prints the curve coverage, the pass rate and entries per language/tier, and commits.
@@ -136,7 +139,7 @@ The client fails closed with a clear Music-only shortage if the index is missing
 
 ### Workflow failure alerts
 
-The production workflows (`deploy.yml`, `e2e.yml`, `e2e-release.yml`, `refresh-catalog.yml`, `refresh-corpus.yml`, `refresh-snips.yml`) end in an `alert` job that `needs` the other jobs and runs on `if: failure()` (`refresh-snips.yml` only on main, `e2e.yml` not on pull requests).
+The production workflows (`deploy.yml`, `e2e.yml`, `e2e-release.yml`, `refresh-catalog.yml`, `refresh-snips.yml`) end in an `alert` job that `needs` the other jobs and runs on `if: failure()` (`refresh-snips.yml` only on main, `e2e.yml` not on pull requests).
 It POSTs the run URL to `https://ntfy.sh/$NTFY_TOPIC` with the title `<repo>/<workflow> failed`.
 `failure()` is false for cancelled runs, so a deploy superseded by a newer push stays quiet.
 The topic is the shared ops topic (`~/.config/ops/secrets.env`, `OPS_NTFY_TOPIC`), set with `gh secret set NTFY_TOPIC --repo sathwik-katepally/tuneteasers --body <topic>`.
