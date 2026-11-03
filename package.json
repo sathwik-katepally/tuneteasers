@@ -11,6 +11,7 @@
     "preview": "vite preview",
     "build:catalog": "node scripts/build-catalog.mjs",
     "build:snips": "node scripts/build-snips.mjs",
+    "build:corpus": "node scripts/build-corpus.mjs",
     "e2e:game": "node --experimental-strip-types e2e/game.mjs",
     "e2e:categories": "node e2e/categories.mjs",
     "e2e:ladder": "node --experimental-strip-types e2e/ladder.mjs",
