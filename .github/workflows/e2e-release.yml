@@ -113,19 +113,10 @@ jobs:
       - run: cat /proc/loadavg
       - run: npm run e2e:room -- --difficulty=medium && npm run e2e:room-norepeat
 
-  # Phone alert when main or the nightly run breaks (ntfy, topic in the
-  # NTFY_TOPIC repo secret).
+  # Slack #jobs alert when main or the nightly run breaks, through alert.yml.
   alert:
     needs: [release, room]
     if: failure()
-    runs-on: ubuntu-latest
-    timeout-minutes: 2
-    steps:
-      - env:
-          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
-        run: >-
-          curl -s --max-time 20
-          -H "Title: ${{ github.repository }}/${{ github.workflow }} failed"
-          -H "Priority: high" -H "Tags: x"
-          -d "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          "https://ntfy.sh/$NTFY_TOPIC"
+    uses: ./.github/workflows/alert.yml
+    secrets:
+      SLACK_WEBHOOK_JOBS: ${{ secrets.SLACK_WEBHOOK_JOBS }}

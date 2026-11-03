@@ -48,7 +48,7 @@ Gotchas: screens cross-fade out through `AnimatePresence`, so after a click wait
 ### E2E in CI
 
 `.github/workflows/e2e.yml` runs the key suites on every pull request, on every push to main, nightly (02:30 UTC) and on demand, one job per suite in parallel (about 3-5 minutes wall clock): a pass-the-phone game on each profile, safe-snips and the ladder on each profile, the buzz room and the group sync against a local `wrangler dev`, and the landing and journeys suites.
-`.github/workflows/e2e-release.yml` runs the rest of the release matrix above on pushes to main, nightly (02:30 UTC) and on demand, and alerts through ntfy when it fails; category games play Easy there, since in Music-only the item and mass chips are too thin to pick.
+`.github/workflows/e2e-release.yml` runs the rest of the release matrix above on pushes to main, nightly (02:30 UTC) and on demand, and alerts Slack `#jobs` when it fails; category games play Easy there, since in Music-only the item and mass chips are too thin to pick.
 The shared steps (deps, build, Playwright browsers cached per version) are in `.github/actions/e2e-setup`.
 The suites play real songs from the corpus through the deployed Worker and the Saavn CDN; the song draw is random, so recorded responses would rarely match a run and are not used.
 
@@ -137,9 +137,11 @@ The client fails closed with a clear Music-only shortage if the index is missing
 ### Workflow failure alerts
 
 The production workflows (`deploy.yml`, `e2e.yml`, `e2e-release.yml`, `refresh-catalog.yml`, `refresh-corpus.yml`, `refresh-snips.yml`) end in an `alert` job that `needs` the other jobs and runs on `if: failure()` (`refresh-snips.yml` only on main, `e2e.yml` not on pull requests).
-It POSTs the run URL to `https://ntfy.sh/$NTFY_TOPIC` with the title `<repo>/<workflow> failed`.
+That job calls the reusable `.github/workflows/alert.yml`, the one place the post lives: it sends `<repo>/<workflow> failed <run URL>` to Slack `#jobs`.
 `failure()` is false for cancelled runs, so a deploy superseded by a newer push stays quiet.
-The topic is the shared ops topic (`~/.config/ops/secrets.env`, `OPS_NTFY_TOPIC`), set with `gh secret set NTFY_TOPIC --repo sathwik-katepally/tuneteasers --body <topic>`.
+The `SLACK_WEBHOOK_JOBS` repo secret holds the incoming webhook for `#jobs`, handed from Agent Vault with `agent-vault vault credential get SLACK_WEBHOOK_JOBS | gh secret set SLACK_WEBHOOK_JOBS --repo sathwik-katepally/tuneteasers`.
+Without it the alert job fails, so the run stays red and GitHub still emails.
+Run `alert.yml` by hand (`gh workflow run alert.yml`) to check the webhook still posts.
 A failed scheduled refresh is not an outage (the client degrades without a fresh catalog or snips index), but the alert is how a broken iTunes filter or a rate-limit change gets noticed at all.
 
 ### Web Analytics
