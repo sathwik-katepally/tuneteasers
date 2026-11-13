@@ -315,6 +315,23 @@ try {
   if (A.mode === "teams" && !cast.some(c => c.members.length)) fail("team members lost");
   const text = await page.locator("body").innerText();
   if (!/takes it|tie/.test(text)) fail("podium headline missing");
+  // A tab that iOS reloads after the last song comes back on the podium with the result intact.
+  // The index is seeded one past the last song, where a show that ran its queue dry ends.
+  await page.evaluate(() => {
+    const s = JSON.parse(localStorage.getItem("tuneteasers_v7"));
+    s.game.trackIdx = s.game.queue.length;
+    localStorage.setItem("tuneteasers_v7", JSON.stringify(s));
+  });
+  await page.reload();
+  await btn("Same crowd again").waitFor();
+  const kept = (await saved(page)).game;
+  const scores = c => c.map(x => `${x.name}=${x.score}`).join(" ");
+  if (!kept?.finished || scores(kept.cast) !== scores(cast)) fail("a reload on the podium lost the final scores");
+  if (!/takes it|tie/.test(await page.locator("body").innerText())) fail("podium headline missing after a reload");
+  await btn("New show").click();
+  await btn(/Start the show/).waitFor();
+  if (await page.getByText("Show in progress").count()) fail("finished game offered for resume");
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem("tuneteasers_v7")).game === null);
   if (errors.length) fail("page errors: " + errors.join(" | "));
   if (overflow.length) fail("screens scroll at this size: " + overflow.join(", "));
   if (!resumed) fail("home/resume path not exercised");

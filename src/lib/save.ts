@@ -1,6 +1,8 @@
 /* The saved game: written on every state change, restored and sanitized on
    boot. A page load lands on the home screen (the landing page on a first
-   visit); an unfinished game is offered there as a Resume card. Saves from the pre-points version
+   visit); an unfinished game is offered there as a Resume card. A finished
+   game opens on the podium instead, so a tab that iOS reloads after the last
+   song still shows the result. Saves from the pre-points version
    (tuneteasers_v6) are migrated once, then that key is dropped. */
 import { ERAS } from "./constants.js";
 import { sanitizeTrack } from "./storage";
@@ -90,7 +92,8 @@ function parseRoster(v: unknown, fallback: RosterEntry[], prefix: string): Roste
 function parseQueue(raw: Raw): { queue: Track[]; trackIdx: number } | null {
   const queue = arr(raw.queue).map(sanitizeTrack).filter(Boolean) as Track[];
   const trackIdx = Math.max(0, int(raw.trackIdx, 0));
-  return queue.length && trackIdx < queue.length ? { queue, trackIdx } : null;
+  // A finished game that played its last song sits one past the end of the queue.
+  return queue.length && (trackIdx < queue.length || (raw.finished === true && trackIdx === queue.length)) ? { queue, trackIdx } : null;
 }
 
 const sourceOf = (v: unknown) => oneOf(v, ["corpus", "saavn", "catalog"], "catalog");
@@ -101,7 +104,7 @@ function parseGame(raw: Raw, mode: Mode, difficulty: Difficulty, langs: Lang[]):
   const cast: CastMember[] = parseRoster(raw.cast, [], "c").map((c, i) => ({
     ...c, score: Math.max(0, int(obj(arr(raw.cast)[i]).score, 0)),
   }));
-  if (!cast.length || raw.finished === true) return null;
+  if (!cast.length) return null;
   const ids = new Set(cast.map(c => c.id));
   const history: HistoryEntry[] = arr(raw.history).map(obj)
     .filter(h => typeof h.id === "string" && ids.has(h.id))
@@ -121,7 +124,7 @@ function parseGame(raw: Raw, mode: Mode, difficulty: Difficulty, langs: Lang[]):
     langs: parseLangs(raw, langs),
     cast,
     history,
-    finished: false,
+    finished: raw.finished === true,
   };
 }
 
@@ -169,12 +172,13 @@ export function loadSaved(): AppState {
   }
   const r = obj(raw);
   const settings = parseSettings(obj(r.settings));
+  const game = parseGame(obj(r.game), settings.mode, settings.difficulty, settings.langs);
   return {
-    screen: "setup",
+    screen: game?.finished ? "done" : "setup",
     settings,
     players: parseRoster(r.players, DEFAULTS.players, "p"),
     teams: parseRoster(r.teams, DEFAULTS.teams, "t"),
-    game: parseGame(obj(r.game), settings.mode, settings.difficulty, settings.langs),
+    game,
   };
 }
 

@@ -45,9 +45,12 @@ A `max-height: 760px` pass tightens spacing so every in-game screen fits a short
 `history` holds one `{ id, song, points, round }` entry per judged turn; the box office derives each round's gains from it.
 Every `state` change is saved to localStorage (`tuneteasers_v7`) by an effect; `loadSaved` restores and sanitizes it on boot.
 A save from the pre-points version (`tuneteasers_v6`) is migrated once: players keep their names, scores are multiplied by `LEGACY_SCORE_SCALE`, "With vocals" becomes Easy and "Music only" Medium, and the old key is removed on the next save.
-Unreadable or finished saved games are discarded instead of offered for resume.
+Unreadable saved games are discarded instead of offered for resume.
 A page load lands on the home screen; an unfinished game shows a Resume/Discard card there, with the setup folded under "Start a new show instead".
-The one exception is a first visit, which opens the landing page instead (see Screens and phases).
+The exceptions are a first visit, which opens the landing page instead (see Screens and phases), and a finished saved game, which opens on the podium (`done`), so a tab that iOS reloads on the final count or the podium still shows the result.
+A finished game is never offered for resume.
+It stays saved until "New show", "Same crowd again" or a new show from the home screen replaces it.
+The reload sends its group result again under the same `id`, so it is still recorded once.
 The marquee menu offers "Home, keep the game" (resumable) and "End game" (in-app two-step confirm, clears the game).
 
 Ephemeral per-turn state (`phase`, `turn`, the revealed track, `verdict`, the `steal`, the stream-error `note`, the `skipped` title shown on the next countdown and `boardRound`) is separate `useState` in `usePassTheGame` and intentionally not saved.
