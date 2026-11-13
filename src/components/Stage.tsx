@@ -3,6 +3,7 @@ import { AnimatePresence, LazyMotion, MotionConfig, domAnimation } from "motion/
 import * as m from "motion/react-m";
 import { Theatre, type MenuItem } from "./Theatre";
 import type { GameState } from "../types";
+import { setScreen } from "../lib/report";
 
 /* The theatre plus the cross-fade between screens. Each owner (the
    pass-the-phone App, a room's host screen, a phone in a room) keys its
@@ -11,6 +12,8 @@ export function Stage({ screenKey, meta, game, onHome, onEnd, onAbout, menu, asi
   screenKey: string; meta: string; game: GameState | null; onHome: () => void; onEnd: () => void; onAbout?: () => void;
   menu?: MenuItem[]; aside?: ReactNode; wide?: boolean; onShown?: () => void; children: ReactNode;
 }){
+  // Set while rendering, not in an effect: a screen that crashes on its first render never runs one.
+  setScreen(screenKey);
   useEffect(() => { window.scrollTo(0, 0); }, [screenKey]);
   return (
     <LazyMotion features={domAnimation} strict>

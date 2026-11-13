@@ -4,6 +4,7 @@ import * as m from "motion/react-m";
 import { LADDER } from "../lib/config";
 import { markLandingSeen } from "../lib/save";
 import { LANG_IDS, langsLabel } from "../lib/languages";
+import { setScreen } from "../lib/report";
 import type { Play } from "../types";
 import s from "./Landing.module.css";
 
@@ -18,6 +19,7 @@ const rise = (i: number) => ({
 
 /* What the game is, shown on a first visit and from the About button. */
 export function Landing({ onStart, onJoin }: { onStart: (play: Play) => void; onJoin: () => void }){
+  setScreen("landing");
   useEffect(() => { markLandingSeen(); window.scrollTo(0, 0); }, []);
   return (
     <LazyMotion features={domAnimation} strict>
