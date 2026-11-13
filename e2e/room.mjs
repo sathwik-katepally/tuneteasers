@@ -632,12 +632,16 @@ try {
           await sleep(ROOM_DEAD_CLIP_MS + 1500);
           if (song().cue !== cue || !(await note.isVisible())) fail(`the host skipped more than ${ROOM_DEAD_CLIP_SKIPS} dead songs in a row by itself`);
           // The tap lands while the link is down, and the link stays down past
-          // the next song's countdown. The room still holds the dead song under
-          // this number, and must be given the new one before buzzing opens.
+          // the next song's countdown, into its first clip. The room still holds
+          // the dead song under this number, and must be given the new one
+          // before buzzing opens.
+          const had = await clips();
           await host.link.cut(true);
           await host.page.getByText("Reconnecting to the room").waitFor();
           await host.page.getByRole("button", { name: "Skip this song" }).click();
-          await sleep(4000);
+          // Not the dead song's note, which fades out with its screen.
+          await note.waitFor({ state: "hidden" });
+          await until("the next song's first clip, started while the link was down", () => clipSince(had));
           await host.link.cut(false);
         }
         await until(`dead song ${k + 1} skipped`, () => song().cue !== cue);
