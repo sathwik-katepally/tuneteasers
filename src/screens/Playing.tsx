@@ -89,7 +89,7 @@ export function Playing({ name, track, phase, turn, note, onPlay, onJudge, onHin
             <Lightbulb size={15} strokeWidth={2.5} /> {turn.hints >= hints.length ? "No more hints" : `Hint ${turn.hints + 1} of ${hints.length}, costs ${HINT_PENALTY}`}
           </button>
           {stealing && !note.includes("Skip it")
-            ? passTo && <button type="button" className={s.link} onClick={() => onJudge("wrong")} disabled={cueing}>Nobody knows it</button>
+            ? passTo && <button type="button" className={s.link} onClick={() => onJudge("wrong")}>Nobody knows it</button>
             : <button type="button" className={s.link} onClick={onSkip}>Skip this song</button>}
         </div>
       </div>

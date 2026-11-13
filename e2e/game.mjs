@@ -91,7 +91,7 @@ try {
 
   await page.route(u => u.host === DEAD_HOST, r => r.abort("connectionrefused"));
   let langTurns = 0;
-  let turns = 0, extended = false, hinted = false, resumed = false, deadStreams = 0, heard = null, deadSkip = null;
+  let turns = 0, extended = false, hinted = false, resumed = false, deadStreams = 0, heard = null, deadSkip = null, nobodyCued = false;
   const expectMode = A.difficulty === "easy" ? ["plain"] : ["snip", "plain"];
   for (let guard = 0; guard < 80; guard++){
     const handover = page.getByRole("button", { name: /^It's with me|roll it$/ });
@@ -271,6 +271,20 @@ try {
         scorer = next;
         if (pass === "steal") break;
         if (!taken.has("06b-stealing")) await shot("06b-stealing", 300);
+        if (pass === "nobody" && !nobodyCued && await btn("Nobody knows it").count()){
+          // A stealer whose replay is stuck on a stream too slow to start can still end the song.
+          nobodyCued = true;
+          await page.evaluate(() => {
+            const P = HTMLMediaElement.prototype, real = P.play;
+            window.__ttStall = true;
+            P.play = function(){ return window.__ttStall ? new Promise(() => {}) : real.call(this); };
+          });
+          await btn("Replay").click();
+          await page.getByText("Threading the film").waitFor();
+          if (await btn("Nobody knows it").isDisabled()) fail("Nobody knows it locked while a slow clip is cueing");
+          await page.evaluate(() => { window.__ttStall = false; });
+          break;
+        }
       }
       if (pass === "nobody" && scorer.id === g0.cast[g0.turn].id && g0.cast.length > 1) fail("nobody pass never left the contestant");
     }

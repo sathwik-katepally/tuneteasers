@@ -372,10 +372,17 @@ const SFX = {
   fanfare: (c, out, t) => { [523, 659, 784, 1047].forEach((f, i) => tone(c, out, t + i * 0.12, { type: "triangle", from: f, dur: i === 3 ? 0.7 : 0.2, vol: 0.14 })); },
 };
 
-let wakeLock = null;
+let wakeLock = null, wakeWanted = false;
 export async function keepAwake(on){
+  wakeWanted = on;
   try {
-    if (on && "wakeLock" in navigator) wakeLock = await navigator.wakeLock.request("screen");
+    if (on && "wakeLock" in navigator){
+      const lock = await navigator.wakeLock.request("screen");
+      // An off can land while the request is pending.
+      if (!wakeWanted){ lock.release(); return; }
+      wakeLock?.release();
+      wakeLock = lock;
+    }
     else if (!on && wakeLock){ wakeLock.release(); wakeLock = null; }
   } catch(e){}
 }
