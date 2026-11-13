@@ -47,6 +47,7 @@ const DIST = path.resolve(import.meta.dirname, "../dist");
 const MIME = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".json": "application/json", ".woff2": "font/woff2", ".woff": "font/woff", ".svg": "image/svg+xml", ".png": "image/png" };
 
 export function serve(){
+  if (process.env.E2E_URL) return Promise.resolve({ url: process.env.E2E_URL.replace(/\/?$/, "/"), close(){} });
   return new Promise(resolve => {
     const srv = http.createServer((q, s) => {
       let f = path.join(DIST, decodeURIComponent(q.url.split("?")[0]));
