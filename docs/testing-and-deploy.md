@@ -49,7 +49,7 @@ Package scripts: `npm run e2e:game -- --profile=desktop`, `e2e:categories`, `e2e
 Phone WebKit on macOS plays the default show and a teams show in Hindi With singing, desktop Chromium on Linux the default show and one in Telugu, and the room runs on Linux in Playwright's Docker image.
 `E2E_URL=<site>` makes `serve()` hand back that URL instead of serving `dist/`, which is how that workflow points the suites at production.
 `e2e:room` is not in it: its checks read the room state from the frames its socket proxy records, and it floods the room with sockets, which production should not get.
-The room job there is named `buzz room live`, not `buzz room`: a dispatch from a branch reports on that branch's head commit, where `buzz room` is a required check.
+Its jobs are named `game phone live`, `game desktop live` and `buzz room live`: a dispatch from a branch reports on that branch's head commit, where `game phone`, `game desktop` and `buzz room` are required checks.
 A release run is the matrix of `game.mjs` over both profiles, both modes, both difficulties and all three language mixes (not every combination, but each value at least once per profile), one `--reduced` run, one `--no-worker` run, one `--no-saavn` Easy run, one `--categories=item` and one `--categories=mass` run, plus the other scripts.
 Playback modes asserted are `snip | plain` (`window.__ttLastMode`); Easy must report `plain`, while Medium must report `snip` or show a safe-clip shortage.
 Gotchas: screens cross-fade out through `AnimatePresence`, so after a click wait for the old button to detach before looking for the next screen; seed localStorage from a non-app page on the same origin (`/seed.html` 404s, which is fine) so the app's own first save cannot race the seeding.

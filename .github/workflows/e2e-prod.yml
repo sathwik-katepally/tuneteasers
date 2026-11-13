@@ -13,6 +13,8 @@ permissions:
 env:
   E2E_URL: https://sathwik-katepally.github.io/tuneteasers/
 
+# Job names end in "live": a dispatch from a branch reports on the branch's
+# head commit, where e2e.yml's names are required checks.
 jobs:
   game:
     name: ${{ matrix.name }}
@@ -22,13 +24,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: game phone
+          - name: game phone live
             os: macos-latest
             browsers: webkit
             run: >-
               npm run e2e:game -- --profile=phone &&
               npm run e2e:game -- --profile=phone --mode=teams --mix=hindi --difficulty=easy
-          - name: game desktop
+          - name: game desktop live
             os: ubuntu-latest
             browsers: chromium
             run: >-
@@ -54,8 +56,6 @@ jobs:
       - id: v
         run: echo "version=$(node -p 'require("./package-lock.json").packages["node_modules/playwright"].version')" >> "$GITHUB_OUTPUT"
 
-  # Not named "buzz room": a dispatch from a branch reports on the branch's
-  # head commit, where that name is a required check of e2e.yml.
   room:
     name: buzz room live
     needs: playwright-image
