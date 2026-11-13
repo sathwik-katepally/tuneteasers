@@ -9,10 +9,13 @@
    It also has the first contestant skip a song (title on screen, same
    contestant, nothing recorded), skip the next one while its clip is still
    cueing on a stream too slow to start, and forces one dead stream to check
-   the skip after a stream error moves on the same way and records nothing. */
+   the skip after a stream error moves on the same way and records nothing.
+   A later song's stream answers 404 with no CORS header, as Saavn's CDN does
+   for a song it has lost: the game offers its skip and the browser's CORS
+   error is no page error, while the same 404 from the Worker still is one. */
 import fs from "node:fs";
 import path from "node:path";
-import { serve, open, args, saved, moreSettings, pickLangs, countsSettled } from "./harness.mjs";
+import { serve, open, args, saved, moreSettings, pickLangs, countsSettled, WORKER_HOST } from "./harness.mjs";
 import { displayTitle, songKey } from "../src/lib/utils.js";
 import { SAAVN_BASES } from "../src/lib/constants.js";
 import { CATEGORIES, DIFFICULTY, HINT_PENALTY, SPEED_BONUS_FADE_SECS, SPEED_BONUS_MAX } from "../src/lib/config.ts";
@@ -45,6 +48,10 @@ const btn = name => page.getByRole("button", { name });
 const fail = msg => { throw new Error(msg); };
 const songHistory = () => page.evaluate(() => JSON.parse(localStorage.getItem("tt_played") || "{}"));
 const DEAD_HOST = "dead-stream.invalid";
+/* Playwright adds an Access-Control-Allow-Origin that admits the page to any
+   fulfilled cross-origin response without one, so a header naming another
+   origin stands in for the missing one: the browser rejects both alike. */
+const noCors404 = route => route.fulfill({ status: 404, headers: { "access-control-allow-origin": "https://elsewhere.invalid" }, body: "" });
 
 let exit = 0;
 try {
@@ -56,6 +63,12 @@ try {
   await page.goto(url);
   await page.evaluate(() => localStorage.clear());
   await page.goto(url);
+  const probe = `https://${WORKER_HOST}/e2e-no-cors`;
+  await page.route(u => u.href === probe, noCors404);
+  const seen = errors.length;
+  await page.evaluate(u => fetch(u).catch(() => {}), probe);
+  if (!errors.slice(seen).some(e => /Access-Control-Allow-Origin|CORS policy/.test(e))) fail(`a Worker 404 without CORS was not a page error (recorded: ${errors.slice(seen).join(" | ") || "nothing"})`);
+  errors.splice(seen);
   await page.getByRole("radio", { name: A.mode === "teams" ? "Teams" : "Players" }).click();
   await pickLangs(page, langLabels(A.mix));
   await moreSettings(page);
@@ -91,7 +104,7 @@ try {
 
   await page.route(u => u.host === DEAD_HOST, r => r.abort("connectionrefused"));
   let langTurns = 0;
-  let turns = 0, extended = false, hinted = false, resumed = false, deadStreams = 0, heard = null, deadSkip = null, nobodyCued = false;
+  let turns = 0, extended = false, hinted = false, resumed = false, deadStreams = 0, heard = null, deadSkip = null, nobodyCued = false, gone = null;
   const expectMode = A.difficulty === "easy" ? ["plain"] : ["snip", "plain"];
   for (let guard = 0; guard < 80; guard++){
     const handover = page.getByRole("button", { name: /^It's with me|roll it$/ });
@@ -120,6 +133,13 @@ try {
       const g = (await saved(page)).game;
       deadSkip = { g, track: g.queue[g.trackIdx], history: await songHistory() };
     }
+    if (turns === 3 && !gone){
+      // The next song is already loading in the background; the one after it has not been asked for.
+      const g = (await saved(page)).game;
+      const stream = g.queue[g.trackIdx + 2]?.stream ?? fail("no song two ahead to answer 404");
+      gone = { stream, skipped: false };
+      await page.route(u => u.href === new URL(stream).href, noCors404);
+    }
     if (A["player-lang"]){
       const g = (await saved(page)).game, c = g.cast[g.turn], t = g.queue[g.trackIdx];
       if (c.lang && t.lang !== c.lang) fail(`${c.name}'s turn plays ${t.lang} ("${t.title}"), not ${c.lang}`);
@@ -145,6 +165,7 @@ try {
         deadStreams++;
         await page.evaluate(() => { window.__ttLastMode = null; });
         const before = (await saved(page)).game;
+        if (before.queue[before.trackIdx].stream === gone?.stream) gone.skipped = true;
         await skipBtn.click();
         await page.getByText("Another one").waitFor();
         if (deadSkip && !deadSkip.checked && before.queue[before.trackIdx].stream === deadSkip.track.stream){
@@ -351,6 +372,7 @@ try {
   if (!resumed) fail("home/resume path not exercised");
   if (A["player-lang"] && !langTurns) fail("no turn had a player's own language");
   if (!heard) fail("skip not exercised");
+  if (!gone?.skipped) fail("the stream that answered 404 without CORS never offered its skip");
   if (g.history.some(h => h.song === displayTitle(heard.title))) fail("skipped song was played later in the show");
   if (categories.length){
     const corpus = JSON.parse(fs.readFileSync(new URL("../dist/corpus.json", import.meta.url), "utf8"));
