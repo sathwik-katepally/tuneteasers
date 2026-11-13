@@ -33,6 +33,7 @@ jobs:
       - run: npm run build
         env:
           CF_WEB_ANALYTICS_TOKEN: ${{ vars.CF_WEB_ANALYTICS_TOKEN }}
+          SENTRY_DSN: ${{ vars.SENTRY_DSN }}
       - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v5
         with:
