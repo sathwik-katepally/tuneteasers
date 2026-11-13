@@ -26,7 +26,8 @@
     "e2e:room-background": "node e2e/room-background.mjs",
     "e2e:room-live": "node e2e/room-live.mjs",
     "e2e:landing": "node --experimental-strip-types e2e/landing.mjs",
-    "e2e:journeys": "node e2e/journeys.mjs"
+    "e2e:journeys": "node e2e/journeys.mjs",
+    "e2e:reporting": "node e2e/reporting.mjs"
   },
   "dependencies": {
     "@fontsource/mukta": "^5.3.0",
