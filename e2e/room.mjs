@@ -144,6 +144,15 @@ async function currentTitle(){
   const s = await hostShow();
   return s.queue[s.idx].title;
 }
+/* A message the host sends twice passes every wait in this script: a second
+   `song` is only a new cue, a second `clip` only opens buzzing again. So the
+   host's frames are counted: one `start` for each show begun, one `end` for
+   each show over, and one `song` for each cue the room has handed out. */
+function toldOnce(begun, over){
+  const sent = t => traffic.host.filter(f => f.dir === "out" && JSON.parse(f.data).t === t).length;
+  if (sent("start") !== begun || sent("end") !== over) fail(`the host sent ${sent("start")} start and ${sent("end")} end frames for ${begun} shows begun and ${over} over`);
+  if (sent("song") !== song().cue) fail(`the host sent ${sent("song")} song frames, and the room is on cue ${song().cue}`);
+}
 // A wrong guess comes from the public list and is never a song in this show:
 // a guess is echoed to every phone, and the secrecy check must only catch the
 // room leaking titles, not a player saying one.
@@ -742,6 +751,7 @@ try {
   const refused = await host.page.evaluate(() => Number(sessionStorage.getItem("tt_e2e_blocked") || 0));
   if (refused) fail(`${refused} plays on the big screen were refused under the iOS autoplay rule`);
   await until("room over", () => hostState().phase === "over");
+  toldOnce(1, 1);
   await shot(host, "host-10-podium");
 
   // Podium, room and phones agree.
@@ -820,6 +830,7 @@ try {
   await until("buzz answered", async () => { await host.page.waitForTimeout(0); return song().answering === idOf("Meena"); });
 
   if (overflow.length) fail("screens scroll at this size: " + overflow.join(", "));
+  toldOnce(2, 1);
   await guards(code, (await hostShow()).host, show.total);
   const errors = all.flatMap(d => d.errors);
   if (errors.length) fail("page errors:\n" + errors.join("\n"));
