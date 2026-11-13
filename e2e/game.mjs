@@ -65,10 +65,11 @@ try {
   await page.goto(url);
   const probe = `https://${WORKER_HOST}/e2e-no-cors`;
   await page.route(u => u.href === probe, noCors404);
-  const seen = errors.length;
+  const seen = errors.length, corsError = /Access-Control-Allow-Origin|CORS policy/;
   await page.evaluate(u => fetch(u).catch(() => {}), probe);
-  if (!errors.slice(seen).some(e => /Access-Control-Allow-Origin|CORS policy/.test(e))) fail(`a Worker 404 without CORS was not a page error (recorded: ${errors.slice(seen).join(" | ") || "nothing"})`);
-  errors.splice(seen);
+  const probed = errors.splice(seen);
+  if (!probed.some(e => corsError.test(e))) fail(`a Worker 404 without CORS was not a page error (recorded: ${probed.join(" | ") || "nothing"})`);
+  errors.push(...probed.filter(e => !corsError.test(e) && !e.includes(probe)));
   await page.getByRole("radio", { name: A.mode === "teams" ? "Teams" : "Players" }).click();
   await pickLangs(page, langLabels(A.mix));
   await moreSettings(page);
