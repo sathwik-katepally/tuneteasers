@@ -9,6 +9,7 @@ import { App } from "./app";
 import { Crashed } from "./components/Crashed";
 import { DebugLog } from "./components/DebugLog";
 import { log, errMsg } from "./lib/log.js";
+import { reportCrash, startReporting } from "./lib/report";
 
 // A "boot" with no preceding "pagehide" means the last page instance died
 // without a clean exit (crash / jetsam kill / forced reload).
@@ -18,6 +19,7 @@ log("boot", { ua: navigator.userAgent.replace(/^Mozilla\/5\.0 /, "").slice(0, 80
 
 // The debug overlay stays outside the boundary, so the log can still be opened after a crash.
 createRoot(document.getElementById("root")!).render(<>
-  <ErrorBoundary fallback={<Crashed />} onError={e => log("js-error", { msg: errMsg(e) })}><App /></ErrorBoundary>
+  <ErrorBoundary fallback={<Crashed />} onError={e => { log("js-error", { msg: errMsg(e) }); reportCrash(e); }}><App /></ErrorBoundary>
   <DebugLog />
 </>);
+startReporting();

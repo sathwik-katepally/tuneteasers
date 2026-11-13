@@ -44,7 +44,12 @@ CI runners (`CI` set) skip the lock.
   The host's reveal must credit the points each answer pad promised, then the host ends the show from its menu and both phones show the final screen.
   It makes exactly one room and nothing more (no floods, no limit probes, no phone group), since `e2e-prod.yml` runs it against production.
 
-Package scripts: `npm run e2e:game -- --profile=desktop`, `e2e:categories`, `e2e:ladder`, `e2e:migrate`, `e2e:autoplay`, `e2e:offline`, `e2e:snips`, `e2e:group`, `e2e:group-edge`, `e2e:room`, `e2e:room-norepeat`, `e2e:room-background`, `e2e:room-live`, `e2e:landing`, `e2e:journeys`.
+- `e2e/reporting.mjs` (`npm run e2e:reporting -- --profile=phone|desktop`) - error reporting (see Error reporting below), on two builds.
+  `dist/`, built without a DSN, must hold no SDK and make no request that looks like Sentry's while an uncaught error, a thrown string, an unhandled rejection, a render crash and a dead stream happen.
+  The suite then builds once more with a made-up DSN (on a host that never resolves) and a seeded save, opens a `#join=` invite link and a `#room=` link, and forces the same errors with a message that holds the invite, the room code, a stream URL, a Worker URL, a player name and a song title; the thrown string holds the name and the title without quotes.
+  Each must arrive at the intercepted Sentry host with exactly the scrubbed message (the thrown string with none of its text) and its screen, four dead streams must send three reports, and every request must hold the allowlisted keys only and none of the secrets, no URL at all included.
+
+Package scripts: `npm run e2e:game -- --profile=desktop`, `e2e:categories`, `e2e:ladder`, `e2e:migrate`, `e2e:autoplay`, `e2e:offline`, `e2e:snips`, `e2e:group`, `e2e:group-edge`, `e2e:room`, `e2e:room-norepeat`, `e2e:room-background`, `e2e:room-live`, `e2e:landing`, `e2e:journeys`, `e2e:reporting`.
 `gh workflow run e2e-prod.yml` runs `e2e:game` and `e2e:room-live` against the live site instead of `dist/` (`.github/workflows/e2e-prod.yml`, on demand only).
 Phone WebKit on macOS plays the default show and a teams show in Hindi With singing, desktop Chromium on Linux the default show and one in Telugu, and the room runs on Linux in Playwright's Docker image.
 `E2E_URL=<site>` makes `serve()` hand back that URL instead of serving `dist/`, which is how that workflow points the suites at production.
@@ -56,13 +61,14 @@ Gotchas: screens cross-fade out through `AnimatePresence`, so after a click wait
 
 ### E2E in CI
 
-`.github/workflows/e2e.yml` runs the key suites on every pull request, on every push to main, nightly (02:30 UTC) and on demand, one job per suite in parallel (about 3-5 minutes wall clock): a pass-the-phone game on each profile, safe-snips on each profile, the desktop ladder, the buzz room and the group sync against a local `wrangler dev`, and the landing and journeys suites.
+`.github/workflows/e2e.yml` runs the key suites on every pull request, on every push to main, nightly (02:30 UTC) and on demand, one job per suite in parallel (about 3-5 minutes wall clock): a pass-the-phone game on each profile, safe-snips on each profile, the desktop ladder, the buzz room and the group sync against a local `wrangler dev`, the landing and journeys suites, and error reporting.
 `.github/workflows/e2e-release.yml` runs the rest of the release matrix above on pushes to main, nightly (02:30 UTC) and on demand, and alerts through ntfy when it fails; category games play Easy there, since in Music-only the item and mass chips are too thin to pick.
 The shared steps (deps, build, Playwright browsers cached per version) are in `.github/actions/e2e-setup`.
 The suites play real songs from the corpus through the deployed Worker and the Saavn CDN; the song draw is random, so recorded responses would rarely match a run and are not used.
 
 main's ruleset requires `verify` and seven of the `e2e.yml` jobs before a pull request merges: `game phone`, `game desktop`, `safe snips phone`, `safe snips desktop`, `ladder desktop`, `landing and journeys` and `buzz room`.
 `group sync` runs on every pull request but is not required: its "waiting to sync" wait timed out on two data-only commits on main (2026-10-14 and 2026-11-03).
+`error reporting` runs on every pull request too and is not in the ruleset yet.
 A required job that never reports blocks every merge, so the `pull_request` trigger of `e2e.yml` takes no path or branch filter, and a job renamed or removed there is renamed or removed in the ruleset first (`gh api repos/sathwik-katepally/tuneteasers/rulesets`).
 
 Which runner a suite gets is decided by where its browser plays these AAC/MP4 streams in real time, measured on the runners in September 2026:
@@ -175,3 +181,57 @@ The `cloudflareBeacon` plugin in `vite.config.js` injects the Cloudflare Web Ana
 Local builds have no token and ship no beacon.
 The token is public by design (every visitor can read it out of the HTML), which is why it is a variable and not a secret.
 The site is registered in the dashboard under the hostname `sathwik-katepally.github.io` (https://dash.cloudflare.com/?to=/:account/web-analytics); the `/tuneteasers/` path is covered.
+
+### Error reporting
+
+A crash or a run of dead streams on someone else's phone reaches the owner by email through Sentry, sent by the maintained `@sentry/browser` SDK.
+It is off until the build has a DSN: `vite.config.js` bakes the `SENTRY_DSN` environment variable into the build, and `deploy.yml` feeds it from the repo variable of the same name.
+With no DSN (local builds, the builds the E2E suites test, and production until the variable is set) the SDK is not in the build at all, so nothing is loaded or sent.
+With one, `src/lib/report.ts` downloads `src/lib/sentry.ts` and the SDK as a chunk of their own (58 kB, 20 kB gzipped) after the first render.
+
+What is reported: a render crash (the error boundary in `src/main.tsx`), an uncaught error, an unhandled promise rejection, and a stream that fails to play (the `element-fail` and `snip-fail` log entries, as warnings).
+A page load sends at most 10 events, at most 3 of them stream failures, so a dead CDN or an error in a loop cannot use up the month's quota.
+
+An event holds only:
+
+- the error's type and its message, scrubbed (below); for a stream failure the log entry's name and its error code;
+- the stack trace: per frame the built asset's name (`assets/index-<hash>.js`, anything else reads `other`), the function name, the line and the column;
+- the build's commit SHA (`GITHUB_SHA` at build time) as the release;
+- the browser's User-Agent string, which Sentry reads the browser and the OS from;
+- the current screen's name (`setup`, `playing`, `join`, ...) as the `screen` tag;
+- the last 30 debug-log entries, cut down to the entry names and the number, flag and fixed-word fields listed in `LOG_FIELDS` in `src/lib/sentry.ts`;
+- what delivery needs: an event id, a timestamp, the level, and the SDK's name and version.
+
+Never sent:
+
+- the page URL in any form (address, hash, query, referrer), so neither a `#join=` invite nor a `#room=` code;
+- breadcrumbs: console output, fetch and XHR URLs (stream and Worker URLs pass through those), clicks, navigation;
+- a user, a cookie or an IP address;
+- player, team and group names, song titles, artists and stream URLs;
+- anything from localStorage other than those debug-log fields;
+- sessions, traces, replays and feedback.
+
+This is an allowlist, enforced in two places in `src/lib/sentry.ts`.
+`beforeSend` drops the event the SDK made and builds a new one from the fields above, so nothing a later SDK version starts to collect can ride along.
+The transport then refuses every envelope that is not exactly one such rebuilt event, which covers what the SDK sends past `beforeSend` (sessions, client reports, its own internal errors).
+The client is made by hand with one integration (`globalHandlersIntegration`), so the breadcrumb, page-URL, session, tracing, replay and feedback code is not in the chunk.
+`dataCollection: { userInfo: false }` (the SDK's replacement for `sendDefaultPii`, which version 11 removed) makes it send `infer_ip: "never"`, which tells Sentry not to take the IP address from the connection.
+
+An error message is free text and cannot be allowlisted, so it is scrubbed.
+Everything from the first quote on is dropped, since engines quote the data they choked on.
+URLs, `#x=` and `?x=` pairs, tokens of 20 characters or more (an invite, a seat key) and any word of four capitals (a room code, and `JSON` with it) are replaced.
+A thrown or rejected value that is not an Error (a string, or an object whose keys the SDK would list) has its text replaced whole.
+What the scrub cannot catch is a name or a title written without quotes into an Error's own message; nothing in the app does that, and browsers quote the data in theirs.
+A debug-log entry or field added later is not sent until it is listed in `LOG_FIELDS`; list only numbers, flags and fixed words there.
+`e2e/reporting.mjs` checks all of this on every pull request.
+
+To turn it on:
+
+1. Create a free Sentry account and a project of the platform "Browser JavaScript" (https://sentry.io/signup/), choosing to be alerted about new issues; the SDK setup steps it shows can be skipped.
+2. In the project's settings, under Security & Privacy, turn on the setting that prevents storing IP addresses and leave data scrubbing on (a second lock; the app already asks for no IP).
+3. Copy the DSN from the project's settings (Client Keys) and set it as a repo variable: `gh variable set SENTRY_DSN --repo sathwik-katepally/tuneteasers --body <dsn>`.
+   Like the analytics token, a DSN is public by design (it ships in the JavaScript), so it is a variable and not a secret.
+4. Deploy: `gh workflow run deploy.yml`, or the next push to main.
+5. Check that an alert emails you: Sentry's Alerts page lists the rule, and User Settings, Notifications has the address.
+
+To turn it off, delete the variable (`gh variable delete SENTRY_DSN --repo sathwik-katepally/tuneteasers`) and deploy again.

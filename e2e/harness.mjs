@@ -46,11 +46,11 @@ if (!process.env.CI) await suiteLock();
 const DIST = path.resolve(import.meta.dirname, "../dist");
 const MIME = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".json": "application/json", ".woff2": "font/woff2", ".woff": "font/woff", ".svg": "image/svg+xml", ".png": "image/png" };
 
-export function serve(){
+export function serve(dir = DIST){
   if (process.env.E2E_URL) return Promise.resolve({ url: process.env.E2E_URL.replace(/\/?$/, "/"), close(){} });
   return new Promise(resolve => {
     const srv = http.createServer((q, s) => {
-      let f = path.join(DIST, decodeURIComponent(q.url.split("?")[0]));
+      let f = path.join(dir, decodeURIComponent(q.url.split("?")[0]));
       if (f.endsWith("/")) f += "index.html";
       fs.readFile(f, (e, d) => {
         if (e){ s.writeHead(404, { "content-type": "text/plain" }); return s.end("Not found"); }

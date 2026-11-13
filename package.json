@@ -26,11 +26,13 @@
     "e2e:room-background": "node e2e/room-background.mjs",
     "e2e:room-live": "node e2e/room-live.mjs",
     "e2e:landing": "node --experimental-strip-types e2e/landing.mjs",
-    "e2e:journeys": "node e2e/journeys.mjs"
+    "e2e:journeys": "node e2e/journeys.mjs",
+    "e2e:reporting": "node e2e/reporting.mjs"
   },
   "dependencies": {
     "@fontsource/mukta": "^5.3.0",
     "@fontsource/rozha-one": "^5.3.0",
+    "@sentry/browser": "^11.12.0",
     "lucide-react": "^1.48.0",
     "motion": "^13.4.4",
     "partysocket": "^1.3.0",
