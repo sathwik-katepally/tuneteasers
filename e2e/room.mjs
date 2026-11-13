@@ -12,8 +12,11 @@
    - a phone that reloads mid-show keeps its seat and score,
    - a first clip whose stream is dead is skipped by the host itself, up to
      two songs in a row,
-   - the host's link dropping does not stall the show: the clip after a miss
-     waits for it, and a reveal and the end of the show go out once it is back,
+   - the host's link dropping does not stall the show or change what the room
+     judges: the clip after a miss waits for it, and what the room missed
+     goes out once it is back (a song cued in the gap and its clip, a reveal,
+     the song after a skip the host made in the gap, buzzing after a wrong
+     answer the host never saw, the end of the show, the start of the next),
    - the podium matches the room, and every phone's final place does too,
    - skips: two votes of three do not skip, the third does, the host can
      skip on its own as often as it likes, votes close once someone buzzes,
@@ -628,7 +631,14 @@ try {
         if (k === ROOM_DEAD_CLIP_SKIPS){
           await sleep(ROOM_DEAD_CLIP_MS + 1500);
           if (song().cue !== cue || !(await note.isVisible())) fail(`the host skipped more than ${ROOM_DEAD_CLIP_SKIPS} dead songs in a row by itself`);
+          // The tap lands while the link is down, and the link stays down past
+          // the next song's countdown. The room still holds the dead song under
+          // this number, and must be given the new one before buzzing opens.
+          await host.link.cut(true);
+          await host.page.getByText("Reconnecting to the room").waitFor();
           await host.page.getByRole("button", { name: "Skip this song" }).click();
+          await sleep(4000);
+          await host.link.cut(false);
         }
         await until(`dead song ${k + 1} skipped`, () => song().cue !== cue);
         // The old screen fades out with its note still on it.
@@ -701,6 +711,7 @@ try {
     }
     await answer(p, displayTitle(await currentTitle()));
     await revealed(n);
+    if (n === 8 && song().winner !== idOf(p.label)) fail("after a skip while the link was down, the room judged song 8 against another title");
   }
   // The host reloads on the final reveal: it comes back to that reveal and the
   // end of the show, not a 13th song.
