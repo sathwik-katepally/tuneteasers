@@ -10,6 +10,7 @@
    - nobody knowing carries the clip ladder on (manual and automatic),
    - the answer timer runs out, and everyone locked out reveals the song,
    - a phone that reloads mid-show keeps its seat and score,
+   - a first clip whose stream is dead is skipped by the host itself,
    - the host's link dropping does not stall the show: the clip after a miss
      waits for it, and a reveal and the end of the show go out once it is back,
    - the podium matches the room, and every phone's final place does too,
@@ -30,6 +31,7 @@ import { LANGUAGES, isFilmLang } from "../src/lib/languages.ts";
 
 const A = args({ difficulty: "easy" });
 const CLIP_POINTS = LADDER.points;
+const DEAD_STREAM = "https://dead-stream.invalid/gone.mp4";
 const categories = A.categories ? A.categories.split(",") : [];
 const shotsDir = A.shots && A.shots !== "true" ? A.shots : null;
 if (shotsDir) fs.mkdirSync(shotsDir, { recursive: true });
@@ -83,6 +85,7 @@ async function device(kind, label){
   await context.addInitScript(silence);
   await context.addInitScript(skipLanding);
   if (kind === "host") await context.addInitScript(iosAutoplay);
+  if (kind === "host") await context.route(u => u.host === new URL(DEAD_STREAM).host, r => r.abort("connectionrefused"));
   // Counts what actually reached the page, to tell a lost frame from an app bug.
   await context.addInitScript(() => {
     const W = window.WebSocket;
@@ -596,6 +599,16 @@ try {
   };
   for (let n = 5; n <= show.total; n++){
     await nextSong(n);
+    if (n === 8){
+      // The stream seeded at the reload never starts. The song is still in
+      // cue, where no phone can vote to skip it, so the host skips it by itself.
+      const cue = song().cue, skips = hostState().skips;
+      await host.page.getByText(/won't stream right now|isn't available/).waitFor({ timeout: 30000 });
+      await until("the host skipping a dead first clip by itself", () => song().cue !== cue);
+      const s = await hostShow();
+      if (s.songNo !== 7 || s.queue[s.idx - 1].stream !== DEAD_STREAM) fail("the dead song was not swapped for the next one in the queue");
+      if (hostState().skips !== skips) fail("a dead stream counted as a skip in the room");
+    }
     await live(n, 0);
     if (n === 6){
       // The link is down when the host taps "Reveal it": the reveal reaches the room once it is back.
@@ -618,6 +631,12 @@ try {
       const title = displayTitle(await currentTitle());
       const before = scoreOf(p.label);
       await reloadHost();
+      // A stream that dies: seeded into the saved queue as the next song.
+      await host.page.evaluate(stream => {
+        const s = JSON.parse(localStorage.getItem("tt_room_host"));
+        s.queue[s.idx + 1].stream = stream;
+        localStorage.setItem("tt_room_host", JSON.stringify(s));
+      }, DEAD_STREAM);
       await answer(p, title);
       // The host's socket is gone, so this reads what the phone was told.
       await until("song 7 scored while the host was away", () => latest[p.label]?.song?.n === 7 && latest[p.label].song.state === "revealed");

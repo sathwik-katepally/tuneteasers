@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { DIFFICULTY, LADDER, ROOM_ANSWER_SECS, ROOM_AUTO_SECS, ROOM_FILM_SHARE, ROOM_GRACE_SECS, ROOM_SONGS_PER_ROUND, ROOM_WRONG_BEAT_MS, hookOffset } from "../lib/config";
+import { DIFFICULTY, LADDER, ROOM_ANSWER_SECS, ROOM_AUTO_SECS, ROOM_DEAD_CLIP_MS, ROOM_FILM_SHARE, ROOM_GRACE_SECS, ROOM_SONGS_PER_ROUND, ROOM_WRONG_BEAT_MS, hookOffset } from "../lib/config";
 import { nearTitles } from "../lib/answer.js";
 import { useClipPlayer } from "../lib/ladder";
 import { answerTitles, buildCrate, halfAnswer, withFreshAt, type AnswerEntry } from "../lib/crate";
@@ -39,6 +39,7 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
   const [revealed, setRevealed] = useState<Revealed | null>(null);
   const [wrong, setWrong] = useState<{ name: string; text: string; timeout: boolean; at: number } | null>(null);
   const [skipped, setSkipped] = useState("");
+  const [dead, setDead] = useState(false);
 
   const setShow = (s: HostShow | null) => { setShowState(s); saveHostShow(s); };
   const room = useRoom(show?.code ?? "", show ? { t: "host", token: show.host } : null);
@@ -51,6 +52,7 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
     setStatus: s => setAudio(a => (s === "playing" && a === "blocked" ? a : s)),
     onStarted: rung => room.send({ t: "clip", rung, points: ladder.points[rung] }),
     onEnded: () => setGraceUntil(Date.now() + ROOM_GRACE_SECS * 1000),
+    onFailed: rung => { if (rung === 0) setDead(true); },
   });
   const { turn: clip, note, setNote } = player;
 
@@ -189,6 +191,7 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
   function playClip(rung: number, replay = false){
     if (!live.current.track) return;
     gaveUp.current = 0;
+    setDead(false);
     setGraceUntil(null);
     setPhase("song");
     void player.play(rung, replay);
@@ -353,6 +356,16 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
     engine.prime(next.queue[next.idx], next.plain);
     toCountdown(skippedTitle);
   }
+
+  /* A first clip that never started leaves the song in `cue`: nobody heard
+     it and no phone can vote to skip it, so after a beat to read the note
+     the host skips it by itself. Not while the link is down: an offline host
+     fails every stream, and the skips would run through the whole queue. */
+  useEffect(() => {
+    if (!dead || phase !== "song" || room.link !== "open") return;
+    const id = window.setTimeout(skipSong, ROOM_DEAD_CLIP_MS);
+    return () => window.clearTimeout(id);
+  }, [dead, phase, room.link]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* A skip decided by the room (every phone voted, or the host's own tap):
      song n is cued again with the next track, and nothing is recorded.
