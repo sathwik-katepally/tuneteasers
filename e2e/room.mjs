@@ -12,8 +12,12 @@
    - a phone that reloads mid-show keeps its seat and score,
    - a first clip whose stream is dead is skipped by the host itself, up to
      two songs in a row,
-   - the host's link dropping does not stall the show: the clip after a miss
-     waits for it, and a reveal and the end of the show go out once it is back,
+   - the host's link dropping does not stall the show or change what the room
+     judges: the clip after a miss waits for it, and what the room missed
+     goes out once it is back (a song cued in the gap and its clip, a reveal,
+     the song after a skip the host made in the gap, buzzing after a wrong
+     answer the host never saw, the end of the show, the start of the next,
+     and the end of a show whose podium has already started the next one),
    - the podium matches the room, and every phone's final place does too,
    - skips: two votes of three do not skip, the third does, the host can
      skip on its own as often as it likes, votes close once someone buzzes,
@@ -141,6 +145,19 @@ async function currentTitle(){
   const s = await hostShow();
   return s.queue[s.idx].title;
 }
+/* A message the host sends twice passes every wait in this script: a second
+   `song` is only a new cue, a second `clip` only opens buzzing again. So the
+   host's frames are counted: one `start` for each show begun, one `end` for
+   each show over, and one `song` for each track the host has cued. The tracks
+   come from the host's own place in its queue, not from the room's cue id,
+   which a second `song` moves on as well; the cue id only shows that the room
+   took every one of them. */
+function toldOnce(begun, over, tracks){
+  const sent = t => traffic.host.filter(f => f.dir === "out" && JSON.parse(f.data).t === t).length;
+  if (sent("start") !== begun || sent("end") !== over) fail(`the host sent ${sent("start")} start and ${sent("end")} end frames for ${begun} shows begun and ${over} over`);
+  if (sent("song") !== tracks) fail(`the host sent ${sent("song")} song frames for ${tracks} tracks cued`);
+  if (sent("song") !== song().cue) fail(`the host sent ${sent("song")} song frames, and the room is on cue ${song().cue}`);
+}
 // A wrong guess comes from the public list and is never a song in this show:
 // a guess is echoed to every phone, and the secrecy check must only catch the
 // room leaking titles, not a player saying one.
@@ -158,8 +175,9 @@ async function wrongTitle(){
 const buzzBtn = p => p.page.locator('button[aria-label="Buzz"]');
 // A tap that lands just as buzzing closes (the song was revealed) is rightly
 // ignored, so a buzz counts once the room has the phone in its queue.
-async function buzz(p){
-  const inRoom = () => { const s = song(), id = idOf(p.label); return s && (s.answering === id || s.queue.includes(id)); };
+// While the host's link is down its view stands still, and `view` reads the phone's own.
+async function buzz(p, view = hostState){
+  const inRoom = () => { const s = view()?.song, id = idOf(p.label); return s && (s.answering === id || s.queue.includes(id)); };
   const t0 = Date.now();
   for (;;){
     if (inRoom()) return;
@@ -465,7 +483,9 @@ try {
   // The host's Wi-Fi drops through the beat after the miss. The next clip
   // waits for the link: played into the gap, the room would never hear of it
   // and would sit on the miss.
-  const clips = () => host.page.evaluate(() => window.__ttClips.length);
+  const clips = () => host.page.evaluate(() => window.__ttClips?.length ?? 0);
+  // A first clip the host started while its link was down, or the note of a stream that never started.
+  const clipSince = async n => (await clips()) > n || await host.page.getByText(/won't stream right now|isn't available/).first().isVisible();
   const played = await clips();
   await host.link.cut(true);
   await sleep(ROOM_WRONG_BEAT_MS + 1500);
@@ -603,6 +623,14 @@ try {
     await host.page.getByText("Buzz-in show in progress").waitFor();
   };
   for (let n = 5; n <= show.total; n++){
+    if (n === 10){
+      // The link drops on song 9's reveal and stays down through the countdown
+      // and into the first clip: the room hears of the song and its clip once it is back.
+      const had = await clips();
+      await host.link.cut(true);
+      await until("song 10's first clip, started while the link was down", () => clipSince(had), (ROOM_AUTO_SECS.reveal + 20) * 1000);
+      await host.link.cut(false);
+    }
     await nextSong(n);
     if (n === 8){
       // The streams seeded at the reload never start. Each song is still in
@@ -617,7 +645,18 @@ try {
         if (k === ROOM_DEAD_CLIP_SKIPS){
           await sleep(ROOM_DEAD_CLIP_MS + 1500);
           if (song().cue !== cue || !(await note.isVisible())) fail(`the host skipped more than ${ROOM_DEAD_CLIP_SKIPS} dead songs in a row by itself`);
+          // The tap lands while the link is down, and the link stays down past
+          // the next song's countdown, into its first clip. The room still holds
+          // the dead song under this number, and must be given the new one
+          // before buzzing opens.
+          const had = await clips();
+          await host.link.cut(true);
+          await host.page.getByText("Reconnecting to the room").waitFor();
           await host.page.getByRole("button", { name: "Skip this song" }).click();
+          // Not the dead song's note, which fades out with its screen.
+          await note.waitFor({ state: "hidden" });
+          await until("the next song's first clip, started while the link was down", () => clipSince(had));
+          await host.link.cut(false);
         }
         await until(`dead song ${k + 1} skipped`, () => song().cue !== cue);
         // The old screen fades out with its note still on it.
@@ -640,6 +679,30 @@ try {
       continue;
     }
     const p = phones[n % 3];
+    if (n === 9){
+      // A phone buzzes and answers wrong while the host's link is down and the
+      // clip still plays, so the host never pauses for the answer. Back on the
+      // link it finds the room on a miss with its own clip still running:
+      // buzzing must open again and the show carry on by itself from there.
+      // The last rung played again is the longest clip, which leaves the time.
+      const anyone = () => host.page.getByText(/^Anyone\?/).isVisible();
+      await until("first clip over", anyone);
+      await more.click();
+      await live(n, 1);
+      await until("second clip over", anyone);
+      await host.page.getByRole("button", { name: "Play it again" }).click();
+      await host.page.getByText("Buzz when you know it").waitFor();
+      await host.link.cut(true);
+      await buzz(p, () => latest[p.label]);
+      await answer(p, await wrongTitle());
+      await until("the miss, as the phone sees it", () => latest[p.label].song.state === "missed");
+      // An answer that outlasted the clip would pass below without the case this song is here for.
+      if (!(await host.page.getByText("Buzz when you know it").isVisible())) fail("song 9's clip ended before the wrong answer was in, so the host's link came back to no running clip");
+      await host.link.cut(false);
+      await revealed(n);
+      if (song().winner !== null || !song().guesses.some(g => g.id === idOf(p.label) && !g.ok)) fail("song 9 did not end on the wrong answer given while the host's link was down");
+      continue;
+    }
     await buzz(p);
     if (n === 7){
       // The host screen reloads while a phone is answering, and the phone gets
@@ -668,6 +731,7 @@ try {
     }
     await answer(p, displayTitle(await currentTitle()));
     await revealed(n);
+    if (n === 8 && song().winner !== idOf(p.label)) fail("after a skip while the link was down, the room judged song 8 against another title");
   }
   // The host reloads on the final reveal: it comes back to that reveal and the
   // end of the show, not a 13th song.
@@ -692,6 +756,9 @@ try {
   const refused = await host.page.evaluate(() => Number(sessionStorage.getItem("tt_e2e_blocked") || 0));
   if (refused) fail(`${refused} plays on the big screen were refused under the iOS autoplay rule`);
   await until("room over", () => hostState().phase === "over");
+  // After the last reveal the host's place in its queue is the number of tracks it cued: every song and every skip moved it on by one.
+  const cuedFirst = (await hostShow()).idx;
+  toldOnce(1, 1, cuedFirst);
   await shot(host, "host-10-podium");
 
   // Podium, room and phones agree.
@@ -751,10 +818,53 @@ try {
   }
   if (!frames) fail("recorded no phone traffic");
 
-  // Same crowd again restarts the room with scores at zero.
+  // Same crowd again restarts the room with scores at zero. The host's link is
+  // down while the crate loads, through the countdown and into the first clip:
+  // the room hears of the new show, its first song and the clip once it is back.
+  const beforeAgain = await clips();
+  await host.link.cut(true);
   await host.page.getByRole("button", { name: "Same crowd again" }).click();
+  await until("the second show's first clip, started while the link was down", () => clipSince(beforeAgain), 60000);
+  await host.link.cut(false);
   await until("second show live", () => hostState().phase === "show" && song()?.n === 1 && song().state === "live", 60000);
   if (hostState().players.some(p => p.score !== 0)) fail("scores not reset for the next show");
+
+  // The link is down from the second show's final reveal, through its box
+  // office and podium, until "Same crowd again" has the third show's first
+  // clip playing. Back on the link the room is still in the second show, so
+  // its end goes out inside the third show's song, and must end the show
+  // before, not the one playing. The second show is one song long: its saved
+  // queue is cut at a reload, and a show whose queue runs out ends this way.
+  // (The first show's ending needs the room over while the podium is up, to
+  // check the phones' places.)
+  {
+    const cue = song().cue;
+    await reloadHost();
+    await host.page.evaluate(() => {
+      const s = JSON.parse(localStorage.getItem("tt_room_host"));
+      s.queue = s.queue.slice(0, s.idx + 1);
+      localStorage.setItem("tt_room_host", JSON.stringify(s));
+    });
+    await host.page.getByRole("button", { name: "Resume" }).click();
+    await until("the second show's song cued again after the reload", () => song().cue > cue);
+    await live(1, 0);
+    await buzz(ravi);
+    await answer(ravi, displayTitle(await currentTitle()));
+    await revealed(1);
+    await host.page.getByRole("button", { name: "Final box office" }).waitFor();
+    const had = await clips(), from = traffic.host.length;
+    await host.link.cut(true);
+    await host.page.getByRole("button", { name: "Same crowd again" }).click({ timeout: (ROOM_AUTO_SECS.reveal + ROOM_AUTO_SECS.board + 10) * 1000 });
+    await until("the third show's first clip, started while the link was down", () => clipSince(had), 60000);
+    await host.link.cut(false);
+    await until("third show live", () => hostState().phase === "show" && !hostState().results.length && song()?.n === 1 && song().state === "live", 60000);
+    const got = traffic.host.slice(from).filter(f => f.dir === "in").map(f => JSON.parse(f.data));
+    const refusal = got.find(m => m.t === "error");
+    if (refusal) fail(`the room refused the host with ${refusal.code} after a gap from the final box office to the next show`);
+    const over = got.find(m => m.t === "state" && m.phase === "over");
+    if (over?.results.length !== 1) fail("the second show was not over in the room, with its one result, before the third began");
+    if (hostState().players.some(p => p.score !== 0)) fail("scores not reset for the third show");
+  }
   await asha.page.locator('button[aria-label="Buzz"]').waitFor({ timeout: 15000 });
   // A new show has its skips back; votes close for everyone once someone buzzes.
   if (hostState().skips !== 0) fail("skips not reset for the next show");
@@ -764,6 +874,8 @@ try {
   await until("buzz answered", async () => { await host.page.waitForTimeout(0); return song().answering === idOf("Meena"); });
 
   if (overflow.length) fail("screens scroll at this size: " + overflow.join(", "));
+  // The second show cued its one track twice (the reload started the song over), the third has cued one so far.
+  toldOnce(3, 2, cuedFirst + 2 + 1);
   await guards(code, (await hostShow()).host, show.total);
   const errors = all.flatMap(d => d.errors);
   if (errors.length) fail("page errors:\n" + errors.join("\n"));
