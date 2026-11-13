@@ -10,7 +10,8 @@
    - nobody knowing carries the clip ladder on (manual and automatic),
    - the answer timer runs out, and everyone locked out reveals the song,
    - a phone that reloads mid-show keeps its seat and score,
-   - a first clip whose stream is dead is skipped by the host itself,
+   - a first clip whose stream is dead is skipped by the host itself, up to
+     two songs in a row,
    - the host's link dropping does not stall the show: the clip after a miss
      waits for it, and a reveal and the end of the show go out once it is back,
    - the podium matches the room, and every phone's final place does too,
@@ -25,7 +26,7 @@ import path from "node:path";
 import { chromium, webkit, devices } from "playwright";
 import { serve, args, localWorker, silence, skipLanding, moreSettings, pickLangs, wireWorker, MUTE_ARGS, roomFields, sentStrings } from "./harness.mjs";
 import { displayTitle } from "../src/lib/utils.js";
-import { CATEGORIES, DIFFICULTY, LADDER, ROOM_ANSWER_SECS, ROOM_AUTO_SECS, ROOM_FILM_SHARE, ROOM_WRONG_BEAT_MS } from "../src/lib/config.ts";
+import { CATEGORIES, DIFFICULTY, LADDER, ROOM_ANSWER_SECS, ROOM_AUTO_SECS, ROOM_DEAD_CLIP_MS, ROOM_DEAD_CLIP_SKIPS, ROOM_FILM_SHARE, ROOM_WRONG_BEAT_MS } from "../src/lib/config.ts";
 import { songKey } from "../src/lib/utils.js";
 import { LANGUAGES, isFilmLang } from "../src/lib/languages.ts";
 
@@ -464,8 +465,11 @@ try {
   // The host's Wi-Fi drops through the beat after the miss. The next clip
   // waits for the link: played into the gap, the room would never hear of it
   // and would sit on the miss.
+  const clips = () => host.page.evaluate(() => window.__ttClips.length);
+  const played = await clips();
   await host.link.cut(true);
   await sleep(ROOM_WRONG_BEAT_MS + 1500);
+  if ((await clips()) !== played) fail("the host played the next clip while its link was down");
   await host.link.cut(false);
   await live(2, after);
   await shot(meena, "phone-10-out-next-rung");
@@ -601,13 +605,26 @@ try {
   for (let n = 5; n <= show.total; n++){
     await nextSong(n);
     if (n === 8){
-      // The stream seeded at the reload never starts. The song is still in
-      // cue, where no phone can vote to skip it, so the host skips it by itself.
-      const cue = song().cue, skips = hostState().skips;
-      await host.page.getByText(/won't stream right now|isn't available/).waitFor({ timeout: 30000 });
-      await until("the host skipping a dead first clip by itself", () => song().cue !== cue);
+      // The streams seeded at the reload never start. Each song is still in
+      // cue, where no phone can vote to skip it, so the host skips it by
+      // itself. It stops at the third in a row and waits for a tap: a dead CDN
+      // would otherwise run through the whole queue.
+      const note = host.page.getByText(/won't stream right now|isn't available/);
+      const skips = hostState().skips;
+      for (let k = 0; k <= ROOM_DEAD_CLIP_SKIPS; k++){
+        const cue = song().cue;
+        await note.waitFor({ timeout: 30000 });
+        if (k === ROOM_DEAD_CLIP_SKIPS){
+          await sleep(ROOM_DEAD_CLIP_MS + 1500);
+          if (song().cue !== cue || !(await note.isVisible())) fail(`the host skipped more than ${ROOM_DEAD_CLIP_SKIPS} dead songs in a row by itself`);
+          await host.page.getByRole("button", { name: "Skip this song" }).click();
+        }
+        await until(`dead song ${k + 1} skipped`, () => song().cue !== cue);
+        // The old screen fades out with its note still on it.
+        await note.waitFor({ state: "hidden" });
+      }
       const s = await hostShow();
-      if (s.songNo !== 7 || s.queue[s.idx - 1].stream !== DEAD_STREAM) fail("the dead song was not swapped for the next one in the queue");
+      if (s.songNo !== 7 || s.queue.slice(s.idx - ROOM_DEAD_CLIP_SKIPS - 1, s.idx).some(t => t.stream !== DEAD_STREAM)) fail("the dead songs were not swapped for the next one in the queue");
       if (hostState().skips !== skips) fail("a dead stream counted as a skip in the room");
     }
     await live(n, 0);
@@ -632,12 +649,12 @@ try {
       const title = displayTitle(await currentTitle());
       const before = scoreOf(p.label);
       await reloadHost();
-      // A stream that dies: seeded into the saved queue as the next song.
-      await host.page.evaluate(stream => {
+      // Streams that die: seeded into the saved queue as the next songs, one more than the host skips by itself.
+      await host.page.evaluate(({ stream, songs }) => {
         const s = JSON.parse(localStorage.getItem("tt_room_host"));
-        s.queue[s.idx + 1].stream = stream;
+        for (const t of s.queue.slice(s.idx + 1, s.idx + 1 + songs)) t.stream = stream;
         localStorage.setItem("tt_room_host", JSON.stringify(s));
-      }, DEAD_STREAM);
+      }, { stream: DEAD_STREAM, songs: ROOM_DEAD_CLIP_SKIPS + 1 });
       await answer(p, title);
       // The host's socket is gone, so this reads what the phone was told.
       await until("song 7 scored while the host was away", () => latest[p.label]?.song?.n === 7 && latest[p.label].song.state === "revealed");

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { DIFFICULTY, LADDER, ROOM_ANSWER_SECS, ROOM_AUTO_SECS, ROOM_DEAD_CLIP_MS, ROOM_FILM_SHARE, ROOM_GRACE_SECS, ROOM_SONGS_PER_ROUND, ROOM_WRONG_BEAT_MS, hookOffset } from "../lib/config";
+import { DIFFICULTY, LADDER, ROOM_ANSWER_SECS, ROOM_AUTO_SECS, ROOM_DEAD_CLIP_MS, ROOM_DEAD_CLIP_SKIPS, ROOM_FILM_SHARE, ROOM_GRACE_SECS, ROOM_SONGS_PER_ROUND, ROOM_WRONG_BEAT_MS, hookOffset } from "../lib/config";
 import { nearTitles } from "../lib/answer.js";
 import { useClipPlayer } from "../lib/ladder";
 import { answerTitles, buildCrate, halfAnswer, withFreshAt, type AnswerEntry } from "../lib/crate";
@@ -40,6 +40,8 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
   const [wrong, setWrong] = useState<{ name: string; text: string; timeout: boolean; at: number } | null>(null);
   const [skipped, setSkipped] = useState("");
   const [dead, setDead] = useState(false);
+  // First clips in a row that never started: past the limit the host waits for a tap, or a dead CDN would run through the queue.
+  const deadRun = useRef(0);
 
   const setShow = (s: HostShow | null) => { setShowState(s); saveHostShow(s); };
   const room = useRoom(show?.code ?? "", show ? { t: "host", token: show.host } : null);
@@ -50,9 +52,10 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
   const ladder = LADDER;
   const player = useClipPlayer({ track, plain,
     setStatus: s => setAudio(a => (s === "playing" && a === "blocked" ? a : s)),
-    onStarted: rung => room.send({ t: "clip", rung, points: ladder.points[rung] }),
+    // A stream the engine gave up on can still start late; a song that plays is not skipped.
+    onStarted: rung => { deadRun.current = 0; setDead(false); room.send({ t: "clip", rung, points: ladder.points[rung] }); },
     onEnded: () => setGraceUntil(Date.now() + ROOM_GRACE_SECS * 1000),
-    onFailed: rung => { if (rung === 0) setDead(true); },
+    onFailed: rung => { if (rung === 0 && deadRun.current++ < ROOM_DEAD_CLIP_SKIPS) setDead(true); },
   });
   const { turn: clip, note, setNote } = player;
 
