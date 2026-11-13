@@ -82,13 +82,15 @@ const exception = (x: Exception, text: boolean): Exception => ({
 });
 
 const rebuilt = new WeakSet<object>();
+// The stream messages this file writes itself, out of allowlisted words.
+const own = new Set<string>();
 let events = 0;
 
 function rebuild(event: ErrorEvent, hint: EventHint): ErrorEvent | null {
   if (++events > MAX_EVENTS) return null;
-  // For a thrown or rejected value that is not an Error the SDK writes the text itself, out of the value (a string, an object's keys).
+  // A thrown or rejected value that is not an Error is the text (a string) or the SDK writes one out of it (an object's keys), so none of it is kept.
   const thrown = hint.originalException;
-  const text = thrown === undefined || thrown instanceof Error || thrown === event.message;
+  const text = thrown === undefined || thrown instanceof Error || (typeof thrown === "string" && own.has(thrown));
   const out: ErrorEvent = {
     type: undefined,
     event_id: word(event.event_id, /^[0-9a-f]{32}$/, "") || undefined,
@@ -96,7 +98,7 @@ function rebuild(event: ErrorEvent, hint: EventHint): ErrorEvent | null {
     platform: "javascript",
     level: event.level === "warning" ? "warning" : "error",
     release: __BUILD_SHA__,
-    ...(event.message ? { message: scrub(event.message) } : {}),
+    ...(event.message ? { message: text ? scrub(event.message) : "[not an Error]" } : {}),
     ...(event.exception?.values ? { exception: { values: event.exception.values.slice(0, 3).map(x => exception(x, text)) } } : {}),
     tags: { screen: /^[a-z]+/.exec(screenName())?.[0] ?? "none" },
     extra: { log: logTail() },
@@ -139,5 +141,7 @@ client.init();
 let streamReports = 0;
 onLog((e: { tag: string; err?: unknown }) => {
   if ((e.tag !== "element-fail" && e.tag !== "snip-fail") || ++streamReports > MAX_STREAM_REPORTS) return;
-  captureMessage(`stream ${e.tag}${plain(e.err) ? ` ${e.err}` : ""}`, "warning");
+  const message = `stream ${e.tag}${plain(e.err) ? ` ${e.err}` : ""}`;
+  own.add(message);
+  captureMessage(message, "warning");
 });

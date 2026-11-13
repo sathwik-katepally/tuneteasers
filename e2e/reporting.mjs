@@ -1,10 +1,10 @@
 /* Error reporting (docs/testing-and-deploy.md, Error reporting). The build
    CI tests has no DSN: it must hold no SDK and never call Sentry, whatever
    goes wrong. A second build with a made-up DSN must report an uncaught
-   error, an unhandled rejection, a render crash and dead streams (capped per
-   page load), and every request must hold the allowlisted fields only: no
-   group invite, room code, URL, name, title or saved data, although the
-   forced errors carry all of them.
+   error, a thrown string, an unhandled rejection, a render crash and dead
+   streams (capped per page load), and every request must hold the
+   allowlisted fields only: no group invite, room code, URL, name, title or
+   saved data, although the forced errors carry all of them.
    Usage: node e2e/reporting.mjs [--profile=phone|desktop] */
 import fs from "node:fs";
 import os from "node:os";
@@ -36,6 +36,8 @@ const SAVE = {
 // One message with everything an event must never hold, and what must be left of it.
 const LEAKY = `boom at https://${DEAD_HOST}/private/clip-9.mp4 and https://${WORKER_HOST}/api/songs?ids=1 with #join=${INVITE} in room ${ROOM}, invite ${INVITE}, '${NAMES[0]}' "Hidden Title 1"`;
 const SCRUBBED = "boom at [url] and [url] with [param] in room [code], invite [token], [cut]";
+// A thrown string has no quotes for the scrub to cut at, so none of it may be sent.
+const THROWN = `${NAMES[0]} sang Hidden Title 1`;
 const SECRETS = [INVITE, ...INVITE.split("."), ROOM, "join=", "room=", DEAD_HOST, "clip-", WORKER_HOST, "saavn", "localhost", "Hidden Title", "Quiet Singer", ...NAMES, "tuneteasers_v7"];
 
 const results = [];
@@ -70,8 +72,8 @@ async function visit(dir){
 const events = sent => sent.map(s => JSON.parse(s.body.split("\n")[2]));
 const inline = (page, code) => page.addScriptTag({ content: code });
 
-/* An invite link, then a room link, with an uncaught error, an unhandled
-   rejection and a render crash on the way. `reported` waits for each event. */
+/* An invite link, then a room link, with an uncaught error, a thrown string,
+   an unhandled rejection and a render crash on the way. `reported` waits for each event. */
 async function crashes(v, reported){
   const { page, url } = v;
   await page.goto(url + "seed.html");
@@ -83,17 +85,19 @@ async function crashes(v, reported){
   else await page.waitForTimeout(1000);
   await inline(page, `setTimeout(() => { throw new Error(${JSON.stringify(LEAKY)}); })`);
   if (reported) await reported(1);
+  await inline(page, `setTimeout(() => { throw ${JSON.stringify(THROWN)}; })`);
+  if (reported) await reported(2);
 
   await page.evaluate(code => { location.hash = "#room=" + code; }, ROOM);
   await page.getByLabel(`Room code ${ROOM}`).waitFor();
   await inline(page, `Promise.reject(new Error(${JSON.stringify(LEAKY)}))`);
-  if (reported) await reported(2);
+  if (reported) await reported(3);
 
   // Every screen change scrolls to the top in an effect, so this crashes the next screen inside React.
   await page.evaluate(m => { window.scrollTo = () => { throw new Error(m); }; }, LEAKY);
   await page.getByRole("button", { name: "Back to the start", exact: true }).click();
   await page.getByRole("heading", { name: "Something went wrong" }).waitFor();
-  if (reported) await reported(3);
+  if (reported) await reported(4);
 }
 
 /* The saved game's streams are all dead: resume it and skip on from each one. */
@@ -132,19 +136,20 @@ execFileSync("npx", ["vite", "build", "--outDir", built, "--emptyOutDir", "--log
 const v = await visit(built);
 try {
   let crashed = [], streams = [];
-  await check("an uncaught error, an unhandled rejection and a render crash are each reported", async () => {
+  await check("an uncaught error, a thrown string, an unhandled rejection and a render crash are each reported", async () => {
     await crashes(v, n => until(() => v.sent.length >= n, `report ${n}`));
     await v.page.waitForTimeout(500);
     crashed = events(v.sent);
-    expect(crashed.length === 3, `${crashed.length} events, not 3`);
+    expect(crashed.length === 4, `${crashed.length} events, not 4`);
     const got = crashed.map(e => `${e.exception?.values?.[0]?.mechanism?.type} on ${e.tags?.screen}`);
-    const want = ["auto.browser.global_handlers.onerror on group", "auto.browser.global_handlers.onunhandledrejection on join", "generic on setup"];
+    const want = ["auto.browser.global_handlers.onerror on group", "auto.browser.global_handlers.onerror on group", "auto.browser.global_handlers.onunhandledrejection on join", "generic on setup"];
     expect(JSON.stringify(got) === JSON.stringify(want), `got ${JSON.stringify(got)}`);
   });
 
   await check("error messages are scrubbed, and stack frames name built assets only", async () => {
     const values = crashed.map(e => e.exception.values[0]);
-    for (const x of values) expect(x.type === "Error" && x.value === SCRUBBED, `value ${JSON.stringify(x.value)}`);
+    values.forEach((x, i) => expect(x.type === "Error" && x.value === (i === 1 ? "[not an Error]" : SCRUBBED), `value ${JSON.stringify(x.value)}`));
+    expect(crashed[1].message === undefined || crashed[1].message === "[not an Error]", `thrown string's message ${JSON.stringify(crashed[1].message)}`);
     const files = values.flatMap(x => x.stacktrace?.frames ?? []).map(f => f.filename);
     expect(files.length > 0, "no stack frames at all");
     expect(files.every(f => f === "other" || /^assets\/[\w.-]+\.js$/.test(f)), `frame files ${JSON.stringify([...new Set(files)])}`);
@@ -167,7 +172,7 @@ try {
   });
 
   await check("every request holds the allowlisted fields only", async () => {
-    expect(v.sent.length === 6, `${v.sent.length} requests, not 6`);
+    expect(v.sent.length === 7, `${v.sent.length} requests, not 7`);
     const keys = (o, allowed, what) => { const extra = Object.keys(o).filter(k => !allowed.includes(k)); expect(!extra.length, `${what} also has ${extra}`); };
     for (const s of v.sent){
       const lines = s.body.split("\n");

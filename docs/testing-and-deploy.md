@@ -45,9 +45,9 @@ CI runners (`CI` set) skip the lock.
   It makes exactly one room and nothing more (no floods, no limit probes, no phone group), since `e2e-prod.yml` runs it against production.
 
 - `e2e/reporting.mjs` (`npm run e2e:reporting -- --profile=phone|desktop`) - error reporting (see Error reporting below), on two builds.
-  `dist/`, built without a DSN, must hold no SDK and make no request that looks like Sentry's while an uncaught error, an unhandled rejection, a render crash and a dead stream happen.
-  The suite then builds once more with a made-up DSN (on a host that never resolves) and a seeded save, opens a `#join=` invite link and a `#room=` link, and forces the same three errors with a message that holds the invite, the room code, a stream URL, a Worker URL, a player name and a song title.
-  Each must arrive at the intercepted Sentry host with exactly the scrubbed message and its screen, four dead streams must send three reports, and every request must hold the allowlisted keys only and none of the secrets, no URL at all included.
+  `dist/`, built without a DSN, must hold no SDK and make no request that looks like Sentry's while an uncaught error, a thrown string, an unhandled rejection, a render crash and a dead stream happen.
+  The suite then builds once more with a made-up DSN (on a host that never resolves) and a seeded save, opens a `#join=` invite link and a `#room=` link, and forces the same errors with a message that holds the invite, the room code, a stream URL, a Worker URL, a player name and a song title; the thrown string holds the name and the title without quotes.
+  Each must arrive at the intercepted Sentry host with exactly the scrubbed message (the thrown string with none of its text) and its screen, four dead streams must send three reports, and every request must hold the allowlisted keys only and none of the secrets, no URL at all included.
 
 Package scripts: `npm run e2e:game -- --profile=desktop`, `e2e:categories`, `e2e:ladder`, `e2e:migrate`, `e2e:autoplay`, `e2e:offline`, `e2e:snips`, `e2e:group`, `e2e:group-edge`, `e2e:room`, `e2e:room-norepeat`, `e2e:room-background`, `e2e:room-live`, `e2e:landing`, `e2e:journeys`, `e2e:reporting`.
 `gh workflow run e2e-prod.yml` runs `e2e:game` and `e2e:room-live` against the live site instead of `dist/` (`.github/workflows/e2e-prod.yml`, on demand only).
@@ -212,7 +212,7 @@ The client is made by hand with one integration (`globalHandlersIntegration`), s
 An error message is free text and cannot be allowlisted, so it is scrubbed.
 Everything from the first quote on is dropped, since engines quote the data they choked on.
 URLs, `#x=` and `?x=` pairs, tokens of 20 characters or more (an invite, a seat key) and any word of four capitals (a room code, and `JSON` with it) are replaced.
-A message the SDK writes itself out of a thrown value that is not an Error (a string, an object's keys) is replaced whole.
+A thrown or rejected value that is not an Error (a string, or an object whose keys the SDK would list) has its text replaced whole.
 What the scrub cannot catch is a name or a title written without quotes into an Error's own message; nothing in the app does that, and browsers quote the data in theirs.
 A debug-log entry or field added later is not sent until it is listed in `LOG_FIELDS`; list only numbers, flags and fixed words there.
 `e2e/reporting.mjs` checks all of this on every pull request.
