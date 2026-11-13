@@ -16,7 +16,8 @@
      judges: the clip after a miss waits for it, and what the room missed
      goes out once it is back (a song cued in the gap and its clip, a reveal,
      the song after a skip the host made in the gap, buzzing after a wrong
-     answer the host never saw, the end of the show, the start of the next),
+     answer the host never saw, the end of the show, the start of the next,
+     and the end of a show whose podium has already started the next one),
    - the podium matches the room, and every phone's final place does too,
    - skips: two votes of three do not skip, the third does, the host can
      skip on its own as often as it likes, votes close once someone buzzes,
@@ -821,6 +822,43 @@ try {
   await host.link.cut(false);
   await until("second show live", () => hostState().phase === "show" && song()?.n === 1 && song().state === "live", 60000);
   if (hostState().players.some(p => p.score !== 0)) fail("scores not reset for the next show");
+
+  // The link is down from the second show's final reveal, through its box
+  // office and podium, until "Same crowd again" has the third show's first
+  // clip playing. Back on the link the room is still in the second show, so
+  // its end goes out inside the third show's song, and must end the show
+  // before, not the one playing. The second show is one song long: its saved
+  // queue is cut at a reload, and a show whose queue runs out ends this way.
+  // (The first show's ending needs the room over while the podium is up, to
+  // check the phones' places.)
+  {
+    const cue = song().cue;
+    await reloadHost();
+    await host.page.evaluate(() => {
+      const s = JSON.parse(localStorage.getItem("tt_room_host"));
+      s.queue = s.queue.slice(0, s.idx + 1);
+      localStorage.setItem("tt_room_host", JSON.stringify(s));
+    });
+    await host.page.getByRole("button", { name: "Resume" }).click();
+    await until("the second show's song cued again after the reload", () => song().cue > cue);
+    await live(1, 0);
+    await buzz(ravi);
+    await answer(ravi, displayTitle(await currentTitle()));
+    await revealed(1);
+    await host.page.getByRole("button", { name: "Final box office" }).waitFor();
+    const had = await clips(), from = traffic.host.length;
+    await host.link.cut(true);
+    await host.page.getByRole("button", { name: "Same crowd again" }).click({ timeout: (ROOM_AUTO_SECS.reveal + ROOM_AUTO_SECS.board + 10) * 1000 });
+    await until("the third show's first clip, started while the link was down", () => clipSince(had), 60000);
+    await host.link.cut(false);
+    await until("third show live", () => hostState().phase === "show" && !hostState().results.length && song()?.n === 1 && song().state === "live", 60000);
+    const got = traffic.host.slice(from).filter(f => f.dir === "in").map(f => JSON.parse(f.data));
+    const refusal = got.find(m => m.t === "error");
+    if (refusal) fail(`the room refused the host with ${refusal.code} after a gap from the final box office to the next show`);
+    const over = got.find(m => m.t === "state" && m.phase === "over");
+    if (over?.results.length !== 1) fail("the second show was not over in the room, with its one result, before the third began");
+    if (hostState().players.some(p => p.score !== 0)) fail("scores not reset for the third show");
+  }
   await asha.page.locator('button[aria-label="Buzz"]').waitFor({ timeout: 15000 });
   // A new show has its skips back; votes close for everyone once someone buzzes.
   if (hostState().skips !== 0) fail("skips not reset for the next show");
@@ -830,7 +868,7 @@ try {
   await until("buzz answered", async () => { await host.page.waitForTimeout(0); return song().answering === idOf("Meena"); });
 
   if (overflow.length) fail("screens scroll at this size: " + overflow.join(", "));
-  toldOnce(2, 1);
+  toldOnce(3, 2);
   await guards(code, (await hostShow()).host, show.total);
   const errors = all.flatMap(d => d.errors);
   if (errors.length) fail("page errors:\n" + errors.join("\n"));
