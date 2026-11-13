@@ -140,3 +140,67 @@
   color: var(--cream-shade);
   text-align: center;
 }
+
+/* From 8 players a column of full rows runs off a 1080p screen, so the rows
+   tighten; from 11 they also split into two columns, ranked down each, so a
+   room of 24 fits. In two columns the round's gains are left to the reels
+   below. */
+.rows:has(> :nth-child(8)) {
+  gap: 4px;
+}
+
+.rows:has(> :nth-child(8)) > .row {
+  --cell-w: 14px;
+  --cell-h: 20px;
+  --cell-font: 15px;
+  padding: 2px 6px;
+}
+
+.rows:has(> :nth-child(8)) .rank {
+  font-size: 17px;
+}
+
+.rows:has(> :nth-child(11)) {
+  display: block;
+  columns: 2;
+  column-gap: 8px;
+}
+
+.rows:has(> :nth-child(11)) > .row {
+  grid-template-columns: 18px 1fr auto;
+  gap: 6px;
+  padding: 2px 4px;
+  margin-bottom: 4px;
+  break-inside: avoid;
+}
+
+.rows:has(> :nth-child(11)) .name {
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+
+.rows:has(> :nth-child(11)) .delta {
+  display: none;
+}
+
+@media (min-width: 900px) {
+  .rows:has(> :nth-child(8)) > .row {
+    --cell-w: 19px;
+    --cell-h: 26px;
+    --cell-font: 20px;
+    padding: 3px 8px 3px 6px;
+  }
+  .rows:has(> :nth-child(8)) .rank {
+    font-size: 22px;
+  }
+  .rows:has(> :nth-child(11)) {
+    column-gap: 10px;
+  }
+  .rows:has(> :nth-child(11)) > .row {
+    grid-template-columns: 28px 1fr auto;
+    padding: 3px 8px 3px 4px;
+  }
+  .rows:has(> :nth-child(11)) .name {
+    font-size: 15px;
+  }
+}

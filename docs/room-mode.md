@@ -15,6 +15,7 @@ Autocomplete offers every known title in the show's languages; if she is right s
 - The host screen (`src/room/Host.tsx`) builds the crate (honouring the home screen's languages, eras, difficulty and song categories), plays audio through the engine, runs the clip ladder, the reveal, the box office and the podium, and tells the room what is playing.
   It reuses the pass-the-phone screens: `Countdown`, `Reveal`, `Scoreboard`, `Podium`, `Loading`, plus `Lobby` and `HostPlaying` in `src/room/`.
   From 900px wide the host screen is laid out for a laptop or TV: the lobby spreads over the whole stage with code tiles and a QR sized from the screen (up to 260px), and during the show a small join tag (QR and code) stays in the corner, since latecomers can still take a seat.
+  With many players the lists tighten so a full room of 24 fits a 1920x1080 screen and a 390x844 phone: from 8 players the box office (shared with pass-the-phone) tightens its rows, and from 11 it splits them into two columns and drops the per-row gain, which the round's reels already show; past 8 a phone's final standings go to two columns and a phone-sized host fits three seats to a row.
 - The room (`worker/src/room.js`) is one Durable Object per room code, built on PartyServer with WebSocket hibernation.
   It is the referee: it orders buzzes as they arrive, runs the answer clock, judges answers and holds the scores.
 - A phone (`src/room/Phone.tsx`) only joins, buzzes and types. It never plays audio.
@@ -188,3 +189,6 @@ It then probes the room directly: a foreign origin, an unclaimed code, a wrong h
 
 `npm run e2e:room-norepeat` (`e2e/room-norepeat.mjs`) seeds three WebKit phones' histories (one over the cap, one with songs still sitting out, one with songs back from their cooldown), then checks what each phone sends, the hours and seat counts the host gets, the room's caps from raw sockets (an oversized join, 400 songs, malformed entries, a history that is not a map, seats leaving the lobby), a crate with none of those songs, a revealed song as played on every phone, a vote-skipped song in nobody's history, a reload and an offline seat keeping their songs, a phone joining mid-show having heard the next song (swapped out), and a second room with a new host screen that leaves out what the first room played.
 Its secrecy scan is the one above, plus every other phone's seeded songs.
+
+`npm run e2e:room-crowd` (`e2e/room-crowd.mjs`) plays a show with 4, 8 and 24 seats (raw sockets for all but one phone) and shoots every screen that lists players at 1920x1080 and 390x844.
+It fails when one of them scrolls (the lobby may, at 390px) or a player is off screen.

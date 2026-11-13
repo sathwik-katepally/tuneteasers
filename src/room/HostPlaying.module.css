@@ -209,3 +209,22 @@
     padding: 4px 8px;
   }
 }
+
+/* A phone hosting more than 8 players: narrower, tighter seats, so a full room of 24 stays on screen under the song. */
+@media (max-width: 899px) {
+  .seats:has(> :nth-child(9)) {
+    grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+    gap: 4px;
+  }
+  .seats:has(> :nth-child(9)) .seat {
+    gap: 6px;
+    padding: 3px 6px;
+  }
+  .seats:has(> :nth-child(9)) .seatName {
+    font-size: 12px;
+    letter-spacing: 0.02em;
+  }
+  .seats:has(> :nth-child(9)) .seatScore {
+    font-size: 15px;
+  }
+}
