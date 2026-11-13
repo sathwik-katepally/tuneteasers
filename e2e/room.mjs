@@ -10,6 +10,8 @@
    - nobody knowing carries the clip ladder on (manual and automatic),
    - the answer timer runs out, and everyone locked out reveals the song,
    - a phone that reloads mid-show keeps its seat and score,
+   - the host's link dropping does not stall the show: the clip after a miss
+     waits for it, and a reveal and the end of the show go out once it is back,
    - the podium matches the room, and every phone's final place does too,
    - skips: two votes of three do not skip, the third does, the host can
      skip on its own as often as it likes, votes close once someone buzzes,
@@ -22,7 +24,7 @@ import path from "node:path";
 import { chromium, webkit, devices } from "playwright";
 import { serve, args, localWorker, silence, skipLanding, moreSettings, pickLangs, wireWorker, MUTE_ARGS, roomFields, sentStrings } from "./harness.mjs";
 import { displayTitle } from "../src/lib/utils.js";
-import { CATEGORIES, DIFFICULTY, LADDER, ROOM_ANSWER_SECS, ROOM_AUTO_SECS, ROOM_FILM_SHARE } from "../src/lib/config.ts";
+import { CATEGORIES, DIFFICULTY, LADDER, ROOM_ANSWER_SECS, ROOM_AUTO_SECS, ROOM_FILM_SHARE, ROOM_WRONG_BEAT_MS } from "../src/lib/config.ts";
 import { songKey } from "../src/lib/utils.js";
 import { LANGUAGES, isFilmLang } from "../src/lib/languages.ts";
 
@@ -77,7 +79,7 @@ async function device(kind, label){
   const context = await browser.newContext(desk
     ? { viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" }
     : { ...devices[A.phone === "se" ? "iPhone SE" : "iPhone 13"], reducedMotion: "reduce" });
-  await wire(context, label);
+  const link = await wire(context, label);
   await context.addInitScript(silence);
   await context.addInitScript(skipLanding);
   if (kind === "host") await context.addInitScript(iosAutoplay);
@@ -103,7 +105,7 @@ async function device(kind, label){
   page.on("console", m => { if (m.text().startsWith("[tt]")) logs.push(m.text()); });
   page.on("pageerror", e => errors.push(`${label}: ${e.message}`));
   page.on("console", m => { if (m.type() === "error" && !/Failed to load resource|net::ERR|WebSocket/.test(m.text())) errors.push(`${label}: ${m.text()}`); });
-  return { label, browser, context, page, errors, logs };
+  return { label, browser, context, page, errors, logs, link };
 }
 
 // Every in-show screen has to fit without scrolling; setup and the lobby may scroll.
@@ -455,6 +457,12 @@ try {
   await answer(meena, await wrongTitle());
   const after = Math.min(2, LADDER.last);
   await until("song 2 missed", () => song().state === "missed" || (after > 1 && song().rung === after));
+  // The host's Wi-Fi drops through the beat after the miss. The next clip
+  // waits for the link: played into the gap, the room would never hear of it
+  // and would sit on the miss.
+  await host.link.cut(true);
+  await sleep(ROOM_WRONG_BEAT_MS + 1500);
+  await host.link.cut(false);
   await live(2, after);
   await shot(meena, "phone-10-out-next-rung");
   await buzz(asha);
@@ -589,6 +597,17 @@ try {
   for (let n = 5; n <= show.total; n++){
     await nextSong(n);
     await live(n, 0);
+    if (n === 6){
+      // The link is down when the host taps "Reveal it": the reveal reaches the room once it is back.
+      await host.link.cut(true);
+      await host.page.getByText("Reconnecting to the room").waitFor();
+      await host.page.getByRole("button", { name: "Reveal it" }).click();
+      await sleep(1000);
+      await host.link.cut(false);
+      await revealed(n);
+      if (song().winner !== null) fail("a reveal sent after a link gap scored for someone");
+      continue;
+    }
     const p = phones[n % 3];
     await buzz(p);
     if (n === 7){
@@ -625,7 +644,12 @@ try {
   await host.page.getByRole("button", { name: "Pause" }).click();
   await sleep((ROOM_AUTO_SECS.reveal + 2) * 1000);
   if (!await host.page.getByRole("button", { name: "Resume" }).isVisible()) fail("the paused reveal moved on");
+  // The link is down when the show ends: the room hears of the end once it is
+  // back, or the phones would never reach their final screen.
+  await host.link.cut(true);
   await host.page.getByRole("button", { name: "Final box office" }).click();
+  await host.page.getByText(/^After round \d+$/).waitFor();
+  await host.link.cut(false);
   await host.page.getByText("Final count").waitFor();
   await host.page.getByRole("button", { name: "Same crowd again" }).waitFor({ timeout: (ROOM_AUTO_SECS.board + 10) * 1000 });
   const refused = await host.page.evaluate(() => Number(sessionStorage.getItem("tt_e2e_blocked") || 0));
