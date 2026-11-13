@@ -1,0 +1,37 @@
+name: E2E production
+
+# The game suite against the live site instead of a local build of dist/, on
+# demand only: gh workflow run e2e-prod.yml. Runners follow e2e.yml: phone
+# WebKit on macOS, desktop Chromium on Linux.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  E2E_URL: https://sathwik-katepally.github.io/tuneteasers/
+
+jobs:
+  game:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: game phone
+            os: macos-latest
+            browsers: webkit
+            run: npm run e2e:game -- --profile=phone
+          - name: game desktop
+            os: ubuntu-latest
+            browsers: chromium
+            run: npm run e2e:game -- --profile=desktop
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/e2e-setup
+        with:
+          browsers: ${{ matrix.browsers }}
+      - run: ${{ matrix.run }}
