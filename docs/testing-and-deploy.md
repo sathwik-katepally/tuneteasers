@@ -13,8 +13,8 @@ Only one suite runs at a time per machine: importing `e2e/harness.mjs` takes a l
 A suite that is killed stops refreshing the lock, and the next one takes it over within a minute.
 CI runners (`CI` set) skip the lock.
 
-- `e2e/game.mjs` - plays a whole show through the UI: setup, hand-over, countdown, clip ladder (one "Hear 7s more"), every hint on one song (each shows and costs its points), Home and Resume mid-turn, the game menu, a right answer, a pass that the next contestant steals for half, a pass round the table that nobody knows (ended by "Nobody knows it" or the last contestant's "I don't know this one"), box office after each round, podium.
-  The first contestant skips a song (the title shows on the countdown, the same contestant gets the next song, nothing lands in `tt_played`, and the skip is offered again on the next song), and a dead stream seeded into the saved queue checks that the skip after a stream error moves on the same way and records nothing.
+- `e2e/game.mjs` - plays a whole show through the UI: setup, hand-over, countdown, clip ladder (one "Hear 7s more"), every hint on one song (each shows and costs its points), Home and Resume mid-turn, the game menu, a right answer, a pass that the next contestant steals for half, a pass round the table that nobody knows (ended by "Nobody knows it" or the last contestant's "I don't know this one"), box office after each round, podium, and a reload on the podium that keeps the final scores until "New show".
+  The first contestant skips a song (the title shows on the countdown, the same contestant gets the next song, nothing lands in `tt_played`), skips the next one while its clip is still cueing (a `play()` that never settles stands in for a stream too slow to start), and finds "Hear 7s more" disabled while a clip plays; a dead stream seeded into the saved queue checks that the skip after a stream error moves on the same way and records nothing.
   It then checks the bookkeeping (every contestant's score equals their history, one history entry per turn, points in range, team members kept), that no page errors were thrown, and that no in-game screen scrolls at that size.
   Flags: `--profile=phone|desktop --mode=players|teams --mix=both|<language ids, comma separated> --difficulty=easy|medium --rounds=3|5|8 --categories=item,mass --player-lang=english --reduced --no-worker --no-saavn --shots=<dir>`; `--player-lang` gives the added player Anu that language and checks every one of Anu's turns plays it; `--categories` picks those chips and checks that the game came from the corpus and every queued song carries one of the tags; `--shots` saves one screenshot per screen for review, and `--no-worker` makes the project's Worker unreachable (songs come from the mirror).
   `--no-saavn` makes the Worker and every mirror in `SAAVN_BASES` unreachable and checks that the crate log line reports `source=catalog`, so an Easy show must play from the baked catalog alone (Music-only cannot: catalog clips carry no verified windows).
@@ -47,10 +47,14 @@ Gotchas: screens cross-fade out through `AnimatePresence`, so after a click wait
 
 ### E2E in CI
 
-`.github/workflows/e2e.yml` runs the key suites on every pull request, on every push to main, nightly (02:30 UTC) and on demand, one job per suite in parallel (about 3-5 minutes wall clock): a pass-the-phone game on each profile, safe-snips and the ladder on each profile, the buzz room and the group sync against a local `wrangler dev`, and the landing and journeys suites.
+`.github/workflows/e2e.yml` runs the key suites on every pull request, on every push to main, nightly (02:30 UTC) and on demand, one job per suite in parallel (about 3-5 minutes wall clock): a pass-the-phone game on each profile, safe-snips on each profile, the desktop ladder, the buzz room and the group sync against a local `wrangler dev`, and the landing and journeys suites.
 `.github/workflows/e2e-release.yml` runs the rest of the release matrix above on pushes to main, nightly (02:30 UTC) and on demand, and alerts Slack `#jobs` when it fails; category games play Easy there, since in Music-only the item and mass chips are too thin to pick.
 The shared steps (deps, build, Playwright browsers cached per version) are in `.github/actions/e2e-setup`.
 The suites play real songs from the corpus through the deployed Worker and the Saavn CDN; the song draw is random, so recorded responses would rarely match a run and are not used.
+
+main's ruleset requires `verify` and seven of the `e2e.yml` jobs before a pull request merges: `game phone`, `game desktop`, `safe snips phone`, `safe snips desktop`, `ladder desktop`, `landing and journeys` and `buzz room`.
+`group sync` runs on every pull request but is not required: its "waiting to sync" wait timed out on two data-only commits on main (2026-10-14 and 2026-11-03).
+A required job that never reports blocks every merge, so the `pull_request` trigger of `e2e.yml` takes no path or branch filter, and a job renamed or removed there is renamed or removed in the ruleset first (`gh api repos/sathwik-katepally/tuneteasers/rulesets`).
 
 Which runner a suite gets is decided by where its browser plays these AAC/MP4 streams in real time, measured on the runners in September 2026:
 - Linux WebKit (GStreamer) cannot resume after a seek once a stream has played: `readyState` stays at 2 while `currentTime` runs on in silence, with local or CDN files, PulseAudio, either AAC decoder and playbin3 alike.
@@ -60,7 +64,8 @@ Which runner a suite gets is decided by where its browser plays these AAC/MP4 st
 - The buzz room runs on Linux: only its desktop host plays audio, and the WebKit phones there only render and send frames.
   Its jobs run in Playwright's Docker image (`mcr.microsoft.com/playwright`, tagged with the Playwright version in `package-lock.json` by a small `playwright-image` job), which ships WebKit's and Chromium's system libraries.
   Installing those from Ubuntu's mirror on every run took 13 to 30 minutes on slow days in October 2026, past the job's time limit.
-- Two checks stay off CI because the 3-core macOS runners are too loaded for them: the phone Easy ladder (its 150ms "Now playing" hand-off check missed by 170-290ms in 2 of 5 runs) and the buzz room with a phone host (4 WebKit pages; a phone's "You're in" timed out in 2 of 3 runs). Run them locally.
+- Two checks stay off the per-PR suites because the 3-core macOS runners are too loaded for them: the phone ladder (its 150ms "Now playing" hand-off check missed by 170-290ms in 2 of 5 Easy runs, and by 160-209ms on Medium in 4 of the 5 failed E2E runs on main in the two weeks to 2026-11-13, all on data-only commits) and the buzz room with a phone host (4 WebKit pages; a phone's "You're in" timed out in 2 of 3 runs).
+  Run them locally: `npm run e2e:ladder -- --profile=phone --difficulty=easy` and `--difficulty=medium`, and `npm run e2e:room -- --host=phone`.
 - A fresh macOS runner indexes its disk for Spotlight for the first minutes (load averages above 20 on 3 cores), which starves the timers the hand-off checks measure; the setup action turns indexing off.
 
 
@@ -93,7 +98,7 @@ Test locally with `npx wrangler d1 migrations apply DB --local && npx wrangler d
 
 ### Landing data commits
 
-main has a ruleset that requires a passing `verify` check, which only a pull request starts, so a push made with the workflow's `GITHUB_TOKEN` is refused (and would start no other workflow if it were not).
+main has a ruleset that requires a passing `verify` check and the key E2E jobs (see E2E in CI), which only a pull request starts, so a push made with the workflow's `GITHUB_TOKEN` is refused (and would start no other workflow if it were not).
 The refresh workflows push with a deploy key instead: a write deploy key on the repo, whose private half is the repo secret `DATA_DEPLOY_KEY` (kept in Automic Vault as `TUNETEASERS_DATA_DEPLOY_KEY`) and which main's ruleset lists as a bypass actor (DeployKey).
 The jobs that commit check out with `actions/checkout@v7`, `ssh-key: ${{ secrets.DATA_DEPLOY_KEY }}` and `fetch-depth: 0`, then run `scripts/push-data-commit.sh <message> <paths...>`, which commits the changed files as github-actions[bot], rebases on the branch tip and pushes to the branch the run came from (three tries, in case another push lands in between).
 A push over the key is an ordinary push to main, so it starts `deploy.yml`, `e2e.yml` and `e2e-release.yml` by itself: the data is deployed and checked by the whole E2E matrix at once.
@@ -106,14 +111,15 @@ The script holds its own iTunes search terms and genre-to-language map, and impo
 
 ## Corpus refresh
 
-The `tuneteasers-corpus` job in the ops repo (`bin/tuneteasers-corpus`, a launchd job on the owner's Mac) runs `scripts/build-corpus.mjs` weekly (Tue 09:00 Stockholm) from its own clone of main, and lands a changed `public/corpus.json` as a PR that merges itself once `verify` passes.
+The `tuneteasers-corpus` job in the ops repo (`bin/tuneteasers-corpus`, a launchd job on the owner's Mac) runs `scripts/build-corpus.mjs` weekly (Tue 09:00 Stockholm) from its own clone of main, and lands a changed `public/corpus.json` as a PR that merges itself once the required checks pass.
 It does not run in GitHub Actions because JioSaavn answers by country: from GitHub's US runners its English playlists come back with no songs and its search hides English originals, so a build there finds almost no English songs and refuses to write (October and November 2026).
 From Sweden and India the playlists come back whole.
 Play counts move every week, so the file practically always changes.
 The nightly snips refresh scores the newly added songs.
 A failed run turns the job's Gatus check red, and the morning brief names it.
 The script calls the Wikidata SPARQL endpoint (two queries per configured language, ~1 minute total), JioSaavn's `api.php` (a few hundred playlist fetches and roughly one title search per compilation copy, at concurrency 4) and English Wikipedia for the song categories (one title lookup per 50 candidate titles and one raw article per film, about 1,200); a full build takes about 15 minutes.
-It refuses to write a corpus with fewer than `minSongsPerLanguage` songs in either language, or with a song category below its `minTagged`, so a broken upstream leaves the last good corpus in place.
+It refuses to write a corpus with fewer than `minSongsPerLanguage` songs in any language, with a language below `minShareOfCommitted` of the songs the committed `public/corpus.json` holds for it (`scripts/corpus-guard.mjs`), or with a song category below its `minTagged`, so a broken upstream leaves the last good corpus in place.
+A deliberate cut deeper than that share needs `minShareOfCommitted` lowered in `scripts/corpus.config.json` for that build.
 Run it locally with `CORPUS_CACHE=<dir>` to cache upstream responses across reruns and `CORPUS_REPORT=<file>` for a per-song decision log (the input for hand checks).
 
 ## Snips refresh CI

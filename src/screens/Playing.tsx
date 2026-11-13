@@ -70,7 +70,7 @@ export function Playing({ name, track, phase, turn, note, onPlay, onJudge, onHin
 
       <div className={`${sh.actions} ${s.actions}`}>
         <div className={sh.row2}>
-          <button type="button" className="btn btn-cream" onClick={() => nextLen && onPlay(turn.rung + 1)} disabled={!nextLen || cueing}>
+          <button type="button" className="btn btn-cream" onClick={() => nextLen && onPlay(turn.rung + 1)} disabled={!nextLen || cueing || playing}>
             <Plus size={18} strokeWidth={3} /> {nextLen ? `Hear ${nextLen}s more` : "Full clip"}
           </button>
           <button type="button" className="btn btn-cream" onClick={() => onPlay(turn.rung, true)} disabled={cueing || playing}>
@@ -90,7 +90,7 @@ export function Playing({ name, track, phase, turn, note, onPlay, onJudge, onHin
           </button>
           {stealing && !note.includes("Skip it")
             ? passTo && <button type="button" className={s.link} onClick={() => onJudge("wrong")} disabled={cueing}>Nobody knows it</button>
-            : <button type="button" className={s.link} onClick={onSkip} disabled={cueing}>Skip this song</button>}
+            : <button type="button" className={s.link} onClick={onSkip}>Skip this song</button>}
         </div>
       </div>
     </div>

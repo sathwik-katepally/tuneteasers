@@ -60,6 +60,7 @@
   "tiers": { "easy": 0.3, "medium": 0.4 },
   "concurrency": 4,
   "minSongsPerLanguage": 300,
+  "minShareOfCommitted": 0.85,
   "musicbrainz": { "minScore": 90, "gapMs": 1100 },
   "categories": {
     "overrides": "scripts/category-overrides.json",

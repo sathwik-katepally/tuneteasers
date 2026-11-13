@@ -1,0 +1,29 @@
+.wrap {
+  min-height: 100dvh;
+  max-width: var(--stage-w);
+  margin: 0 auto;
+  padding: var(--pad);
+  padding-bottom: calc(var(--pad) + var(--safe-b));
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 14px;
+  text-align: center;
+}
+
+.eyebrow {
+  composes: eyebrow from global;
+  color: var(--cream-dim);
+}
+
+.title {
+  composes: display from global;
+  font-size: clamp(34px, 10vw, 46px);
+  line-height: 1.05;
+  color: var(--bulb);
+  text-shadow: 3px 3px 0 var(--vermilion);
+}
+
+.text {
+  color: var(--cream-dim);
+}
