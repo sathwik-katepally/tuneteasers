@@ -62,7 +62,22 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      # A re-run keeps the run's github.sha, so only main's live tip shows that
+      # a newer push has landed since and this deploy would roll it back.
+      - id: tip
+        if: github.event_name == 'workflow_run'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TESTED: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          tip=$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)
+          if [ "$tip" = "$TESTED" ]; then
+            echo current=true >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::main is at $tip now, so $TESTED is not deployed"
+          fi
       - id: deployment
+        if: github.event_name != 'workflow_run' || steps.tip.outputs.current == 'true'
         uses: actions/deploy-pages@v5
 
   # Phone alert on failure (ntfy, topic in the NTFY_TOPIC repo secret).
