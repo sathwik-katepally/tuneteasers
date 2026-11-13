@@ -110,6 +110,17 @@ export function skipLanding(){
   try { localStorage.setItem("tt_landing_seen", "1"); } catch {}
 }
 
+/* A song Saavn's CDN has lost answers 404 with no CORS header. Music-only
+   loads streams with CORS, so the browser logs a CORS error beside the dead
+   stream the game already handles. WebKit's error names no URL, so it is
+   dropped only when a failed song stream request (the CDN, or a suite's
+   planted .invalid host) owns it: its failure text is the same message
+   (WebKit) or its URL is in it (Chromium). The error and the failed request
+   can arrive in either order. */
+const CORS_ERROR = /is not allowed by Access-Control-Allow-Origin|has been blocked by CORS policy/;
+const isStream = url => /(^|\.)(saavncdn\.com|invalid)$/.test(new URL(url).hostname);
+const owns = (text, request) => text === request.failure()?.errorText || text.includes(`'${request.url()}'`);
+
 const PROFILES = {
   phone: { type: webkit, context: { ...devices["iPhone 13"] } },
   desktop: { type: chromium, launch: { args: ["--autoplay-policy=no-user-gesture-required", ...MUTE_ARGS] }, context: { viewport: { width: 1440, height: 900 } } },
@@ -122,9 +133,19 @@ export async function open(profile, { reducedMotion = false, landing = false } =
   await context.addInitScript(silence);
   if (!landing) await context.addInitScript(skipLanding);
   const page = await context.newPage();
-  const errors = [];
+  const errors = [], failedStreams = [];
   page.on("pageerror", e => errors.push(String(e.message)));
-  page.on("console", m => { if (m.type() === "error" && !/Failed to load resource|net::ERR/.test(m.text())) errors.push(m.text()); });
+  page.on("console", m => {
+    const text = m.text();
+    if (m.type() !== "error" || /Failed to load resource|net::ERR/.test(text)) return;
+    const i = CORS_ERROR.test(text) ? failedStreams.findIndex(r => owns(text, r)) : -1;
+    if (i < 0) errors.push(text); else failedStreams.splice(i, 1);
+  });
+  page.on("requestfailed", r => {
+    if (!isStream(r.url())) return;
+    const i = errors.findIndex(text => CORS_ERROR.test(text) && owns(text, r));
+    if (i < 0) failedStreams.push(r); else errors.splice(i, 1);
+  });
   return { browser, context, page, errors };
 }
 
