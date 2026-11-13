@@ -201,6 +201,9 @@ try {
       await awaitClip();
     }
     if (!extended){
+      // "Hear more" starts at the next rung, so mid-clip it would jump past the seconds not heard yet.
+      await page.getByText(/\ds left/).waitFor({ timeout: 20000 });
+      if (!(await btn(/Hear 7s more/).isDisabled())) fail("Hear more offered while the clip is still playing");
       await page.getByText("Guess, or hear more").waitFor({ timeout: 20000 });
       await shot("05b-listened", 200);
       await btn(/Hear 7s more/).click();
