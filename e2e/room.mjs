@@ -32,6 +32,7 @@ import { serve, args, localWorker, silence, skipLanding, moreSettings, pickLangs
 import { displayTitle } from "../src/lib/utils.js";
 import { CATEGORIES, DIFFICULTY, LADDER, ROOM_ANSWER_SECS, ROOM_AUTO_SECS, ROOM_DEAD_CLIP_MS, ROOM_DEAD_CLIP_SKIPS, ROOM_FILM_SHARE, ROOM_WRONG_BEAT_MS } from "../src/lib/config.ts";
 import { songKey } from "../src/lib/utils.js";
+import { isCorrect, isFilm } from "../src/lib/answer.js";
 import { LANGUAGES, isFilmLang } from "../src/lib/languages.ts";
 
 const A = args({ difficulty: "easy" });
@@ -202,6 +203,29 @@ async function answer(p, text, { pick = true } = {}){
   const option = p.page.getByRole("option", { name: optionName(text) });
   if (pick && await option.count()) await option.first().click();
   else { await input.fill(text); await p.page.getByRole("button", { name: "Lock it in" }).click(); }
+}
+
+/* The cued song's film (an English song's lead artist), or null when the room
+   would not score it as the film: a title track's film is a version of its
+   title ("Dhadak" for "Dhadak Title Track") and scores in full. It is also
+   null when it shares a name with another song in this show. isCorrect with
+   no near titles is right whenever the room's is, so this errs towards null. */
+async function halfOfCued(){
+  const s = await hostShow(), t = s.queue[s.idx];
+  const kind = isFilmLang(t.lang) ? "film" : "artist";
+  const text = kind === "film" ? filmOf(t) : String(t.artist || "").split(",")[0].trim();
+  if (!isFilm(text, text) || isCorrect(text, t.title, [], text) || s.queue.some(q => songKey(displayTitle(q.title)) === songKey(text))) return null;
+  return { kind, text };
+}
+let halfNamed = false;
+async function nameHalf(p, n, half){
+  const before = scoreOf(p.label), worth = song().points;
+  await answer(p, half.text, { pick: false });
+  await revealed(n);
+  const won = Math.max(1, Math.round(worth * ROOM_FILM_SHARE));
+  if (scoreOf(p.label) - before !== won) fail(`naming the ${half.kind} scored ${scoreOf(p.label) - before}, not ${won}`);
+  await p.page.getByText(`You named the ${half.kind}`).waitFor();
+  halfNamed = true;
 }
 
 /* Waits for the host to have a live clip at `rung` for song `n`. */
@@ -524,18 +548,17 @@ try {
   if (waited < ROOM_ANSWER_SECS - 2) fail(`answer clock ran out after ${waited}s`);
   if (!song().guesses.some(g => g.id === raviId && g.timeout)) fail("timeout was not recorded");
   // Meena names the film (an English song's artist), not the song, for part of
-  // the points (unless the song is named after it, when that is the title, or
-  // it shares a name with another song in this show).
-  const show3 = await hostShow(), track3 = show3.queue[show3.idx];
-  const kind3 = isFilmLang(track3.lang) ? "film" : "artist";
-  const half3 = kind3 === "film" ? filmOf(track3) : String(track3.artist || "").split(",")[0].trim();
-  const byHalf = !!half3 && !show3.queue.some(t => songKey(displayTitle(t.title)) === songKey(half3));
-  const meena3 = scoreOf("Meena"), worth3 = song().points;
-  await answer(meena, byHalf ? half3 : displayTitle(track3.title), { pick: false });
-  await revealed(3);
-  const won3 = byHalf ? Math.max(1, Math.round(worth3 * ROOM_FILM_SHARE)) : worth3;
-  if (scoreOf("Meena") - meena3 !== won3) fail(`naming ${byHalf ? `the ${kind3}` : "the song"} scored ${scoreOf("Meena") - meena3}, not ${won3}`);
-  if (byHalf) await meena.page.getByText(`You named the ${kind3}`).waitFor();
+  // the points. When this song's film would score as its title, she names the
+  // song and the first later plain song that has one names it instead.
+  const half3 = await halfOfCued();
+  if (half3) await nameHalf(meena, 3, half3);
+  else {
+    const meena3 = scoreOf("Meena"), worth3 = song().points;
+    await answer(meena, displayTitle(await currentTitle()), { pick: false });
+    await revealed(3);
+    if (scoreOf("Meena") - meena3 !== worth3) fail(`naming the song scored ${scoreOf("Meena") - meena3}, not ${worth3}`);
+    await meena.page.getByText("You got it").waitFor();
+  }
 
   // Song 4: everyone answers wrong, which reveals with nobody scoring.
   await nextSong(4);
@@ -729,10 +752,16 @@ try {
       if (hostState().results.filter(r => r.n === 7).length !== 1) fail("song 7 has more than one result");
       continue;
     }
-    await answer(p, displayTitle(await currentTitle()));
-    await revealed(n);
+    // Song 8 stays on its title, where a wrong verdict means the room judged another song.
+    const half = !halfNamed && n !== 8 && await halfOfCued();
+    if (half) await nameHalf(p, n, half);
+    else {
+      await answer(p, displayTitle(await currentTitle()));
+      await revealed(n);
+    }
     if (n === 8 && song().winner !== idOf(p.label)) fail("after a skip while the link was down, the room judged song 8 against another title");
   }
+  if (!halfNamed) fail("no plain song in the show had a film or artist apart from its title, so naming one was never checked");
   // The host reloads on the final reveal: it comes back to that reveal and the
   // end of the show, not a 13th song.
   const finalScores = hostState().players.map(pl => pl.score).join();
