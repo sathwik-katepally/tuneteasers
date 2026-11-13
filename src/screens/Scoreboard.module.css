@@ -140,3 +140,55 @@
   color: var(--cream-shade);
   text-align: center;
 }
+
+/* A buzz-in room past pass-the-phone's 8 players: two columns of tighter
+   rows, ranked down each column, so 24 fit one screen. The round's gains
+   are in the reels below, so the delta column goes. */
+.rows:has(> :nth-child(9)) {
+  display: block;
+  columns: 2;
+  column-gap: 8px;
+}
+
+.rows:has(> :nth-child(9)) > .row {
+  --cell-w: 14px;
+  --cell-h: 20px;
+  --cell-font: 15px;
+  grid-template-columns: 18px 1fr auto;
+  gap: 6px;
+  padding: 2px 4px;
+  margin-bottom: 4px;
+  break-inside: avoid;
+}
+
+.rows:has(> :nth-child(9)) .rank {
+  font-size: 17px;
+}
+
+.rows:has(> :nth-child(9)) .name {
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+
+.rows:has(> :nth-child(9)) .delta {
+  display: none;
+}
+
+@media (min-width: 900px) {
+  .rows:has(> :nth-child(9)) {
+    column-gap: 10px;
+  }
+  .rows:has(> :nth-child(9)) > .row {
+    --cell-w: 19px;
+    --cell-h: 26px;
+    --cell-font: 20px;
+    grid-template-columns: 28px 1fr auto;
+    padding: 3px 8px 3px 4px;
+  }
+  .rows:has(> :nth-child(9)) .rank {
+    font-size: 22px;
+  }
+  .rows:has(> :nth-child(9)) .name {
+    font-size: 15px;
+  }
+}
