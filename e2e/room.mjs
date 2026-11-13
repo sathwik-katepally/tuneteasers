@@ -148,10 +148,14 @@ async function currentTitle(){
 /* A message the host sends twice passes every wait in this script: a second
    `song` is only a new cue, a second `clip` only opens buzzing again. So the
    host's frames are counted: one `start` for each show begun, one `end` for
-   each show over, and one `song` for each cue the room has handed out. */
-function toldOnce(begun, over){
+   each show over, and one `song` for each track the host has cued. The tracks
+   come from the host's own place in its queue, not from the room's cue id,
+   which a second `song` moves on as well; the cue id only shows that the room
+   took every one of them. */
+function toldOnce(begun, over, tracks){
   const sent = t => traffic.host.filter(f => f.dir === "out" && JSON.parse(f.data).t === t).length;
   if (sent("start") !== begun || sent("end") !== over) fail(`the host sent ${sent("start")} start and ${sent("end")} end frames for ${begun} shows begun and ${over} over`);
+  if (sent("song") !== tracks) fail(`the host sent ${sent("song")} song frames for ${tracks} tracks cued`);
   if (sent("song") !== song().cue) fail(`the host sent ${sent("song")} song frames, and the room is on cue ${song().cue}`);
 }
 // A wrong guess comes from the public list and is never a song in this show:
@@ -752,7 +756,9 @@ try {
   const refused = await host.page.evaluate(() => Number(sessionStorage.getItem("tt_e2e_blocked") || 0));
   if (refused) fail(`${refused} plays on the big screen were refused under the iOS autoplay rule`);
   await until("room over", () => hostState().phase === "over");
-  toldOnce(1, 1);
+  // After the last reveal the host's place in its queue is the number of tracks it cued: every song and every skip moved it on by one.
+  const cuedFirst = (await hostShow()).idx;
+  toldOnce(1, 1, cuedFirst);
   await shot(host, "host-10-podium");
 
   // Podium, room and phones agree.
@@ -868,7 +874,8 @@ try {
   await until("buzz answered", async () => { await host.page.waitForTimeout(0); return song().answering === idOf("Meena"); });
 
   if (overflow.length) fail("screens scroll at this size: " + overflow.join(", "));
-  toldOnce(3, 2);
+  // The second show cued its one track twice (the reload started the song over), the third has cued one so far.
+  toldOnce(3, 2, cuedFirst + 2 + 1);
   await guards(code, (await hostShow()).host, show.total);
   const errors = all.flatMap(d => d.errors);
   if (errors.length) fail("page errors:\n" + errors.join("\n"));
