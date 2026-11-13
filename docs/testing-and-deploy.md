@@ -39,12 +39,15 @@ CI runners (`CI` set) skip the lock.
   It starts its own `wrangler dev` and proxies the room WebSockets to it, recording every frame; `--worker=<origin>` uses a deployed Worker, `--shots=<dir>` saves every screen.
 - `e2e/room-norepeat.mjs` (`npm run e2e:room-norepeat`) - no repeats in buzz-in rooms: seeded phone histories reach only the host, the room's payload caps, crates without the seated phones' songs across two rooms, revealed songs in each phone's own history and a vote-skipped one in none, reconnects and a mid-show joiner (docs/room-mode.md, No repeats).
 - `e2e/room-background.mjs` (`npm run e2e:room-background`) - a WebKit host goes to the background while its socket dies without a close (iOS), a phone joins, and the host must reconnect and show the player when it comes back (docs/room-mode.md, Reconnects).
+- `e2e/room-crowd.mjs` (`npm run e2e:room-crowd -- --seats=4,24 --shots=<dir>`) - a buzz-in room with every seat taken: a desktop Chromium host, one WebKit iPhone and the other seats as raw sockets that join, buzz and answer play a 3-round show for each seat count.
+  Every host screen that lists players (lobby, song, reveal, box office, final count, podium) is shot at 1920x1080 and 390x844, and the phone's final screen at 390x844; it fails when a screen scrolls (at 390px the lobby may) or a player's name is off screen.
+  CI runs it in the `buzz room` job and keeps the shots as the `room-crowd-shots` artifact.
 - `e2e/room-live.mjs` (`npm run e2e:room-live`) - a buzz-in room on the deployed Worker with no socket proxy, so every check reads the screens: a desktop Chromium host opens a room and two WebKit iPhones join by the code it shows.
   One phone buzzes and names song 1; on song 2 the other reloads and keeps its seat, then buzzes first and is wrong, and the first, in line behind it, names the song.
   The host's reveal must credit the points each answer pad promised, then the host ends the show from its menu and both phones show the final screen.
   It makes exactly one room and nothing more (no floods, no limit probes, no phone group), since `e2e-prod.yml` runs it against production.
 
-Package scripts: `npm run e2e:game -- --profile=desktop`, `e2e:categories`, `e2e:ladder`, `e2e:migrate`, `e2e:autoplay`, `e2e:offline`, `e2e:snips`, `e2e:group`, `e2e:group-edge`, `e2e:room`, `e2e:room-norepeat`, `e2e:room-background`, `e2e:room-live`, `e2e:landing`, `e2e:journeys`.
+Package scripts: `npm run e2e:game -- --profile=desktop`, `e2e:categories`, `e2e:ladder`, `e2e:migrate`, `e2e:autoplay`, `e2e:offline`, `e2e:snips`, `e2e:group`, `e2e:group-edge`, `e2e:room`, `e2e:room-norepeat`, `e2e:room-background`, `e2e:room-crowd`, `e2e:room-live`, `e2e:landing`, `e2e:journeys`.
 `gh workflow run e2e-prod.yml` runs `e2e:game` and `e2e:room-live` against the live site instead of `dist/` (`.github/workflows/e2e-prod.yml`, on demand only).
 Phone WebKit on macOS plays the default show and a teams show in Hindi With singing, desktop Chromium on Linux the default show and one in Telugu, and the room runs on Linux in Playwright's Docker image.
 `E2E_URL=<site>` makes `serve()` hand back that URL instead of serving `dist/`, which is how that workflow points the suites at production.
