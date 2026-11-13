@@ -114,7 +114,14 @@ async function songsByIds(url){
   const { j, error } = await upstream({ __call: "song.getDetails", pids: ids.join(",") });
   if (error) return error;
   const list = Array.isArray(j.songs) ? j.songs : Object.values(j).filter(s => s && s.type === "song");
-  return json({ success: true, data: list.filter(s => s.type === "song").map(toSong) }, 200, CACHEABLE);
+  const data = list.filter(s => s.type === "song").map(toSong);
+  // An empty list would be cached for hours and reads as a success to the
+  // client, which then never asks the next base in SAAVN_BASES.
+  if (!data.some(s => s.downloadUrl.length)){
+    console.warn("saavn upstream failed", { call: "song.getDetails", ids: ids.length, songs: data.length, body: "no streams" });
+    return json({ success: false, message: "upstream sent no playable songs" }, 502);
+  }
+  return json({ success: true, data }, 200, CACHEABLE);
 }
 
 export const SAAVN_ROUTES = { "/api/search/songs": searchSongs, "/api/songs": songsByIds };

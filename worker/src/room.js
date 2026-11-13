@@ -25,8 +25,8 @@ const HOUR = 3600e3;
 const ROOM_TTL_MS = 3 * 3600e3;
 const HELLO_MS = 10e3;
 const LIMITS = {
-  players: 16,
-  connections: 48,
+  players: 24,
+  connections: 56,
   name: 24,
   title: 120,
   guess: 80,
