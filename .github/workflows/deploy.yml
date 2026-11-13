@@ -12,17 +12,21 @@ permissions:
   pages: write
   id-token: write
 
-concurrency:
-  group: pages
-  cancel-in-progress: true
-
 jobs:
   deploy:
-    # Only a push to main: a fork's pull request from a branch named main
-    # also matches the branch filter above.
+    # Only a push run, since a fork's pull request from a branch named main
+    # also matches the branch filter, and only while its commit is still
+    # main's tip (github.sha), so a late rerun of an older commit cannot roll
+    # production back.
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+      (github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_sha == github.sha)
+    # On the job, not the workflow: a skipped run must not cancel a deploy.
+    concurrency:
+      group: pages
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     environment:
       name: github-pages
@@ -30,7 +34,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          # The commit E2E tested, not main's tip by now. Empty for a manual run.
           ref: ${{ github.event.workflow_run.head_sha }}
       - uses: actions/setup-node@v7
         with:
