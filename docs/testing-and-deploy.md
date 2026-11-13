@@ -81,12 +81,13 @@ Which runner a suite gets is decided by where its browser plays these AAC/MP4 st
 ## Deploy (GitHub Pages via Actions)
 
 `.github/workflows/deploy.yml` deploys only a commit that passed the checks: it starts when an `E2E` run (`e2e.yml`) for a push to main completes, and deploys only if that run succeeded.
-It checks out the commit that run tested (`workflow_run.head_sha`), not main's tip by then, checks TypeScript, builds with Vite, and deploys `dist/` to Pages; Pages is configured with `build_type=workflow`.
+It checks out the commit that run tested (`workflow_run.head_sha`), checks TypeScript, builds with Vite, and deploys `dist/` to Pages; Pages is configured with `build_type=workflow`.
+It deploys only while that commit is still main's tip: when a newer push has landed by then, that push's run deploys instead, so a late rerun of an older commit cannot roll production back.
 A push reaches production about 6 minutes after it lands (E2E about 5, the deploy under 1), longer when another E2E run on main is still going, since those queue one at a time.
 The release matrix (`e2e-release.yml`) does not gate the deploy.
 A failed or cancelled E2E run deploys nothing, so production stays on the last good build: a failed one raises E2E's own alert, and a cancelled one was superseded by a newer push, whose run deploys in its place.
 Nightly, manual and pull request E2E runs never deploy; the push check also keeps a fork's pull request from a branch named main from matching.
-Re-running a failed E2E run (`gh run rerun <id> --failed`) deploys its commit once it passes.
+Re-running a failed E2E run (`gh run rerun <id> --failed`) deploys its commit once it passes, if no newer push has landed.
 Manual override, for a day E2E is red for an outside reason: `gh workflow run deploy.yml -R sathwik-katepally/tuneteasers` deploys main's tip at once without waiting for E2E.
 The Worker deploys separately through Cloudflare Workers Builds (see Worker below), so nothing orders the two any more: a site change that needs a new Worker route ships in a PR after the route's PR has deployed, and migrations must stay additive so the live site keeps working against the new schema.
 `.github/workflows/verify.yml` runs the same typecheck and build on pull requests, plus `npm run lint` (oxlint with only the two react-hooks rules over `src/`), a Worker `wrangler deploy --dry-run` and the migrations against a throwaway local D1.
