@@ -69,7 +69,8 @@ try {
   await page.evaluate(u => fetch(u).catch(() => {}), probe);
   const probed = errors.splice(seen);
   if (!probed.some(e => corsError.test(e))) fail(`a Worker 404 without CORS was not a page error (recorded: ${probed.join(" | ") || "nothing"})`);
-  errors.push(...probed.filter(e => !corsError.test(e) && !e.includes(probe)));
+  // WebKit reports the failed fetch as a page error, which Playwright cuts at its first colon: the URL's.
+  errors.push(...probed.filter(e => !corsError.test(e) && !e.includes(probe.slice("https://".length))));
   await page.getByRole("radio", { name: A.mode === "teams" ? "Teams" : "Players" }).click();
   await pickLangs(page, langLabels(A.mix));
   await moreSettings(page);
