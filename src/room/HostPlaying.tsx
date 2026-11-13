@@ -114,7 +114,8 @@ export function HostPlaying({ view, song, songNo, total, ladder, clip, audio, gr
 
       <div className={`${sh.actions} ${p.actions}`}>
         <div className={sh.row2}>
-          <button type="button" className="btn btn-cream" onClick={onMore} disabled={answering || cueing || audio === "blocked"}>
+          {/* Off while a clip plays: the next rung starts where this one ends, so a tap would skip the seconds not yet heard. */}
+          <button type="button" className="btn btn-cream" onClick={onMore} disabled={answering || cueing || playing || audio === "blocked"}>
             <Plus size={18} strokeWidth={3} /> {nextLen ? `Hear ${nextLen}s more` : "Play it again"}
           </button>
           <button type="button" className="btn btn-cream" onClick={onReveal} disabled={answering || cueing}>

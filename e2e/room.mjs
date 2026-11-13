@@ -451,6 +451,7 @@ try {
   await nextSong(2);
   await live(2, 0);
   const more = host.page.getByRole("button", { name: /^Hear \d+s more$/ });
+  if (!(await more.isDisabled())) fail("Hear more can be tapped while the clip is still playing, which skips the rest of it");
   await until("first clip over", () => host.page.getByText(/^Anyone\?/).isVisible());
   await shot(host, "host-08-grace");
   await more.click();
