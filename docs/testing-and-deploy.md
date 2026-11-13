@@ -39,11 +39,17 @@ CI runners (`CI` set) skip the lock.
   It starts its own `wrangler dev` and proxies the room WebSockets to it, recording every frame; `--worker=<origin>` uses a deployed Worker, `--shots=<dir>` saves every screen.
 - `e2e/room-norepeat.mjs` (`npm run e2e:room-norepeat`) - no repeats in buzz-in rooms: seeded phone histories reach only the host, the room's payload caps, crates without the seated phones' songs across two rooms, revealed songs in each phone's own history and a vote-skipped one in none, reconnects and a mid-show joiner (docs/room-mode.md, No repeats).
 - `e2e/room-background.mjs` (`npm run e2e:room-background`) - a WebKit host goes to the background while its socket dies without a close (iOS), a phone joins, and the host must reconnect and show the player when it comes back (docs/room-mode.md, Reconnects).
+- `e2e/room-live.mjs` (`npm run e2e:room-live`) - a buzz-in room on the deployed Worker with no socket proxy, so every check reads the screens: a desktop Chromium host opens a room and two WebKit iPhones join by the code it shows.
+  One phone buzzes and names song 1; on song 2 the other reloads and keeps its seat, then buzzes first and is wrong, and the first, in line behind it, names the song.
+  The host's reveal must credit the points each answer pad promised, then the host ends the show from its menu and both phones show the final screen.
+  It makes exactly one room and nothing more (no floods, no limit probes, no phone group), since `e2e-prod.yml` runs it against production.
 
-Package scripts: `npm run e2e:game -- --profile=desktop`, `e2e:categories`, `e2e:ladder`, `e2e:migrate`, `e2e:autoplay`, `e2e:offline`, `e2e:snips`, `e2e:group`, `e2e:group-edge`, `e2e:room`, `e2e:room-norepeat`, `e2e:room-background`, `e2e:landing`, `e2e:journeys`.
-`gh workflow run e2e-prod.yml` runs `e2e:game` against the live site instead of `dist/` (`.github/workflows/e2e-prod.yml`, on demand only): phone WebKit on macOS and desktop Chromium on Linux.
-`E2E_URL=<site>` makes `serve()` hand back that URL instead of serving `dist/`, which is how that workflow points the suite at production.
+Package scripts: `npm run e2e:game -- --profile=desktop`, `e2e:categories`, `e2e:ladder`, `e2e:migrate`, `e2e:autoplay`, `e2e:offline`, `e2e:snips`, `e2e:group`, `e2e:group-edge`, `e2e:room`, `e2e:room-norepeat`, `e2e:room-background`, `e2e:room-live`, `e2e:landing`, `e2e:journeys`.
+`gh workflow run e2e-prod.yml` runs `e2e:game` and `e2e:room-live` against the live site instead of `dist/` (`.github/workflows/e2e-prod.yml`, on demand only).
+Phone WebKit on macOS plays the default show and a teams show in Hindi With singing, desktop Chromium on Linux the default show and one in Telugu, and the room runs on Linux in Playwright's Docker image.
+`E2E_URL=<site>` makes `serve()` hand back that URL instead of serving `dist/`, which is how that workflow points the suites at production.
 `e2e:room` is not in it: its checks read the room state from the frames its socket proxy records, and it floods the room with sockets, which production should not get.
+Its jobs are named `game phone live`, `game desktop live` and `buzz room live`: a dispatch from a branch reports on that branch's head commit, where `game phone`, `game desktop` and `buzz room` are required checks.
 A release run is the matrix of `game.mjs` over both profiles, both modes, both difficulties and all three language mixes (not every combination, but each value at least once per profile), one `--reduced` run, one `--no-worker` run, one `--no-saavn` Easy run, one `--categories=item` and one `--categories=mass` run, plus the other scripts.
 Playback modes asserted are `snip | plain` (`window.__ttLastMode`); Easy must report `plain`, while Medium must report `snip` or show a safe-clip shortage.
 Gotchas: screens cross-fade out through `AnimatePresence`, so after a click wait for the old button to detach before looking for the next screen; seed localStorage from a non-app page on the same origin (`/seed.html` 404s, which is fine) so the app's own first save cannot race the seeding.
