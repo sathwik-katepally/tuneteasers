@@ -7,6 +7,7 @@ import { Ticket } from "../components/Ticket";
 import { NAME_MAX } from "../lib/config";
 import { prepareTitles, suggest } from "../lib/answer.js";
 import { answerTitles, type AnswerEntry } from "../lib/crate";
+import { keepAwake } from "../lib/engine.js";
 import { isFilmLang, langsOf } from "../lib/languages";
 import { displayTitle } from "../lib/utils.js";
 import { cleanCode, dropSeat, heardPayload, isCode, lastName, loadSeat, newSeat, playerName, rememberName, setRoomUrl, useMsLeft,
@@ -44,6 +45,16 @@ export function Phone({ code: initial, onExit }: { code: string; onExit: () => v
   useRecordHeard(me ? view : null);
 
   useEffect(() => { setRoomUrl(seat ? code : ""); }, [seat, code]);
+
+  // A phone that locks its screen mid-show loses the buzz race.
+  const seated = !!seat;
+  useEffect(() => {
+    if (!seated) return;
+    keepAwake(true);
+    const vis = () => { if (document.visibilityState === "visible") keepAwake(true); };
+    document.addEventListener("visibilitychange", vis);
+    return () => { document.removeEventListener("visibilitychange", vis); keepAwake(false); };
+  }, [seated]);
 
   useEffect(() => {
     if (!room.error) return;

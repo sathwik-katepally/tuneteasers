@@ -4,6 +4,7 @@
    here) or to --worker=<origin>; room WebSockets go through a proxy in this
    script, which also records every frame each phone receives. Checks:
    - joining by code (typed) and by the #room link,
+   - a seated phone asks for a screen wake lock,
    - a buzz race is answered in the order buzzes reached the room,
    - a wrong answer passes to the next buzzer, a right one scores the rung,
    - nobody knowing carries the clip ladder on (manual and automatic),
@@ -91,6 +92,11 @@ async function device(kind, label){
         this.addEventListener("message", e => { window.__rx.n++; window.__rx.last = String(e.data).slice(0, 300); });
       }
     };
+  });
+  // Counts screen wake lock requests, whether or not this browser has the API.
+  await context.addInitScript(() => {
+    window.__wake = 0;
+    Object.defineProperty(navigator, "wakeLock", { configurable: true, value: { request: async () => { window.__wake++; return { release(){} }; } } });
   });
   const page = await context.newPage();
   const errors = [], logs = [];
@@ -369,6 +375,8 @@ try {
   await dup.browser.close();
   await until("three players in the lobby", () => hostState()?.players.length === 3 && hostState().players.every(p => p.online));
   await host.page.getByText("3 in").waitFor();
+  // A seated phone keeps its screen on: one that locks mid-show loses the buzz race.
+  for (const p of phones) if (!(await p.page.evaluate(() => window.__wake))) fail(`${p.label}'s phone did not ask to stay awake`);
   await shot(host, "host-03-lobby-full");
   await shot(meena, "phone-03-waiting");
 

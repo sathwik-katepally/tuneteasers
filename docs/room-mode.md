@@ -18,6 +18,8 @@ Autocomplete offers every known title in the show's languages; if she is right s
 - The room (`worker/src/room.js`) is one Durable Object per room code, built on PartyServer with WebSocket hibernation.
   It is the referee: it orders buzzes as they arrive, runs the answer clock, judges answers and holds the scores.
 - A phone (`src/room/Phone.tsx`) only joins, buzzes and types. It never plays audio.
+  While it has a seat it holds a screen wake lock (`keepAwake` in `src/lib/engine.js`), so it does not lock mid-show and miss the buzz.
+  The browser drops the lock when the page is hidden, so the phone asks again each time it comes back.
 - `src/lib/room.ts` is the client side: making a room, the `#room=` link, the PartySocket connection (`useRoom`) and what each device remembers.
 - `src/lib/answer.js` folds titles for matching and ranks autocomplete suggestions; the phone and the Worker import the same file.
 
