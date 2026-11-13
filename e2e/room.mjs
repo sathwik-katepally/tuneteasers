@@ -557,6 +557,7 @@ try {
     await answer(meena, displayTitle(await currentTitle()), { pick: false });
     await revealed(3);
     if (scoreOf("Meena") - meena3 !== worth3) fail(`naming the song scored ${scoreOf("Meena") - meena3}, not ${worth3}`);
+    await meena.page.getByText("You got it").waitFor();
   }
 
   // Song 4: everyone answers wrong, which reveals with nobody scoring.
