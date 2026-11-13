@@ -41,6 +41,9 @@ CI runners (`CI` set) skip the lock.
 - `e2e/room-background.mjs` (`npm run e2e:room-background`) - a WebKit host goes to the background while its socket dies without a close (iOS), a phone joins, and the host must reconnect and show the player when it comes back (docs/room-mode.md, Reconnects).
 
 Package scripts: `npm run e2e:game -- --profile=desktop`, `e2e:categories`, `e2e:ladder`, `e2e:migrate`, `e2e:autoplay`, `e2e:offline`, `e2e:snips`, `e2e:group`, `e2e:group-edge`, `e2e:room`, `e2e:room-norepeat`, `e2e:room-background`, `e2e:landing`, `e2e:journeys`.
+`gh workflow run e2e-prod.yml` runs `e2e:game` against the live site instead of `dist/` (`.github/workflows/e2e-prod.yml`, on demand only): phone WebKit on macOS and desktop Chromium on Linux.
+`E2E_URL=<site>` makes `serve()` hand back that URL instead of serving `dist/`, which is how that workflow points the suite at production.
+`e2e:room` is not in it: its checks read the room state from the frames its socket proxy records, and it floods the room with sockets, which production should not get.
 A release run is the matrix of `game.mjs` over both profiles, both modes, both difficulties and all three language mixes (not every combination, but each value at least once per profile), one `--reduced` run, one `--no-worker` run, one `--no-saavn` Easy run, one `--categories=item` and one `--categories=mass` run, plus the other scripts.
 Playback modes asserted are `snip | plain` (`window.__ttLastMode`); Easy must report `plain`, while Medium must report `snip` or show a safe-clip shortage.
 Gotchas: screens cross-fade out through `AnimatePresence`, so after a click wait for the old button to detach before looking for the next screen; seed localStorage from a non-app page on the same origin (`/seed.html` 404s, which is fine) so the app's own first save cannot race the seeding.
