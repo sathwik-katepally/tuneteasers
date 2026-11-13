@@ -34,12 +34,13 @@ export function usePassTheGame(state: AppState, setState: Dispatch<SetStateActio
   const screenNow = useRef(state.screen);
   screenNow.current = state.screen;
 
+  // Only while the game is on screen: the room screens hold their own lock, and an off from here would release it.
   useEffect(() => {
-    const on = state.screen === "game";
-    keepAwake(on);
-    const vis = () => { if (document.visibilityState === "visible") keepAwake(on); };
+    if (state.screen !== "game") return;
+    keepAwake(true);
+    const vis = () => { if (document.visibilityState === "visible") keepAwake(true); };
     document.addEventListener("visibilitychange", vis);
-    return () => document.removeEventListener("visibilitychange", vis);
+    return () => { document.removeEventListener("visibilitychange", vis); keepAwake(false); };
   }, [state.screen]);
 
   const S = state.settings;
