@@ -52,6 +52,10 @@ Gotchas: screens cross-fade out through `AnimatePresence`, so after a click wait
 The shared steps (deps, build, Playwright browsers cached per version) are in `.github/actions/e2e-setup`.
 The suites play real songs from the corpus through the deployed Worker and the Saavn CDN; the song draw is random, so recorded responses would rarely match a run and are not used.
 
+main's ruleset requires `verify` and seven of the `e2e.yml` jobs before a pull request merges: `game phone`, `game desktop`, `safe snips phone`, `safe snips desktop`, `ladder desktop`, `landing and journeys` and `buzz room`.
+`group sync` runs on every pull request but is not required: its "waiting to sync" wait timed out on two data-only commits on main (2026-10-14 and 2026-11-03).
+A required job that never reports blocks every merge, so the `pull_request` trigger of `e2e.yml` takes no path or branch filter, and a job renamed or removed there is renamed or removed in the ruleset first (`gh api repos/sathwik-katepally/tuneteasers/rulesets`).
+
 Which runner a suite gets is decided by where its browser plays these AAC/MP4 streams in real time, measured on the runners in September 2026:
 - Linux WebKit (GStreamer) cannot resume after a seek once a stream has played: `readyState` stays at 2 while `currentTime` runs on in silence, with local or CDN files, PulseAudio, either AAC decoder and playbin3 alike.
   Every Music-only clip and ladder rung seeks, so phone suites that play songs run on `macos-latest`, where WebKit uses AVFoundation like an iPhone.
@@ -94,7 +98,7 @@ Test locally with `npx wrangler d1 migrations apply DB --local && npx wrangler d
 
 ### Landing data commits
 
-main has a ruleset that requires a passing `verify` check, which only a pull request starts, so a push made with the workflow's `GITHUB_TOKEN` is refused (and would start no other workflow if it were not).
+main has a ruleset that requires a passing `verify` check and the key E2E jobs (see E2E in CI), which only a pull request starts, so a push made with the workflow's `GITHUB_TOKEN` is refused (and would start no other workflow if it were not).
 The refresh workflows push with a deploy key instead: a write deploy key on the repo, whose private half is the repo secret `DATA_DEPLOY_KEY` (kept in Automic Vault as `TUNETEASERS_DATA_DEPLOY_KEY`) and which main's ruleset lists as a bypass actor (DeployKey).
 The jobs that commit check out with `actions/checkout@v7`, `ssh-key: ${{ secrets.DATA_DEPLOY_KEY }}` and `fetch-depth: 0`, then run `scripts/push-data-commit.sh <message> <paths...>`, which commits the changed files as github-actions[bot], rebases on the branch tip and pushes to the branch the run came from (three tries, in case another push lands in between).
 A push over the key is an ordinary push to main, so it starts `deploy.yml`, `e2e.yml` and `e2e-release.yml` by itself: the data is deployed and checked by the whole E2E matrix at once.
@@ -107,7 +111,7 @@ The script holds its own iTunes search terms and genre-to-language map, and impo
 
 ## Corpus refresh
 
-The `tuneteasers-corpus` job in the ops repo (`bin/tuneteasers-corpus`, a launchd job on the owner's Mac) runs `scripts/build-corpus.mjs` weekly (Tue 09:00 Stockholm) from its own clone of main, and lands a changed `public/corpus.json` as a PR that merges itself once `verify` passes.
+The `tuneteasers-corpus` job in the ops repo (`bin/tuneteasers-corpus`, a launchd job on the owner's Mac) runs `scripts/build-corpus.mjs` weekly (Tue 09:00 Stockholm) from its own clone of main, and lands a changed `public/corpus.json` as a PR that merges itself once the required checks pass.
 It does not run in GitHub Actions because JioSaavn answers by country: from GitHub's US runners its English playlists come back with no songs and its search hides English originals, so a build there finds almost no English songs and refuses to write (October and November 2026).
 From Sweden and India the playlists come back whole.
 Play counts move every week, so the file practically always changes.
