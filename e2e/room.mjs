@@ -465,7 +465,9 @@ try {
   // The host's Wi-Fi drops through the beat after the miss. The next clip
   // waits for the link: played into the gap, the room would never hear of it
   // and would sit on the miss.
-  const clips = () => host.page.evaluate(() => window.__ttClips.length);
+  const clips = () => host.page.evaluate(() => window.__ttClips?.length ?? 0);
+  // A first clip the host started while its link was down, or the note of a stream that never started.
+  const clipSince = async n => (await clips()) > n || await host.page.getByText(/won't stream right now|isn't available/).first().isVisible();
   const played = await clips();
   await host.link.cut(true);
   await sleep(ROOM_WRONG_BEAT_MS + 1500);
@@ -603,6 +605,14 @@ try {
     await host.page.getByText("Buzz-in show in progress").waitFor();
   };
   for (let n = 5; n <= show.total; n++){
+    if (n === 10){
+      // The link drops on song 9's reveal and stays down through the countdown
+      // and into the first clip: the room hears of the song and its clip once it is back.
+      const had = await clips();
+      await host.link.cut(true);
+      await until("song 10's first clip, started while the link was down", () => clipSince(had), (ROOM_AUTO_SECS.reveal + 20) * 1000);
+      await host.link.cut(false);
+    }
     await nextSong(n);
     if (n === 8){
       // The streams seeded at the reload never start. Each song is still in
@@ -751,8 +761,14 @@ try {
   }
   if (!frames) fail("recorded no phone traffic");
 
-  // Same crowd again restarts the room with scores at zero.
+  // Same crowd again restarts the room with scores at zero. The host's link is
+  // down while the crate loads, through the countdown and into the first clip:
+  // the room hears of the new show, its first song and the clip once it is back.
+  const beforeAgain = await clips();
+  await host.link.cut(true);
   await host.page.getByRole("button", { name: "Same crowd again" }).click();
+  await until("the second show's first clip, started while the link was down", () => clipSince(beforeAgain), 60000);
+  await host.link.cut(false);
   await until("second show live", () => hostState().phase === "show" && song()?.n === 1 && song().state === "live", 60000);
   if (hostState().players.some(p => p.score !== 0)) fail("scores not reset for the next show");
   await asha.page.locator('button[aria-label="Buzz"]').waitFor({ timeout: 15000 });
