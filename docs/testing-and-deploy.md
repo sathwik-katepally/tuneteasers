@@ -48,7 +48,7 @@ Gotchas: screens cross-fade out through `AnimatePresence`, so after a click wait
 ### E2E in CI
 
 `.github/workflows/e2e.yml` runs the key suites on every pull request, on every push to main, nightly (02:30 UTC) and on demand, one job per suite in parallel (about 3-5 minutes wall clock): a pass-the-phone game on each profile, safe-snips on each profile, the desktop ladder, the buzz room and the group sync against a local `wrangler dev`, and the landing and journeys suites.
-`.github/workflows/e2e-release.yml` runs the rest of the release matrix above on pushes to main, nightly (02:30 UTC) and on demand, and alerts through ntfy when it fails; category games play Easy there, since in Music-only the item and mass chips are too thin to pick.
+`.github/workflows/e2e-release.yml` runs the rest of the release matrix above on pushes to main, nightly (02:30 UTC) and on demand, and alerts Slack `#jobs` when it fails; category games play Easy there, since in Music-only the item and mass chips are too thin to pick.
 The shared steps (deps, build, Playwright browsers cached per version) are in `.github/actions/e2e-setup`.
 The suites play real songs from the corpus through the deployed Worker and the Saavn CDN; the song draw is random, so recorded responses would rarely match a run and are not used.
 
@@ -146,9 +146,11 @@ The client fails closed with a clear Music-only shortage if the index is missing
 ### Workflow failure alerts
 
 The production workflows (`deploy.yml`, `e2e.yml`, `e2e-release.yml`, `refresh-catalog.yml`, `refresh-snips.yml`) end in an `alert` job that `needs` the other jobs and runs on `if: failure()` (`refresh-snips.yml` only on main, `e2e.yml` not on pull requests).
-It POSTs the run URL to `https://ntfy.sh/$NTFY_TOPIC` with the title `<repo>/<workflow> failed`.
+It posts `<repo>/<workflow> failed (<failed jobs>): <run URL>` to the Slack channel `#jobs` through `chat.postMessage`, the way the ops repo's `ops-notify` and Gatus do.
+The job reads the failed jobs' names from the run with the workflow's own token (`actions: read`).
 `failure()` is false for cancelled runs, so a deploy superseded by a newer push stays quiet.
-The topic is the shared ops topic (`~/.config/ops/secrets.env`, `OPS_NTFY_TOPIC`), set with `gh secret set NTFY_TOPIC --repo sathwik-katepally/tuneteasers --body <topic>`.
+The post fails the alert job when Slack refuses it (`curl --fail`, and a check of `ok` in the answer, since Slack answers 200 to a bad token), so a lost alert shows as a red `alert` job.
+The token is the ops Slack app's bot token in the repo secret `SLACK_BOT_TOKEN`, set from the owner's own shell with `op read "op://Ops/ops-slack/bot-token" | gh secret set SLACK_BOT_TOKEN --repo sathwik-katepally/tuneteasers`.
 A failed scheduled refresh is not an outage (the client degrades without a fresh catalog or snips index), but the alert is how a broken iTunes filter or a rate-limit change gets noticed at all.
 
 ### Web Analytics

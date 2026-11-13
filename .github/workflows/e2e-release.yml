@@ -113,19 +113,28 @@ jobs:
       - run: cat /proc/loadavg
       - run: npm run e2e:room -- --difficulty=medium && npm run e2e:room-norepeat
 
-  # Phone alert when main or the nightly run breaks (ntfy, topic in the
-  # NTFY_TOPIC repo secret).
+  # Slack alert when main or the nightly run breaks (#jobs, the ops app's bot
+  # token in the SLACK_BOT_TOKEN repo secret).
   alert:
     needs: [release, room]
     if: failure()
     runs-on: ubuntu-latest
     timeout-minutes: 2
+    permissions:
+      actions: read
     steps:
       - env:
-          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
-        run: >-
-          curl -s --max-time 20
-          -H "Title: ${{ github.repository }}/${{ github.workflow }} failed"
-          -H "Priority: high" -H "Tags: x"
-          -d "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          "https://ntfy.sh/$NTFY_TOPIC"
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+        # bash for pipefail: without it the pipe would hide a post that --fail rejected.
+        shell: bash
+        run: |
+          run="$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          failed=$(gh api "repos/$run/jobs?per_page=100" --jq '[.jobs[] | select(.conclusion == "failure") | .name] | join(", ")' || true)
+          # The token reaches curl in a config file, not on its command line, and
+          # Slack answers 200 with ok: false for a bad token or channel.
+          jq -n --arg text "$GITHUB_REPOSITORY/$GITHUB_WORKFLOW failed (${failed:-job unknown}): $GITHUB_SERVER_URL/$run" \
+            '{channel: "#jobs", text: $text, unfurl_links: false}' |
+            curl -sS --fail --max-time 20 -K <(printf 'header = "Authorization: Bearer %s"\n' "$SLACK_BOT_TOKEN") \
+              -H 'Content-Type: application/json; charset=utf-8' --data-binary @- https://slack.com/api/chat.postMessage |
+            jq -e '.ok or error(.error)'
