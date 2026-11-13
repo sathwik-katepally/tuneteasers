@@ -489,6 +489,20 @@
   color: var(--bulb);
 }
 
+/* More than 8 players: two columns, ranked down each, so a full room of 24 fits the screen. */
+.ranks:has(> :nth-child(9)) {
+  columns: 2;
+  column-gap: 14px;
+}
+
+.ranks:has(> :nth-child(9)) li,
+.ranks:has(> :nth-child(9)) li:last-child {
+  padding: 5px 0;
+  font-size: 15px;
+  border-bottom: 1px dashed #3a221b;
+  break-inside: avoid;
+}
+
 /* Two-line suggestions: fewer of them on a short phone, so "Lock it in" stays on screen. */
 @media (max-height: 760px) {
   .hint_:nth-child(n + 5) {
