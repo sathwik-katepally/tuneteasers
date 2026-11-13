@@ -33,6 +33,7 @@ import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { songKey } from "../src/lib/utils.js";
 import { EXCLUDE_RX } from "../src/lib/constants.js";
+import { shrunkLanguages } from "./corpus-guard.mjs";
 
 const REPO = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const CFG = JSON.parse(fs.readFileSync(path.join(REPO, "scripts/corpus.config.json"), "utf8"));
@@ -675,6 +676,9 @@ const COLS = ["id", "title", "film", "year", "yearVerified", "language", "singer
     const n = songs.filter(s => s.language === lang).length;
     if (n < CFG.minSongsPerLanguage){ console.error(`REFUSING to write ${OUT}: only ${n} ${lang} songs (< ${CFG.minSongsPerLanguage})`); process.exit(1); }
   }
+  const perLanguage = Object.fromEntries(Object.keys(LANGS).map(l => [l, songs.filter(s => s.language === l).length]));
+  const shrunk = shrunkLanguages(perLanguage, path.join(REPO, "public/corpus.json"), CFG.minShareOfCommitted);
+  if (shrunk.length){ console.error(`REFUSING to write ${OUT}: ${shrunk.join("; ")}`); process.exit(1); }
   const tagTable = Object.fromEntries(CAT_IDS.map(c => [c, Object.fromEntries(Object.keys(LANGS).map(l => [l, songs.filter(s => s.language === l && s.tags.includes(c)).length]))]));
   console.table(tagTable);
   for (const c of CAT_IDS){

@@ -47,7 +47,7 @@ Gotchas: screens cross-fade out through `AnimatePresence`, so after a click wait
 
 ### E2E in CI
 
-`.github/workflows/e2e.yml` runs the key suites on every pull request, on every push to main, nightly (02:30 UTC) and on demand, one job per suite in parallel (about 3-5 minutes wall clock): a pass-the-phone game on each profile, safe-snips and the ladder on each profile, the buzz room and the group sync against a local `wrangler dev`, and the landing and journeys suites.
+`.github/workflows/e2e.yml` runs the key suites on every pull request, on every push to main, nightly (02:30 UTC) and on demand, one job per suite in parallel (about 3-5 minutes wall clock): a pass-the-phone game on each profile, safe-snips on each profile, the desktop ladder, the buzz room and the group sync against a local `wrangler dev`, and the landing and journeys suites.
 `.github/workflows/e2e-release.yml` runs the rest of the release matrix above on pushes to main, nightly (02:30 UTC) and on demand, and alerts through ntfy when it fails; category games play Easy there, since in Music-only the item and mass chips are too thin to pick.
 The shared steps (deps, build, Playwright browsers cached per version) are in `.github/actions/e2e-setup`.
 The suites play real songs from the corpus through the deployed Worker and the Saavn CDN; the song draw is random, so recorded responses would rarely match a run and are not used.
@@ -60,7 +60,8 @@ Which runner a suite gets is decided by where its browser plays these AAC/MP4 st
 - The buzz room runs on Linux: only its desktop host plays audio, and the WebKit phones there only render and send frames.
   Its jobs run in Playwright's Docker image (`mcr.microsoft.com/playwright`, tagged with the Playwright version in `package-lock.json` by a small `playwright-image` job), which ships WebKit's and Chromium's system libraries.
   Installing those from Ubuntu's mirror on every run took 13 to 30 minutes on slow days in October 2026, past the job's time limit.
-- Two checks stay off CI because the 3-core macOS runners are too loaded for them: the phone Easy ladder (its 150ms "Now playing" hand-off check missed by 170-290ms in 2 of 5 runs) and the buzz room with a phone host (4 WebKit pages; a phone's "You're in" timed out in 2 of 3 runs). Run them locally.
+- Two checks stay off the per-PR suites because the 3-core macOS runners are too loaded for them: the phone ladder (its 150ms "Now playing" hand-off check missed by 170-290ms in 2 of 5 Easy runs, and by 160-209ms on Medium in 4 of the 5 failed E2E runs on main in the two weeks to 2026-11-13, all on data-only commits) and the buzz room with a phone host (4 WebKit pages; a phone's "You're in" timed out in 2 of 3 runs).
+  Run them locally: `npm run e2e:ladder -- --profile=phone --difficulty=easy` and `--difficulty=medium`, and `npm run e2e:room -- --host=phone`.
 - A fresh macOS runner indexes its disk for Spotlight for the first minutes (load averages above 20 on 3 cores), which starves the timers the hand-off checks measure; the setup action turns indexing off.
 
 
@@ -113,7 +114,8 @@ Play counts move every week, so the file practically always changes.
 The nightly snips refresh scores the newly added songs.
 A failed run turns the job's Gatus check red, and the morning brief names it.
 The script calls the Wikidata SPARQL endpoint (two queries per configured language, ~1 minute total), JioSaavn's `api.php` (a few hundred playlist fetches and roughly one title search per compilation copy, at concurrency 4) and English Wikipedia for the song categories (one title lookup per 50 candidate titles and one raw article per film, about 1,200); a full build takes about 15 minutes.
-It refuses to write a corpus with fewer than `minSongsPerLanguage` songs in either language, or with a song category below its `minTagged`, so a broken upstream leaves the last good corpus in place.
+It refuses to write a corpus with fewer than `minSongsPerLanguage` songs in any language, with a language below `minShareOfCommitted` of the songs the committed `public/corpus.json` holds for it (`scripts/corpus-guard.mjs`), or with a song category below its `minTagged`, so a broken upstream leaves the last good corpus in place.
+A deliberate cut deeper than that share needs `minShareOfCommitted` lowered in `scripts/corpus.config.json` for that build.
 Run it locally with `CORPUS_CACHE=<dir>` to cache upstream responses across reruns and `CORPUS_REPORT=<file>` for a per-song decision log (the input for hand checks).
 
 ## Snips refresh CI
