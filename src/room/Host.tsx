@@ -44,6 +44,7 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
   const deadRun = useRef(0);
   // What this screen has decided and the room may not have heard yet; the sync below delivers it.
   const [gaveUp, setGaveUp] = useState(false);
+  // Cue ids start over in a new room, so "New room" clears this.
   const [skipCue, setSkipCue] = useState(0);
   // The room was still in the show before when this one began, so that show's `end` comes before this one's `start`.
   const unended = useRef(false);
@@ -435,7 +436,7 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
       screen = <Loading settings={settings} />;
       break;
     case "failed":
-      screen = <RoomTrouble gone={!!room.gone} onBack={() => { setShow(null); onExit(false); }} onRetry={() => { setShow(null); setPhase("opening"); }} />;
+      screen = <RoomTrouble gone={!!room.gone} onBack={() => { setShow(null); onExit(false); }} onRetry={() => { setShow(null); setSkipCue(0); setPhase("opening"); }} />;
       break;
     case "lobby":
       screen = <Lobby code={code} view={view} link={room.link} settings={settings} error={error}
