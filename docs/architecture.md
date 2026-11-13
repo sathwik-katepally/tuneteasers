@@ -3,7 +3,7 @@
 ## Module layout
 
 - `index.html` - static shell; React 19 renders all UI into `#root`.
-- `src/main.tsx` - entry point; loads the fonts (`@fontsource` Rozha One and Mukta), global styles, and renders `App` plus the debug overlay.
+- `src/main.tsx` - entry point; loads the fonts (`@fontsource` Rozha One and Mukta), global styles, and renders `App` inside an error boundary (`react-error-boundary`, with `Crashed` as its fallback) plus the debug overlay, which stays outside the boundary.
 - `src/app.tsx` - the saved-state owner and the router: the persisted `state` and its save effect, the hash-link listener, the home screen and the screen switch, with the pass-the-phone turn in `usePassTheGame` and the buzz-in room owners behind `screen: "host" | "buzzer"`.
 - `src/game/usePassTheGame.ts` - the pass-the-phone turn engine: the per-turn state that is not saved (phase, clip, revealed track, verdict, steal) and every handler the game screens call, owning a turn the way `Host` owns a room.
 - `src/room/` - buzz-in rooms (docs/room-mode.md): `Host` (the host screen's state owner, with `Lobby` and `HostPlaying`) and `Phone` (a phone's join, buzzer and answer pad).
@@ -21,7 +21,7 @@
 - `src/lib/engine.js` - the audio engine (songs and synthesised sound effects) and screen wake lock.
 - `src/lib/ladder.ts` - `playRung`, which plays a clip ladder rung through the engine, and `useClipPlayer`, the turn record and play sequence (status, started/ended/failed bookkeeping, the stream-error note) that the pass-the-phone game and the room host share.
 - `src/styles/tokens.css`, `src/styles/global.css` - design tokens (colors, fonts, hard shadows) and the few global classes (`.btn*`, `.display`, `.eyebrow`, `.grain`, `.link`, the debug overlay).
-- `src/components/` - the cinema pieces, each with a CSS Module: `Theatre` (marquee, curtains, seat backs, the home and game menus, and an `aside` pinned beside the stage on wide screens), `Bulbs` (bulb rows and frames), `Ticket`, `Curtain`, `Stamp`, `SplitFlap`, `Seg` (segmented radio, and `MultiSeg`, its toggle-button form for the languages), `CategoryPicker` (the setup screen's song-category stubs), `ClipStrip` (the clip ladder as a film strip with the clip's progress, shared by `Playing` and `HostPlaying`), `Equalizer`, `Reel`, `GroupPanel` (the home-screen group card), `Qr`, `Stage` (the theatre plus the screen cross-fade, used by every state owner), `AutoNext` (a primary button that moves on by itself after a countdown, with Pause, used by the room's lobby, reveal and box office), and `DebugLog`.
+- `src/components/` - the cinema pieces, each with a CSS Module: `Theatre` (marquee, curtains, seat backs, the home and game menus, and an `aside` pinned beside the stage on wide screens), `Bulbs` (bulb rows and frames), `Ticket`, `Curtain`, `Stamp`, `SplitFlap`, `Seg` (segmented radio, and `MultiSeg`, its toggle-button form for the languages), `CategoryPicker` (the setup screen's song-category stubs), `ClipStrip` (the clip ladder as a film strip with the clip's progress, shared by `Playing` and `HostPlaying`), `Equalizer`, `Reel`, `GroupPanel` (the home-screen group card), `Qr`, `Stage` (the theatre plus the screen cross-fade, used by every state owner), `AutoNext` (a primary button that moves on by itself after a countdown, with Pause, used by the room's lobby, reveal and box office), `Crashed` (what a render crash shows instead of a blank page: a plain message and a Reload button, with the error logged as `js-error`), and `DebugLog`.
 - `src/screens/` - one component and CSS Module per screen: `Landing`, `Setup`, `GroupScreen`, `Loading`, `Handover`, `Countdown`, `Playing`, `Reveal`, `Scoreboard`, `Podium`, `PastGames`.
 - `tsconfig.json` - strict UI type checking; `src/lib/constants.js`, `utils.js`, `answer.js`, `engine.js` and `log.js` stay JavaScript with `allowJs` and `checkJs` off.
 
@@ -45,9 +45,12 @@ A `max-height: 760px` pass tightens spacing so every in-game screen fits a short
 `history` holds one `{ id, song, points, round }` entry per judged turn; the box office derives each round's gains from it.
 Every `state` change is saved to localStorage (`tuneteasers_v7`) by an effect; `loadSaved` restores and sanitizes it on boot.
 A save from the pre-points version (`tuneteasers_v6`) is migrated once: players keep their names, scores are multiplied by `LEGACY_SCORE_SCALE`, "With vocals" becomes Easy and "Music only" Medium, and the old key is removed on the next save.
-Unreadable or finished saved games are discarded instead of offered for resume.
+Unreadable saved games are discarded instead of offered for resume.
 A page load lands on the home screen; an unfinished game shows a Resume/Discard card there, with the setup folded under "Start a new show instead".
-The one exception is a first visit, which opens the landing page instead (see Screens and phases).
+The exceptions are a first visit, which opens the landing page instead (see Screens and phases), and a finished saved game, which opens on the podium (`done`), so a tab that iOS reloads on the final count or the podium still shows the result.
+A finished game is never offered for resume.
+It stays saved until "New show", "Same crowd again" or a new show from the home screen replaces it.
+The reload sends its group result again under the same `id`, so it is still recorded once.
 The marquee menu offers "Home, keep the game" (resumable) and "End game" (in-app two-step confirm, clears the game).
 
 Ephemeral per-turn state (`phase`, `turn`, the revealed track, `verdict`, the `steal`, the stream-error `note`, the `skipped` title shown on the next countdown and `boardRound`) is separate `useState` in `usePassTheGame` and intentionally not saved.
@@ -112,6 +115,7 @@ Teams: turns rotate through teams; if a team lists members, the phone holder rot
 ## Skips
 
 "Skip this song" is offered while listening, for any reason (heard it to death, nobody will know it, a dead stream), free and unlimited, and it keeps the same contestant.
+It works while a clip is still cueing too, so a slow stream never locks the turn.
 The next queued song comes in, and the skipped title goes up on the next countdown ("Skipped: Kesariya") so the room sees what was skipped.
 Nothing is recorded: the song was not heard through, so it stays in play for later shows (docs/song-loading.md).
 A stealer sees "Nobody knows it" instead, except after a stream error, when the skip is offered to whoever holds the phone.

@@ -22,7 +22,8 @@ export const engine = {
   ctx:null, el:null, pre:null, timer:null, boundary:null, session:0, pool:[],
   ac(){
     if (!this.ctx) this.ctx = new (window.AudioContext||window.webkitAudioContext)();
-    if (this.ctx.state === "suspended") this.ctx.resume();
+    // iOS parks the context in "interrupted", not "suspended", after a lock or a call.
+    if (this.ctx.state !== "running") this.ctx.resume()?.catch(() => {});
     return this.ctx;
   },
   stop(){
@@ -112,12 +113,16 @@ export const engine = {
       gate.gain.setValueAtTime(0, c.currentTime + secs);
       el._ttSrc.connect(gate); gate.connect(c.destination);
       el._ttOut = gate;
-    } catch(e){ log("snip-fail", { id, msg:errMsg(e) }); return "failed"; }
+    } catch(e){
+      // A seek that stalls out after a skip belongs to the abandoned clip, not the turn now on screen.
+      if (s !== this.session) return "superseded";
+      log("snip-fail", { id, msg:errMsg(e) }); return "failed";
+    }
     el.muted = false;
     this._clip(el, s, id, snip.startSec + offset + secs, gate, cb);
     this._play(el, s, id, cb.onBlocked, cb.onErr);
     this._mark("snip");
-    log("play", { id, mode:"snip", snip:snip.startSec, offset, secs });
+    log("play", { id, mode:"snip", snip:snip.startSec, offset, secs, ctx:this.ctx.state });
     return "snip";
   },
   /* Stop a clip at media time `end`. The clip counts as started (onStart)
