@@ -111,7 +111,7 @@ jobs:
           worker: true
       - run: cat /proc/loadavg
       - run: npm run e2e:room && npm run e2e:room-background
-      # Every room screen that lists players, with 4 and with 24 seats; the shots are kept for review.
+      # Every room screen that lists players, with 4, 8 and 24 seats; the shots are kept for review.
       - run: npm run e2e:room-crowd -- --shots=e2e-shots/room-crowd
       - if: always()
         uses: actions/upload-artifact@v7

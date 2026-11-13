@@ -5,14 +5,14 @@
    as the host), and the phone's final screen at 390x844. A screen fails when
    the page scrolls or a player's name is not on screen; at 390px the lobby may
    scroll, as in e2e/room.mjs.
-   node e2e/room-crowd.mjs [--seats=4,24] [--shots=dir] */
+   node e2e/room-crowd.mjs [--seats=4,8,24] [--shots=dir] */
 import fs from "node:fs";
 import path from "node:path";
 import { chromium, webkit, devices } from "playwright";
 import { serve, args, localWorker, silence, skipLanding, moreSettings, wireWorker, MUTE_ARGS } from "./harness.mjs";
 import { displayTitle } from "../src/lib/utils.js";
 
-const A = args({ seats: "4,24" });
+const A = args({ seats: "4,8,24" });
 const counts = A.seats.split(",").map(Number);
 const shotsDir = A.shots && A.shots !== "true" ? A.shots : null;
 
@@ -57,6 +57,8 @@ const problems = [];
    scrolling, anything in the stage past the right edge, and each of `names`
    that is not on screen (outside the viewport or covered). */
 async function shot(page, file, { names = [], scrolls = false } = {}){
+  // From the top, as the screen first shows: a click on Pause scrolls a long page down to it.
+  await page.evaluate(() => scrollTo(0, 0));
   await page.waitForTimeout(500);
   const got = await page.evaluate(names => {
     const spill = document.documentElement.scrollHeight - innerHeight;
