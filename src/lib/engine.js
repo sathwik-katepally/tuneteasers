@@ -112,7 +112,11 @@ export const engine = {
       gate.gain.setValueAtTime(0, c.currentTime + secs);
       el._ttSrc.connect(gate); gate.connect(c.destination);
       el._ttOut = gate;
-    } catch(e){ log("snip-fail", { id, msg:errMsg(e) }); return "failed"; }
+    } catch(e){
+      // A seek that stalls out after a skip belongs to the abandoned clip, not the turn now on screen.
+      if (s !== this.session) return "superseded";
+      log("snip-fail", { id, msg:errMsg(e) }); return "failed";
+    }
     el.muted = false;
     this._clip(el, s, id, snip.startSec + offset + secs, gate, cb);
     this._play(el, s, id, cb.onBlocked, cb.onErr);
