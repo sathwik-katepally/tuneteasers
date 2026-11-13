@@ -104,7 +104,7 @@ A phone that joins mid-show records the songs revealed before it arrived as well
 ## Protocol
 
 JSON over one WebSocket per device at `/parties/room/<CODE>`.
-Admission happens at the upgrade, before a socket joins the room: an unclaimed code gets a socket closed with 4404, and a room with 48 open sockets closes new ones with 4429.
+Admission happens at the upgrade, before a socket joins the room: an unclaimed code gets a socket closed with 4404, and a room with 56 open sockets closes new ones with 4429.
 The first message must be a hello; anything else is refused until then, and a connection that says nothing for 10 seconds is closed with 4401 (an alarm, so it works while the room hibernates).
 
 | From | Message | Does |
@@ -144,8 +144,8 @@ Codes are four letters from `BCDFGHJKLMNPQRSTVWXZ` (no vowels, so no words).
   Buzzes that change nothing (repeated, late, locked out) do not write storage or broadcast.
 - An answer after the answer clock has run out counts as a timeout even if the alarm has not fired yet.
 - Claiming a code closes any socket left from an expired room with the same code.
-- Validation: 24 players, 48 connections, names 24 characters, guesses 80, titles 120, 60 near titles per song, 200 songs, 64 KB host messages, 32 KB for a phone's `join` and 1 KB for its other messages, answer time 5 to 60 seconds.
-  The 48 connections hold the host and 24 phones (25 sockets) with 23 to spare for sockets that overlap while a device reconnects; one refused at the cap (4429) retries by itself.
+- Validation: 24 players, 56 connections, names 24 characters, guesses 80, titles 120, 60 near titles per song, 200 songs, 64 KB host messages, 32 KB for a phone's `join` and 1 KB for its other messages, answer time 5 to 60 seconds.
+  The cap counts every open socket, the host's included, and a reconnect does not close the seat's older socket, so the 56 connections hold two sockets for each of the 25 devices (the host and 24 phones) with 6 to spare; one refused at the cap (4429) retries by itself.
   A seat's songs (`ROOM_HEARD` in `src/lib/constants.js`, shared by the phone and the room): at most 300 kept, keys of 1 to 80 characters without control characters, whole hours from 1 to a year and a day; anything else is dropped, and a `heard` that is not a map is ignored.
 - Free tier: WebSocket messages count 20:1 against Durable Object requests, and a hibernating room with idle sockets costs nothing.
 
