@@ -7,8 +7,9 @@
      from the baked catalog (Easy only: catalog clips have no Music-only windows).
    --categories picks those song categories (corpus tags) and checks every queued song carries one.
    It also has the first contestant skip a song (title on screen, same
-   contestant, nothing recorded, offered again) and forces one dead stream to
-   check the skip after a stream error moves on the same way and records nothing. */
+   contestant, nothing recorded), skip the next one while its clip is still
+   cueing on a stream too slow to start, and forces one dead stream to check
+   the skip after a stream error moves on the same way and records nothing. */
 import fs from "node:fs";
 import path from "node:path";
 import { serve, open, args, saved, moreSettings, pickLangs, countsSettled } from "./harness.mjs";
@@ -159,11 +160,9 @@ try {
     const mode = await page.evaluate(() => window.__ttLastMode);
     if (!expectMode.includes(mode)) fail(`turn ${turns}: mode ${mode} not in ${expectMode}`);
     await shot("05-playing", 1200);
-    // Playback is requested before the clip is flowing, and the link stays disabled while it loads.
-    const skipReady = () => page.waitForFunction(() => [...document.querySelectorAll("button")].some(b => b.textContent === "Skip this song" && !b.disabled), null, { timeout: 25000 }).catch(() => {});
+    // Playback is requested before the clip is flowing, and the link works while it loads.
     if (turns < 2){
       await skipBtn.waitFor();
-      await skipReady();
       if (await skipBtn.isDisabled()) fail(`turn ${turns}: skip not offered to a fresh contestant`);
     }
     if (turns === 0){
@@ -171,7 +170,13 @@ try {
       const before = (await saved(page)).game;
       const track = before.queue[before.trackIdx];
       heard = { title: track.title, who: before.cast[before.turn].id };
-      await page.evaluate(() => { window.__ttLastMode = null; });
+      // The next song's stream is too slow to start: play() never settles, so its clip stays cueing.
+      await page.evaluate(() => {
+        const P = HTMLMediaElement.prototype, real = P.play;
+        window.__ttStall = true;
+        P.play = function(){ return window.__ttStall ? new Promise(() => {}) : real.call(this); };
+        window.__ttLastMode = null;
+      });
       await skipBtn.click();
       await page.getByText("Skipped", { exact: true }).waitFor();
       if ((await page.getByText(displayTitle(track.title), { exact: true }).count()) !== 1) fail("skipped title not on screen");
@@ -184,10 +189,16 @@ try {
       if (h[k]) fail("skipped song recorded as played");
       if (await page.evaluate(() => localStorage.getItem("tt_tired"))) fail("skip wrote the old tired history");
       await awaitClip();
-      await skipBtn.waitFor();
-      await skipReady();
-      if (await skipBtn.isDisabled()) fail("second skip not offered");
+      await page.getByText("Threading the film").waitFor();
+      if (await skipBtn.isDisabled()) fail("skip locked while a slow clip is cueing");
       await shot("05d-skip-again", 200);
+      const slow = (await saved(page)).game;
+      await page.evaluate(() => { window.__ttStall = false; window.__ttLastMode = null; });
+      await skipBtn.click();
+      await page.getByText("Skipped", { exact: true }).waitFor();
+      const next = (await saved(page)).game;
+      if (next.trackIdx !== slow.trackIdx + 1 || next.turn !== slow.turn) fail("skip while cueing did not bring the same contestant a new song");
+      await awaitClip();
     }
     if (!extended){
       await page.getByText("Guess, or hear more").waitFor({ timeout: 20000 });

@@ -90,7 +90,7 @@ export function Playing({ name, track, phase, turn, note, onPlay, onJudge, onHin
           </button>
           {stealing && !note.includes("Skip it")
             ? passTo && <button type="button" className={s.link} onClick={() => onJudge("wrong")} disabled={cueing}>Nobody knows it</button>
-            : <button type="button" className={s.link} onClick={onSkip} disabled={cueing}>Skip this song</button>}
+            : <button type="button" className={s.link} onClick={onSkip}>Skip this song</button>}
         </div>
       </div>
     </div>

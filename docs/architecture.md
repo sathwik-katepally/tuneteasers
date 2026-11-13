@@ -112,6 +112,7 @@ Teams: turns rotate through teams; if a team lists members, the phone holder rot
 ## Skips
 
 "Skip this song" is offered while listening, for any reason (heard it to death, nobody will know it, a dead stream), free and unlimited, and it keeps the same contestant.
+It works while a clip is still cueing too, so a slow stream never locks the turn.
 The next queued song comes in, and the skipped title goes up on the next countdown ("Skipped: Kesariya") so the room sees what was skipped.
 Nothing is recorded: the song was not heard through, so it stays in play for later shows (docs/song-loading.md).
 A stealer sees "Nobody knows it" instead, except after a stream error, when the skip is offered to whoever holds the phone.
