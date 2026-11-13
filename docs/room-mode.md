@@ -18,6 +18,8 @@ Autocomplete offers every known title in the show's languages; if she is right s
 - The room (`worker/src/room.js`) is one Durable Object per room code, built on PartyServer with WebSocket hibernation.
   It is the referee: it orders buzzes as they arrive, runs the answer clock, judges answers and holds the scores.
 - A phone (`src/room/Phone.tsx`) only joins, buzzes and types. It never plays audio.
+  While it has a seat it holds a screen wake lock (`keepAwake` in `src/lib/engine.js`), so it does not lock mid-show and miss the buzz.
+  The browser drops the lock when the page is hidden, so the phone asks again each time it comes back.
 - `src/lib/room.ts` is the client side: making a room, the `#room=` link, the PartySocket connection (`useRoom`) and what each device remembers.
 - `src/lib/answer.js` folds titles for matching and ranks autocomplete suggestions; the phone and the Worker import the same file.
 
@@ -42,6 +44,7 @@ Autocomplete offers every known title in the show's languages; if she is right s
    - wrong or out of time: that player is locked out for the song and the next in the queue answers;
    - queue empty: `missed`. After a short beat (`ROOM_WRONG_BEAT_MS`) the host plays the next rung for everyone (the ladder's "Hear more": only the new stretch, `playRung` in `src/lib/ladder.ts`), or reveals once the ladder is spent. If a buzz cut the clip short, the next play starts from the top of the window instead, and on the last rung it replays. Buzzes are still accepted during the beat.
 5. When a clip ends with nobody buzzing, buzzing stays open for `ROOM_GRACE_SECS`, then the next rung plays. The host can also tap "Hear more" or "Reveal it".
+   "Hear more" ("Play it again" on the last rung) is off while a clip is still playing: the next rung starts where this one ends, so a tap would skip the seconds not yet heard.
 6. If every player is locked out the song is revealed straight away.
 
 ## Nobody works the big screen
@@ -72,6 +75,10 @@ A skip puts the song in state `skipped` without a result, a reveal or its answer
 The host acts on the room's skip count rather than on a tap, so each skip happens exactly once, a reload included (`skipsSeen` in the saved show): it stops the audio and cues song `n` again with the next queued song; nothing is recorded, since the song was not heard through.
 Its countdown shows "Skipped: <title>" on the big screen only.
 A stream error has its own "Skip this song" on the host, which re-cues `n` without asking the room.
+When it is the first clip that never starts, the song is still in `cue`: nobody heard it and no phone can vote to skip it.
+The host then skips it the same way by itself, `ROOM_DEAD_CLIP_MS` after the note went up (`onFailed` in `useClipPlayer`).
+It waits while its link to the room is down, since an offline host fails every stream and the skips would run through the whole queue.
+For the same reason it skips at most `ROOM_DEAD_CLIP_SKIPS` songs in a row this way; after that the note stays up until someone taps "Skip this song", and the count starts over once a clip plays.
 
 A show is `rounds × ROOM_SONGS_PER_ROUND` songs, with the box office after every round.
 "Same crowd again" on the podium starts a new show in the same room with scores reset; the phones stay in their seats.
@@ -130,6 +137,10 @@ Codes are four letters from `BCDFGHJKLMNPQRSTVWXZ` (no vowels, so no words).
   Every reconnect (PartySocket retries on its own) says hello with the key, so a dropped, reloaded or reopened phone keeps its seat and score.
 - A device coming back from the background (more than 2 seconds hidden, or restored from the back-forward cache) reconnects straight away.
   iOS suspends a backgrounded page and can drop its socket without a close event, so it would look open and receive nothing: a host that left Safari to send the code would never see who joined meanwhile.
+- The host sends each `song`, `clip`, `reveal` and `end` once, and a message sent while its link is down is dropped (`send` in `src/lib/room.ts`).
+  PartySocket's own buffer stays off: it would flush before the hello, and the room would answer `hello-first`.
+  So the host does not carry a song on while its link is down: the beat after a miss and the grace window wait for the link to reopen.
+  When it reopens, the host sends what the room is missing: the `song`, the `clip` when the room's rung or state is behind the host's, the `reveal` of a song the host gave up on, and the `end` of a finished show.
 - The room link `#room=CODE` stays in the address bar while a phone is in the room, so a reload goes straight back in.
 - The host keeps its show (code, host secret, queue and position) in `tt_room_host`. After a reload the home screen offers "Resume", and the host reconciles with the room rather than its saved counters: a song the room finished while the host was away (someone answered during the reload) counts as played and comes back on its reveal, a reload on the final reveal returns to that reveal and the end of the show, and only an unfinished song starts over.
 - Close codes 4404 (no such room), 4403 (not the host, or removed) and 4410 (room expired) stop the retries and send the device home with a message.
@@ -170,7 +181,7 @@ A film that is also a song's title is left to that song's entry.
 ## Testing
 
 `npm run e2e:room` (`e2e/room.mjs`) starts a local `wrangler dev` and proxies the room WebSockets to it from Playwright, recording every frame.
-Desktop Chromium hosts (or a WebKit iPhone with `--host=phone`; `--difficulty=medium` plays a Music-only show) and three WebKit iPhones in separate contexts play a full 12-song show that the big screen runs by itself under the emulated iOS autoplay rule (no refused play, a held lobby that waits, then starts by itself, reveals and box offices that move on, a paused final reveal that stays): join by typed code and by link, a buzz race in arrival order, wrong answer to the next buzzer, right answer at the rung's points, "Hear more" and the automatic ladder after a miss, a typed misspelling, a reload and a leave-and-return keeping the seat, the answer clock running out, a film named for half the points, everyone locked out, the box office, skips (two votes of three do not skip, the third does, the host skips on its own twice more, the room refuses a stale skip and a skip after a buzz, nothing lands in the host's history, and the skipped title on the big screen only), the host reloading while a phone answers (the room scores it once and the host resumes on its reveal), the host reloading on the final reveal, podium totals against the room's results, each phone's final place, and "Same crowd again".
+Desktop Chromium hosts (or a WebKit iPhone with `--host=phone`; `--difficulty=medium` plays a Music-only show) and three WebKit iPhones in separate contexts play a full 12-song show that the big screen runs by itself under the emulated iOS autoplay rule (no refused play, a held lobby that waits, then starts by itself, reveals and box offices that move on, a paused final reveal that stays): join by typed code and by link, a buzz race in arrival order, wrong answer to the next buzzer, right answer at the rung's points, "Hear more" and the automatic ladder after a miss, a typed misspelling, a reload and a leave-and-return keeping the seat, the answer clock running out, a film named for half the points, everyone locked out, the box office, skips (two votes of three do not skip, the third does, the host skips on its own twice more, the room refuses a stale skip and a skip after a buzz, nothing lands in the host's history, and the skipped title on the big screen only), the host reloading while a phone answers (the room scores it once and the host resumes on its reveal), the host reloading on the final reveal, three dead streams seeded into the saved queue (the host skips two by itself and waits on the third), the host's link dropping (through the beat after a miss, under a tapped "Reveal it" and at the end of the show; `cut` on the proxy), each phone asking for a screen wake lock, podium totals against the room's results, each phone's final place, and "Same crowd again".
 It then probes the room directly: a foreign origin, an unclaimed code, a wrong host token, silent sockets up to the cap and their 4401 timeout (in a browser page with its own context: Node's WebSocket reports a close the server starts late or never, and the game contexts route the Worker's host through the script's Node proxy, which matters when `--worker` is production), frames before a hello, a host command from a phone, an oversized frame, a flood, and song numbers out of order.
 `--phone=se` plays on 320px iPhone SEs. `--worker=<origin>` runs it against a deployed Worker (the preview one) instead, and `--categories=romantic,...` checks that every song in the show carries one of those tags.
 

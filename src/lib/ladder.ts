@@ -37,6 +37,9 @@ interface ClipOwner {
   /* The clip stopped at its end (the room opens its grace window). A stream
      that failed does not count as ended. */
   onEnded?: () => void;
+  /* This rung never started: the stream is dead, or the clip is not there
+     (the room skips a song whose first clip nobody heard). */
+  onFailed?: (rung: number) => void;
 }
 
 /* The turn record and the play sequence that pass-the-phone and the room host
@@ -50,13 +53,15 @@ export function useClipPlayer(owner: ClipOwner){
   live.current = owner;
 
   async function play(rung: number, replay = false){
-    const { track, plain, setStatus, onStarted, onEnded } = live.current;
+    const { track, plain, setStatus, onStarted, onEnded, onFailed } = live.current;
     if (!track) return;
     engine.ac();
     const span = LADDER.span(rung, replay);
     setNote("");
     setTurn(t => ({ ...t, rung, span, clipEndedAt: replay ? t.clipEndedAt : null, cut: false }));
+    let begun = false;
     const started = () => {
+      begun = true;
       setTurn(t => ({ ...t, clipStartedAt: Date.now(), playKey: t.playKey + 1 }));
       setStatus("playing");
       onStarted?.(rung);
@@ -68,6 +73,8 @@ export function useClipPlayer(owner: ClipOwner){
     const failed = () => {
       setNote(plain ? "This song won't stream right now. Skip it to try another." : "This music-only clip isn't available. Skip it to try another.");
       ended();
+      // The engine also reports a stream error on a clip that is already playing.
+      if (!begun) onFailed?.(rung);
     };
     log("snippet", { rung, from: span.from, to: span.to, sound: plain ? "full" : "inst", title: String(track.title).slice(0, 28) });
     setStatus("cueing");

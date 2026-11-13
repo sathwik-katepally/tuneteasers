@@ -141,7 +141,8 @@ export function args(defaults){
    (a local `wrangler dev` or a preview): HTTP through Playwright, WebSockets
    through a proxy in the test script that appends every frame to `log` as
    { at, dir: "in" | "out", data }. onIn gets each parsed frame the page
-   receives, onOut each raw frame it sends. */
+   receives, onOut each raw frame it sends. The returned cut(true) drops the
+   context's sockets and refuses new ones until cut(false): a Wi-Fi gap. */
 export const WORKER_HOST = "tuneteasers-saavn.sathwik-katepally.workers.dev";
 export async function wireWorker(context, workerOrigin, pageOrigin, log, { onIn, onOut } = {}){
   await context.route(u => u.host === WORKER_HOST, async route => {
@@ -151,7 +152,11 @@ export async function wireWorker(context, workerOrigin, pageOrigin, log, { onIn,
       return route.fulfill({ response: res });
     } catch { return route.abort(); }
   });
+  const open = new Set();
+  let down = false;
   await context.routeWebSocket(u => u.host === WORKER_HOST, ws => {
+    if (down) return void ws.close({ code: 1000 });
+    open.add(ws);
     const u = new URL(ws.url());
     const up = new WebSocket(workerOrigin.replace(/^http/, "ws") + u.pathname + u.search, { headers: { origin: pageOrigin } });
     const pending = [];
@@ -169,8 +174,10 @@ export async function wireWorker(context, workerOrigin, pageOrigin, log, { onIn,
       onOut?.(data);
       if (up.readyState === 1) up.send(data); else pending.push(data);
     });
-    ws.onClose(() => { try { up.close(); } catch {} });
+    ws.onClose(() => { open.delete(ws); try { up.close(); } catch {} });
   });
+  // The wait is bounded: a socket whose page has since gone may never confirm its close.
+  return { cut: async on => { down = on; if (on) await Promise.race([Promise.all([...open].map(ws => ws.close({ code: 1000 }))), new Promise(r => setTimeout(r, 1000))]); } };
 }
 
 export const saved = page => page.evaluate(() => JSON.parse(localStorage.getItem("tuneteasers_v7") || "null"));

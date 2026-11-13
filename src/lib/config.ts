@@ -92,6 +92,10 @@ export const ROOM_FILM_SHARE = 0.5;
 export const ROOM_GRACE_SECS = 6;
 // How long a wrong answer shows on the big screen before the show moves on.
 export const ROOM_WRONG_BEAT_MS = 1800;
+// How long the note about a first clip that won't play stays up before the host skips that song by itself,
+// and how many songs in a row it skips that way before it waits for a tap.
+export const ROOM_DEAD_CLIP_MS = 2500;
+export const ROOM_DEAD_CLIP_SKIPS = 2;
 /* Nobody has to work the big screen: the lobby starts the show this long
    after the last phone sat down, and a reveal and the box office move on by
    themselves after these. Each countdown has a tap to go now and a Pause. */

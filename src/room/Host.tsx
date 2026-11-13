@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { DIFFICULTY, LADDER, ROOM_ANSWER_SECS, ROOM_AUTO_SECS, ROOM_FILM_SHARE, ROOM_GRACE_SECS, ROOM_SONGS_PER_ROUND, ROOM_WRONG_BEAT_MS, hookOffset } from "../lib/config";
+import { DIFFICULTY, LADDER, ROOM_ANSWER_SECS, ROOM_AUTO_SECS, ROOM_DEAD_CLIP_MS, ROOM_DEAD_CLIP_SKIPS, ROOM_FILM_SHARE, ROOM_GRACE_SECS, ROOM_SONGS_PER_ROUND, ROOM_WRONG_BEAT_MS, hookOffset } from "../lib/config";
 import { nearTitles } from "../lib/answer.js";
 import { useClipPlayer } from "../lib/ladder";
 import { answerTitles, buildCrate, halfAnswer, withFreshAt, type AnswerEntry } from "../lib/crate";
@@ -39,6 +39,9 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
   const [revealed, setRevealed] = useState<Revealed | null>(null);
   const [wrong, setWrong] = useState<{ name: string; text: string; timeout: boolean; at: number } | null>(null);
   const [skipped, setSkipped] = useState("");
+  const [dead, setDead] = useState(false);
+  // First clips in a row that never started: past the limit the host waits for a tap, or a dead CDN would run through the queue.
+  const deadRun = useRef(0);
 
   const setShow = (s: HostShow | null) => { setShowState(s); saveHostShow(s); };
   const room = useRoom(show?.code ?? "", show ? { t: "host", token: show.host } : null);
@@ -49,8 +52,10 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
   const ladder = LADDER;
   const player = useClipPlayer({ track, plain,
     setStatus: s => setAudio(a => (s === "playing" && a === "blocked" ? a : s)),
-    onStarted: rung => room.send({ t: "clip", rung, points: ladder.points[rung] }),
+    // A stream the engine gave up on can still start late; a song that plays is not skipped.
+    onStarted: rung => { deadRun.current = 0; setDead(false); room.send({ t: "clip", rung, points: ladder.points[rung] }); },
     onEnded: () => setGraceUntil(Date.now() + ROOM_GRACE_SECS * 1000),
+    onFailed: rung => { if (rung === 0 && deadRun.current++ < ROOM_DEAD_CLIP_SKIPS) setDead(true); },
   });
   const { turn: clip, note, setNote } = player;
 
@@ -188,6 +193,8 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
      only its new stretch, carrying on from where the last one stopped. */
   function playClip(rung: number, replay = false){
     if (!live.current.track) return;
+    gaveUp.current = 0;
+    setDead(false);
     setGraceUntil(null);
     setPhase("song");
     void player.play(rung, replay);
@@ -216,28 +223,37 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
     if (c.rung < ladder.last) playClip(c.rung + 1, c.cut);
     else playClip(c.rung, true);
   }
+  // The song the host last gave up on, until its next clip: a reveal the link dropped goes out again on reopen.
+  const gaveUp = useRef(0);
   function giveUp(){
     engine.stop();
+    gaveUp.current = (live.current.show?.songNo ?? 0) + 1;
     room.send({ t: "reveal" });
   }
 
-  /* `song` and `clip` are sent once; a link that was down at that moment
-     (a Wi-Fi blip in the countdown) never delivered them, and the room would
-     sit on the previous song with buzzers shut. On reopen, send what the
-     room is missing for the song that is playing. */
+  /* `song`, `clip`, `reveal` and `end` are sent once; a link that was down at
+     that moment (a Wi-Fi blip) never delivered them, and the room would sit
+     where it was: buzzers shut, a miss that never moves on, phones never on
+     the final screen. On reopen, send what the room is missing. */
   useEffect(() => {
     if (room.link !== "open") return;
     const { view: v, show: sh, track: t, clip: c, audio: a, phase: p } = live.current;
-    if (p !== "song" || !sh || !t) return;
+    if (!sh) return;
+    if ((p === "board" || p === "done") && v?.phase === "show" && (sh.songNo >= sh.total || sh.idx >= sh.queue.length)) room.send({ t: "end" });
+    if (p !== "song" || !t) return;
     const n = sh.songNo + 1;
-    const cued = v?.song?.n === n;
-    const heard = a === "playing" || a === "listened";
-    if (cued && (v!.song!.state !== "cue" || !heard)) return;
+    const s = v?.song?.n === n ? v.song : null;
+    const owed = gaveUp.current === n;
+    // A clip has started and nobody has buzzed since, so the room should be live on its rung.
+    const heard = a === "playing" || (a === "listened" && graceUntil !== null);
+    const behind = heard && (s?.state === "cue" || s?.state === "missed" || s?.rung !== c.rung);
+    if (s && !owed && !behind) return;
     titlePool(sh.langs).then(titles => {
       if (live.current.track !== t || live.current.phase !== "song") return;
       const film = halfAnswer(t);
-      if (!cued) room.send({ t: "song", n, title: t.title, film, half: isFilmLang(t.lang) ? "film" : "artist", year: t.year || 0, artist: t.artist || "", near: nearTitles(t.title, film, titles) });
-      if (heard) room.send({ t: "clip", rung: c.rung, points: ladder.points[c.rung] });
+      if (!s) room.send({ t: "song", n, title: t.title, film, half: isFilmLang(t.lang) ? "film" : "artist", year: t.year || 0, artist: t.artist || "", near: nearTitles(t.title, film, titles) });
+      if (owed) room.send({ t: "reveal" });
+      else if (heard) room.send({ t: "clip", rung: c.rung, points: ladder.points[c.rung] });
     });
   }, [room.link]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -270,19 +286,20 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
     } else if (s.state === "revealed" && phase === "song") toReveal(view!);
   }, [view?.seq, view?.song?.state, view?.song?.n]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // A miss gets a beat on screen, then the show carries on.
+  // A miss gets a beat on screen, then the show carries on. Not while the
+  // link is down: the room would never hear of the clip or the reveal.
   useEffect(() => {
-    if (phase !== "song" || view?.song?.state !== "missed") return;
+    if (phase !== "song" || view?.song?.state !== "missed" || room.link !== "open") return;
     const id = window.setTimeout(carryOn, ROOM_WRONG_BEAT_MS);
     return () => window.clearTimeout(id);
-  }, [phase, view?.song?.state, view?.seq]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [phase, view?.song?.state, view?.seq, room.link]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Once a clip ends, buzzing stays open for a few seconds before the next rung.
+  // Once a clip ends, buzzing stays open for a few seconds before the next rung (held, too, while the link is down).
   useEffect(() => {
-    if (phase !== "song" || graceUntil === null || view?.song?.state !== "live") return;
+    if (phase !== "song" || graceUntil === null || view?.song?.state !== "live" || room.link !== "open") return;
     const id = window.setTimeout(carryOn, Math.max(0, graceUntil - Date.now()));
     return () => window.clearTimeout(id);
-  }, [phase, graceUntil, view?.song?.state]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [phase, graceUntil, view?.song?.state, room.link]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function toReveal(v: RoomView){
     const t = live.current.track;
@@ -342,6 +359,16 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
     engine.prime(next.queue[next.idx], next.plain);
     toCountdown(skippedTitle);
   }
+
+  /* A first clip that never started leaves the song in `cue`: nobody heard
+     it and no phone can vote to skip it, so after a beat to read the note
+     the host skips it by itself. Not while the link is down: an offline host
+     fails every stream, and the skips would run through the whole queue. */
+  useEffect(() => {
+    if (!dead || phase !== "song" || room.link !== "open") return;
+    const id = window.setTimeout(skipSong, ROOM_DEAD_CLIP_MS);
+    return () => window.clearTimeout(id);
+  }, [dead, phase, room.link]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* A skip decided by the room (every phone voted, or the host's own tap):
      song n is cued again with the next track, and nothing is recorded.

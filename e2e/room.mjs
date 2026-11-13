@@ -4,11 +4,16 @@
    here) or to --worker=<origin>; room WebSockets go through a proxy in this
    script, which also records every frame each phone receives. Checks:
    - joining by code (typed) and by the #room link,
+   - a seated phone asks for a screen wake lock,
    - a buzz race is answered in the order buzzes reached the room,
    - a wrong answer passes to the next buzzer, a right one scores the rung,
    - nobody knowing carries the clip ladder on (manual and automatic),
    - the answer timer runs out, and everyone locked out reveals the song,
    - a phone that reloads mid-show keeps its seat and score,
+   - a first clip whose stream is dead is skipped by the host itself, up to
+     two songs in a row,
+   - the host's link dropping does not stall the show: the clip after a miss
+     waits for it, and a reveal and the end of the show go out once it is back,
    - the podium matches the room, and every phone's final place does too,
    - skips: two votes of three do not skip, the third does, the host can
      skip on its own as often as it likes, votes close once someone buzzes,
@@ -21,12 +26,13 @@ import path from "node:path";
 import { chromium, webkit, devices } from "playwright";
 import { serve, args, localWorker, silence, skipLanding, moreSettings, pickLangs, wireWorker, MUTE_ARGS, roomFields, sentStrings } from "./harness.mjs";
 import { displayTitle } from "../src/lib/utils.js";
-import { CATEGORIES, DIFFICULTY, LADDER, ROOM_ANSWER_SECS, ROOM_AUTO_SECS, ROOM_FILM_SHARE } from "../src/lib/config.ts";
+import { CATEGORIES, DIFFICULTY, LADDER, ROOM_ANSWER_SECS, ROOM_AUTO_SECS, ROOM_DEAD_CLIP_MS, ROOM_DEAD_CLIP_SKIPS, ROOM_FILM_SHARE, ROOM_WRONG_BEAT_MS } from "../src/lib/config.ts";
 import { songKey } from "../src/lib/utils.js";
 import { LANGUAGES, isFilmLang } from "../src/lib/languages.ts";
 
 const A = args({ difficulty: "easy" });
 const CLIP_POINTS = LADDER.points;
+const DEAD_STREAM = "https://dead-stream.invalid/gone.mp4";
 const categories = A.categories ? A.categories.split(",") : [];
 const shotsDir = A.shots && A.shots !== "true" ? A.shots : null;
 if (shotsDir) fs.mkdirSync(shotsDir, { recursive: true });
@@ -76,10 +82,11 @@ async function device(kind, label){
   const context = await browser.newContext(desk
     ? { viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" }
     : { ...devices[A.phone === "se" ? "iPhone SE" : "iPhone 13"], reducedMotion: "reduce" });
-  await wire(context, label);
+  const link = await wire(context, label);
   await context.addInitScript(silence);
   await context.addInitScript(skipLanding);
   if (kind === "host") await context.addInitScript(iosAutoplay);
+  if (kind === "host") await context.route(u => u.host === new URL(DEAD_STREAM).host, r => r.abort("connectionrefused"));
   // Counts what actually reached the page, to tell a lost frame from an app bug.
   await context.addInitScript(() => {
     const W = window.WebSocket;
@@ -92,12 +99,17 @@ async function device(kind, label){
       }
     };
   });
+  // Counts screen wake lock requests, whether or not this browser has the API.
+  await context.addInitScript(() => {
+    window.__wake = 0;
+    Object.defineProperty(navigator, "wakeLock", { configurable: true, value: { request: async () => { window.__wake++; return { release(){} }; } } });
+  });
   const page = await context.newPage();
   const errors = [], logs = [];
   page.on("console", m => { if (m.text().startsWith("[tt]")) logs.push(m.text()); });
   page.on("pageerror", e => errors.push(`${label}: ${e.message}`));
   page.on("console", m => { if (m.type() === "error" && !/Failed to load resource|net::ERR|WebSocket/.test(m.text())) errors.push(`${label}: ${m.text()}`); });
-  return { label, browser, context, page, errors, logs };
+  return { label, browser, context, page, errors, logs, link };
 }
 
 // Every in-show screen has to fit without scrolling; setup and the lobby may scroll.
@@ -369,6 +381,8 @@ try {
   await dup.browser.close();
   await until("three players in the lobby", () => hostState()?.players.length === 3 && hostState().players.every(p => p.online));
   await host.page.getByText("3 in").waitFor();
+  // A seated phone keeps its screen on: one that locks mid-show loses the buzz race.
+  for (const p of phones) if (!(await p.page.evaluate(() => window.__wake))) fail(`${p.label}'s phone did not ask to stay awake`);
   await shot(host, "host-03-lobby-full");
   await shot(meena, "phone-03-waiting");
 
@@ -438,6 +452,7 @@ try {
   await nextSong(2);
   await live(2, 0);
   const more = host.page.getByRole("button", { name: /^Hear \d+s more$/ });
+  if (!(await more.isDisabled())) fail("Hear more can be tapped while the clip is still playing, which skips the rest of it");
   await until("first clip over", () => host.page.getByText(/^Anyone\?/).isVisible());
   await shot(host, "host-08-grace");
   await more.click();
@@ -447,6 +462,15 @@ try {
   await answer(meena, await wrongTitle());
   const after = Math.min(2, LADDER.last);
   await until("song 2 missed", () => song().state === "missed" || (after > 1 && song().rung === after));
+  // The host's Wi-Fi drops through the beat after the miss. The next clip
+  // waits for the link: played into the gap, the room would never hear of it
+  // and would sit on the miss.
+  const clips = () => host.page.evaluate(() => window.__ttClips.length);
+  const played = await clips();
+  await host.link.cut(true);
+  await sleep(ROOM_WRONG_BEAT_MS + 1500);
+  if ((await clips()) !== played) fail("the host played the next clip while its link was down");
+  await host.link.cut(false);
   await live(2, after);
   await shot(meena, "phone-10-out-next-rung");
   await buzz(asha);
@@ -580,7 +604,41 @@ try {
   };
   for (let n = 5; n <= show.total; n++){
     await nextSong(n);
+    if (n === 8){
+      // The streams seeded at the reload never start. Each song is still in
+      // cue, where no phone can vote to skip it, so the host skips it by
+      // itself. It stops at the third in a row and waits for a tap: a dead CDN
+      // would otherwise run through the whole queue.
+      const note = host.page.getByText(/won't stream right now|isn't available/);
+      const skips = hostState().skips;
+      for (let k = 0; k <= ROOM_DEAD_CLIP_SKIPS; k++){
+        const cue = song().cue;
+        await note.waitFor({ timeout: 30000 });
+        if (k === ROOM_DEAD_CLIP_SKIPS){
+          await sleep(ROOM_DEAD_CLIP_MS + 1500);
+          if (song().cue !== cue || !(await note.isVisible())) fail(`the host skipped more than ${ROOM_DEAD_CLIP_SKIPS} dead songs in a row by itself`);
+          await host.page.getByRole("button", { name: "Skip this song" }).click();
+        }
+        await until(`dead song ${k + 1} skipped`, () => song().cue !== cue);
+        // The old screen fades out with its note still on it.
+        await note.waitFor({ state: "hidden" });
+      }
+      const s = await hostShow();
+      if (s.songNo !== 7 || s.queue.slice(s.idx - ROOM_DEAD_CLIP_SKIPS - 1, s.idx).some(t => t.stream !== DEAD_STREAM)) fail("the dead songs were not swapped for the next one in the queue");
+      if (hostState().skips !== skips) fail("a dead stream counted as a skip in the room");
+    }
     await live(n, 0);
+    if (n === 6){
+      // The link is down when the host taps "Reveal it": the reveal reaches the room once it is back.
+      await host.link.cut(true);
+      await host.page.getByText("Reconnecting to the room").waitFor();
+      await host.page.getByRole("button", { name: "Reveal it" }).click();
+      await sleep(1000);
+      await host.link.cut(false);
+      await revealed(n);
+      if (song().winner !== null) fail("a reveal sent after a link gap scored for someone");
+      continue;
+    }
     const p = phones[n % 3];
     await buzz(p);
     if (n === 7){
@@ -591,6 +649,12 @@ try {
       const title = displayTitle(await currentTitle());
       const before = scoreOf(p.label);
       await reloadHost();
+      // Streams that die: seeded into the saved queue as the next songs, one more than the host skips by itself.
+      await host.page.evaluate(({ stream, songs }) => {
+        const s = JSON.parse(localStorage.getItem("tt_room_host"));
+        for (const t of s.queue.slice(s.idx + 1, s.idx + 1 + songs)) t.stream = stream;
+        localStorage.setItem("tt_room_host", JSON.stringify(s));
+      }, { stream: DEAD_STREAM, songs: ROOM_DEAD_CLIP_SKIPS + 1 });
       await answer(p, title);
       // The host's socket is gone, so this reads what the phone was told.
       await until("song 7 scored while the host was away", () => latest[p.label]?.song?.n === 7 && latest[p.label].song.state === "revealed");
@@ -617,7 +681,12 @@ try {
   await host.page.getByRole("button", { name: "Pause" }).click();
   await sleep((ROOM_AUTO_SECS.reveal + 2) * 1000);
   if (!await host.page.getByRole("button", { name: "Resume" }).isVisible()) fail("the paused reveal moved on");
+  // The link is down when the show ends: the room hears of the end once it is
+  // back, or the phones would never reach their final screen.
+  await host.link.cut(true);
   await host.page.getByRole("button", { name: "Final box office" }).click();
+  await host.page.getByText(/^After round \d+$/).waitFor();
+  await host.link.cut(false);
   await host.page.getByText("Final count").waitFor();
   await host.page.getByRole("button", { name: "Same crowd again" }).waitFor({ timeout: (ROOM_AUTO_SECS.board + 10) * 1000 });
   const refused = await host.page.evaluate(() => Number(sessionStorage.getItem("tt_e2e_blocked") || 0));
