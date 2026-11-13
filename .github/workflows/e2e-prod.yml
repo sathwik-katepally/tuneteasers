@@ -1,8 +1,9 @@
 name: E2E production
 
-# The game suite against the live site instead of a local build of dist/, on
-# demand only: gh workflow run e2e-prod.yml. Runners follow e2e.yml: phone
-# WebKit on macOS, desktop Chromium on Linux.
+# The game suite and a buzz-in room against the live site instead of a local
+# build of dist/, on demand only: gh workflow run e2e-prod.yml. Runners follow
+# e2e.yml: phone WebKit on macOS, desktop Chromium on Linux, and the room on
+# Linux in Playwright's Docker image.
 on:
   workflow_dispatch:
 
@@ -24,14 +25,47 @@ jobs:
           - name: game phone
             os: macos-latest
             browsers: webkit
-            run: npm run e2e:game -- --profile=phone
+            run: >-
+              npm run e2e:game -- --profile=phone &&
+              npm run e2e:game -- --profile=phone --mode=teams --mix=hindi --difficulty=easy
           - name: game desktop
             os: ubuntu-latest
             browsers: chromium
-            run: npm run e2e:game -- --profile=desktop
+            run: >-
+              npm run e2e:game -- --profile=desktop &&
+              npm run e2e:game -- --profile=desktop --mix=telugu
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/e2e-setup
         with:
           browsers: ${{ matrix.browsers }}
       - run: ${{ matrix.run }}
+
+  playwright-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      image: mcr.microsoft.com/playwright:v${{ steps.v.outputs.version }}-noble
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: package-lock.json
+          sparse-checkout-cone-mode: false
+      - id: v
+        run: echo "version=$(node -p 'require("./package-lock.json").packages["node_modules/playwright"].version')" >> "$GITHUB_OUTPUT"
+
+  # Not named "buzz room": a dispatch from a branch reports on the branch's
+  # head commit, where that name is a required check of e2e.yml.
+  room:
+    name: buzz room live
+    needs: playwright-image
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    container:
+      image: ${{ needs.playwright-image.outputs.image }}
+      # Chromium needs more shared memory than Docker's default 64MB.
+      options: --ipc=host
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/e2e-setup
+      - run: npm run e2e:room-live
