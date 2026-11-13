@@ -158,8 +158,9 @@ async function wrongTitle(){
 const buzzBtn = p => p.page.locator('button[aria-label="Buzz"]');
 // A tap that lands just as buzzing closes (the song was revealed) is rightly
 // ignored, so a buzz counts once the room has the phone in its queue.
-async function buzz(p){
-  const inRoom = () => { const s = song(), id = idOf(p.label); return s && (s.answering === id || s.queue.includes(id)); };
+// While the host's link is down its view stands still, and `view` reads the phone's own.
+async function buzz(p, view = hostState){
+  const inRoom = () => { const s = view()?.song, id = idOf(p.label); return s && (s.answering === id || s.queue.includes(id)); };
   const t0 = Date.now();
   for (;;){
     if (inRoom()) return;
@@ -650,6 +651,28 @@ try {
       continue;
     }
     const p = phones[n % 3];
+    if (n === 9){
+      // A phone buzzes and answers wrong while the host's link is down and the
+      // clip still plays, so the host never pauses for the answer. Back on the
+      // link it finds the room on a miss with its own clip still running:
+      // buzzing must open again and the show carry on by itself from there.
+      // The last rung played again is the longest clip, which leaves the time.
+      const anyone = () => host.page.getByText(/^Anyone\?/).isVisible();
+      await until("first clip over", anyone);
+      await more.click();
+      await live(n, 1);
+      await until("second clip over", anyone);
+      await host.page.getByRole("button", { name: "Play it again" }).click();
+      await host.page.getByText("Buzz when you know it").waitFor();
+      await host.link.cut(true);
+      await buzz(p, () => latest[p.label]);
+      await answer(p, await wrongTitle());
+      await until("the miss, as the phone sees it", () => latest[p.label].song.state === "missed");
+      await host.link.cut(false);
+      await revealed(n);
+      if (song().winner !== null || !song().guesses.some(g => g.id === idOf(p.label) && !g.ok)) fail("song 9 did not end on the wrong answer given while the host's link was down");
+      continue;
+    }
     await buzz(p);
     if (n === 7){
       // The host screen reloads while a phone is answering, and the phone gets
