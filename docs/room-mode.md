@@ -143,6 +143,7 @@ Instead the host's handlers only record what this screen knows, and one effect i
 | The host knows | The room's view shows | The host sends |
 | --- | --- | --- |
 | The show is over (final box office or podium) | `phase` is still `show` | `end` |
+| The room was still in the show before when this one began ("Same crowd again" in a link gap) | `phase` is still `show` | `end`, then `start` once the room shows it over |
 | A show is on (countdown or song) | `phase` is not `show` | `start` |
 | This track is song `n` | no song `n`, or a cue that is not this track's | `song` |
 | It gave up on the song (a tap, or the ladder is spent) | the track's cue in `cue`, `live` or `missed` | `reveal` |

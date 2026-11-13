@@ -45,6 +45,8 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
   // What this screen has decided and the room may not have heard yet; the sync below delivers it.
   const [gaveUp, setGaveUp] = useState(false);
   const [skipCue, setSkipCue] = useState(0);
+  // The room was still in the show before when this one began, so that show's `end` comes before this one's `start`.
+  const unended = useRef(false);
 
   const setShow = (s: HostShow | null) => { setShowState(s); saveHostShow(s); };
   const room = useRoom(show?.code ?? "", show ? { t: "host", token: show.host } : null);
@@ -168,6 +170,8 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
     await titlePool(show.langs);
     // A phone that sat down while the crate loaded is only in the latest heard.
     const next = freshCue({ ...show, queue, idx: 0, songNo: 0, started: true, skipsSeen: 0 });
+    // "Same crowd again" can come while the last show's `end` is still in a link gap: the room is then in a show that is not this one.
+    unended.current = live.current.view?.phase === "show";
     setShow(next);
     // No prime here: the crate took the tap's gesture with it, and a prime
     // outside a gesture only races the first clip. A strict browser shows
@@ -251,8 +255,12 @@ export function Host({ settings, resume, onExit }: { settings: Settings; resume:
       return;
     }
     if ((phase !== "countdown" && phase !== "song") || !show.started || !track) return;
-    // No titles go to the room here: phones load the public list themselves.
-    if (view.phase !== "show") return void say({ t: "start", langs: show.langs, total: show.total, perRound: show.perRound, answerSecs: ROOM_ANSWER_SECS, filmShare: ROOM_FILM_SHARE });
+    if (view.phase !== "show"){
+      unended.current = false;
+      // No titles go to the room here: phones load the public list themselves.
+      return void say({ t: "start", langs: show.langs, total: show.total, perRound: show.perRound, answerSecs: ROOM_ANSWER_SECS, filmShare: ROOM_FILM_SHARE });
+    }
+    if (unended.current) return void say({ t: "end" });
     if (!song){
       // The room hears about a song from its countdown on; buzzing stays shut until its first clip is actually playing.
       const after = r?.cue ?? 0;
