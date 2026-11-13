@@ -141,16 +141,16 @@
   text-align: center;
 }
 
-/* A buzz-in room past pass-the-phone's 8 players: two columns of tighter
-   rows, ranked down each column, so 24 fit one screen. The round's gains
-   are in the reels below, so the delta column goes. */
-.rows:has(> :nth-child(9)) {
+/* From 8 players one column of rows runs off a 1080p screen: two columns of
+   tighter rows, ranked down each column, so a room of 24 fits. The round's
+   gains are in the reels below, so the delta column goes. */
+.rows:has(> :nth-child(8)) {
   display: block;
   columns: 2;
   column-gap: 8px;
 }
 
-.rows:has(> :nth-child(9)) > .row {
+.rows:has(> :nth-child(8)) > .row {
   --cell-w: 14px;
   --cell-h: 20px;
   --cell-font: 15px;
@@ -161,34 +161,34 @@
   break-inside: avoid;
 }
 
-.rows:has(> :nth-child(9)) .rank {
+.rows:has(> :nth-child(8)) .rank {
   font-size: 17px;
 }
 
-.rows:has(> :nth-child(9)) .name {
+.rows:has(> :nth-child(8)) .name {
   font-size: 12px;
   letter-spacing: 0.04em;
 }
 
-.rows:has(> :nth-child(9)) .delta {
+.rows:has(> :nth-child(8)) .delta {
   display: none;
 }
 
 @media (min-width: 900px) {
-  .rows:has(> :nth-child(9)) {
+  .rows:has(> :nth-child(8)) {
     column-gap: 10px;
   }
-  .rows:has(> :nth-child(9)) > .row {
+  .rows:has(> :nth-child(8)) > .row {
     --cell-w: 19px;
     --cell-h: 26px;
     --cell-font: 20px;
     grid-template-columns: 28px 1fr auto;
     padding: 3px 8px 3px 4px;
   }
-  .rows:has(> :nth-child(9)) .rank {
+  .rows:has(> :nth-child(8)) .rank {
     font-size: 22px;
   }
-  .rows:has(> :nth-child(9)) .name {
+  .rows:has(> :nth-child(8)) .name {
     font-size: 15px;
   }
 }
