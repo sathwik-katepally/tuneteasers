@@ -13,24 +13,22 @@ permissions:
   id-token: write
 
 jobs:
-  deploy:
+  build:
     # Only a push run, since a fork's pull request from a branch named main
     # also matches the branch filter, and only while its commit is still
     # main's tip (github.sha), so a late rerun of an older commit cannot roll
-    # production back.
+    # production back. deploy needs this job, so a skip here skips both.
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'push' &&
       github.event.workflow_run.head_sha == github.sha)
-    # On the job, not the workflow: a skipped run must not cancel a deploy.
+    # A newer build cancels an older one, so the deploys reach the pages group
+    # in the order their runs started.
     concurrency:
-      group: pages
+      group: pages-build
       cancel-in-progress: true
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -50,13 +48,27 @@ jobs:
       - uses: actions/upload-pages-artifact@v5
         with:
           path: dist
+
+  # A job of its own, so re-running it after a failed deploy reuses the one
+  # artifact; a re-run that uploads again leaves two and deploy-pages refuses.
+  deploy:
+    needs: build
+    # On the job, not the workflow: a skipped run must not cancel a deploy.
+    concurrency:
+      group: pages
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
       - id: deployment
         uses: actions/deploy-pages@v5
 
   # Phone alert on failure (ntfy, topic in the NTFY_TOPIC repo secret).
   # failure() is false for a cancelled run, so a superseded run stays quiet.
   alert:
-    needs: [deploy]
+    needs: [build, deploy]
     if: failure()
     runs-on: ubuntu-latest
     timeout-minutes: 2
