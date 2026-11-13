@@ -20,7 +20,8 @@ const DSN = `https://0123456789abcdef0123456789abcdef@${SENTRY_HOST}/1`;
 const SHA = "e2e".padEnd(40, "0");
 const DEAD_HOST = "dead-stream.invalid";
 const INVITE = "abcdefgh2345.AbCdEfGhIjKlMnOpQrStUv";
-const ROOM = "ABCD";
+// A real code has no vowels; anything else is not a room link.
+const ROOM = "BCDF";
 const NAMES = ["Zubeida", "Farrokh"];
 
 const track = n => ({ title: `Hidden Title ${n}`, artist: "Quiet Singer", stream: `https://${DEAD_HOST}/private/clip-${n}.mp4`, duration: 240, year: 2012 });
