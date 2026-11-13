@@ -64,12 +64,16 @@ async function shot(page, file, { names = [], scrolls = false } = {}){
     const spill = document.documentElement.scrollHeight - innerHeight;
     const els = [...document.querySelectorAll("main *")].filter(el => !el.closest("[aria-hidden=true]"));
     const right = Math.max(0, ...els.map(el => el.getBoundingClientRect().right));
-    const seen = n => els.filter(el => !el.children.length && el.textContent === n).some(el => {
-      const r = el.getBoundingClientRect();
-      if (!r.width || r.top < 0 || r.left < 0 || r.bottom > innerHeight + 1 || r.right > innerWidth + 1) return false;
-      const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
-      return !!at && (at === el || el.contains(at));
-    });
+    // Every place a name shows has to be on screen: the answering player's name is also in the heading, and must not stand in for their seat.
+    const seen = n => {
+      const at = els.filter(el => !el.children.length && el.textContent === n);
+      return at.length > 0 && at.every(el => {
+        const r = el.getBoundingClientRect();
+        if (!r.width || r.top < 0 || r.left < 0 || r.bottom > innerHeight + 1 || r.right > innerWidth + 1) return false;
+        const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        return !!hit && (hit === el || el.contains(hit));
+      });
+    };
     return { spill, wide: right - innerWidth, unseen: names.filter(n => !seen(n)) };
   }, names);
   const size = page.viewportSize();
@@ -158,9 +162,12 @@ async function party(n){
       if (k === 1){
         // Song 1: one seat says something wrong, the winner answers, another waits in line.
         const wrong = raws[(raws.indexOf(won) + 2) % raws.length], queued = raws[(raws.indexOf(won) + 1) % raws.length];
-        for (const s of [wrong, won, queued]){ s.send({ t: "buzz" }); await sleep(150); }
+        // Each buzz is in the room's queue before the next goes, so the order holds across the separate sockets.
+        for (const s of [wrong, won, queued]){
+          s.send({ t: "buzz" });
+          await until(`${s.name}'s buzz`, () => song()?.queue.includes(s.id));
+        }
         await answering(k, wrong);
-        await until("the line", () => song().queue.length === 3);
         wrong.send({ t: "answer", text: "xq zv" });
         await answering(k, won);
         await host.getByText("On the buzzer").waitFor();
