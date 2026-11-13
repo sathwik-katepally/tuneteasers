@@ -80,7 +80,14 @@ Which runner a suite gets is decided by where its browser plays these AAC/MP4 st
 
 ## Deploy (GitHub Pages via Actions)
 
-`.github/workflows/deploy.yml` runs on every push to main: it checks TypeScript, builds with Vite, and deploys `dist/` to Pages; Pages is configured with `build_type=workflow`.
+`.github/workflows/deploy.yml` deploys only a commit that passed the checks: it starts when an `E2E` run (`e2e.yml`) for a push to main completes, and deploys only if that run succeeded.
+It checks out the commit that run tested (`workflow_run.head_sha`), not main's tip by then, checks TypeScript, builds with Vite, and deploys `dist/` to Pages; Pages is configured with `build_type=workflow`.
+A push reaches production about 6 minutes after it lands (E2E about 5, the deploy under 1), longer when another E2E run on main is still going, since those queue one at a time.
+The release matrix (`e2e-release.yml`) does not gate the deploy.
+A failed or cancelled E2E run deploys nothing, so production stays on the last good build: a failed one raises E2E's own alert, and a cancelled one was superseded by a newer push, whose run deploys in its place.
+Nightly, manual and pull request E2E runs never deploy; the push check also keeps a fork's pull request from a branch named main from matching.
+Re-running a failed E2E run (`gh run rerun <id> --failed`) deploys its commit once it passes.
+Manual override, for a day E2E is red for an outside reason: `gh workflow run deploy.yml -R sathwik-katepally/tuneteasers` deploys main's tip at once without waiting for E2E.
 The Worker deploys separately through Cloudflare Workers Builds (see Worker below), so nothing orders the two any more: a site change that needs a new Worker route ships in a PR after the route's PR has deployed, and migrations must stay additive so the live site keeps working against the new schema.
 `.github/workflows/verify.yml` runs the same typecheck and build on pull requests, plus `npm run lint` (oxlint with only the two react-hooks rules over `src/`), a Worker `wrangler deploy --dry-run` and the migrations against a throwaway local D1.
 `.github/workflows/e2e.yml` runs the browser suites (see E2E in CI above).
@@ -111,7 +118,7 @@ Test locally with `npx wrangler d1 migrations apply DB --local && npx wrangler d
 main has a ruleset that requires a passing `verify` check and the key E2E jobs (see E2E in CI), which only a pull request starts, so a push made with the workflow's `GITHUB_TOKEN` is refused (and would start no other workflow if it were not).
 The refresh workflows push with a deploy key instead: a write deploy key on the repo, whose private half is the repo secret `DATA_DEPLOY_KEY` (kept in Automic Vault as `TUNETEASERS_DATA_DEPLOY_KEY`) and which main's ruleset lists as a bypass actor (DeployKey).
 The jobs that commit check out with `actions/checkout@v7`, `ssh-key: ${{ secrets.DATA_DEPLOY_KEY }}` and `fetch-depth: 0`, then run `scripts/push-data-commit.sh <message> <paths...>`, which commits the changed files as github-actions[bot], rebases on the branch tip and pushes to the branch the run came from (three tries, in case another push lands in between).
-A push over the key is an ordinary push to main, so it starts `deploy.yml`, `e2e.yml` and `e2e-release.yml` by itself: the data is deployed and checked by the whole E2E matrix at once.
+A push over the key is an ordinary push to main, so it starts `e2e.yml` and `e2e-release.yml` by itself, and the data deploys only once that commit's `E2E` run passes (see Deploy).
 A failed refresh leaves no branch or pull request behind, only the workflow's alert.
 The refresh workflows run with `permissions: contents: read`.
 
