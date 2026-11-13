@@ -682,6 +682,8 @@ try {
       await buzz(p, () => latest[p.label]);
       await answer(p, await wrongTitle());
       await until("the miss, as the phone sees it", () => latest[p.label].song.state === "missed");
+      // An answer that outlasted the clip would pass below without the case this song is here for.
+      if (!(await host.page.getByText("Buzz when you know it").isVisible())) fail("song 9's clip ended before the wrong answer was in, so the host's link came back to no running clip");
       await host.link.cut(false);
       await revealed(n);
       if (song().winner !== null || !song().guesses.some(g => g.id === idOf(p.label) && !g.ok)) fail("song 9 did not end on the wrong answer given while the host's link was down");
