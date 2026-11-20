@@ -116,6 +116,10 @@ try {
       expect(read.headers.get("access-control-allow-origin") === HUB_ORIGIN, `hub read of ${p} came back without its CORS header`);
       const preflight = await from(HUB_ORIGIN, p, { method: "OPTIONS", headers: { "access-control-request-method": "GET" } });
       expect(preflight.status === 204, `hub preflight of ${p} answered ${preflight.status}`);
+      // A browser sends the read only if the preflight names its origin and lets the invite header through.
+      expect(preflight.headers.get("access-control-allow-origin") === HUB_ORIGIN, `hub preflight of ${p} did not name the hub's origin`);
+      expect(/\bauthorization\b/i.test(preflight.headers.get("access-control-allow-headers") || ""), `hub preflight of ${p} does not allow the invite header`);
+      expect(preflight.headers.get("access-control-allow-methods") === "GET", `hub preflight of ${p} offers ${preflight.headers.get("access-control-allow-methods")}`);
     }
     const refused = [
       ["GET", "/group/played"],

@@ -326,12 +326,13 @@ export const isGroupPath = path => path === "/api/groups" || path === "/api/grou
 
 export async function group(request, env, url, ctx){
   const originHeader = request.headers.get("origin");
-  const origin = allowedOrigin(originHeader, env) || hubOrigin(originHeader, env, request, url);
+  const full = allowedOrigin(originHeader, env);
+  const origin = full || hubOrigin(originHeader, env, request, url);
   if (originHeader && !origin) return reply({ success: false, message: "origin not allowed" }, 403, null);
   if (request.method === "OPTIONS"){
     return new Response(null, { status: 204, headers: {
       ...(origin ? { "access-control-allow-origin": origin } : {}),
-      "access-control-allow-methods": "GET, POST, DELETE",
+      "access-control-allow-methods": origin && !full ? "GET" : "GET, POST, DELETE",
       "access-control-allow-headers": "authorization, content-type",
       "access-control-max-age": "86400",
       vary: "Origin",
