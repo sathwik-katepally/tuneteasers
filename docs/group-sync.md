@@ -7,6 +7,7 @@ Everything is optional; with no group, or with the Worker unreachable, the game 
 ## What syncs and what does not
 
 - Synced: every played song (as its `songKey`) with a server timestamp, and each finished pass-the-phone show (date, mode, difficulty, language mix, rounds, songs played, each player or team's name, members and score).
+- Also kept for the group, but written and read by the game night hub and never by this app: finished games of the hub's own games (which game, date, players or teams, each name and score).
 - Not synced: the game in progress (it stays on the phone it started on), blocked artists, presentation settings, rosters, and a buzz-in room's result (its played songs sync like any other, but the host records no show).
 - Never stored server-side: audio, stems, stream URLs or anything else from the song sources.
 
@@ -21,11 +22,14 @@ Everything is optional; with no group, or with the Worker unreachable, the game 
 - The owner secret is the only thing that can delete the group (`DELETE /api/group`); member invites cannot.
 - Group responses are `cache-control: no-store` and never go through the edge cache the Saavn proxy uses.
 - CORS on group routes allows only `ALLOWED_ORIGINS` (the Pages origin) and `http://localhost` / `http://127.0.0.1` on any port; a request with any other `Origin` gets 403.
-- `HUB_ORIGINS` (the game night hub, served from the Game Night site and from its first home on Odd One's site) is a second, read-only list: such an origin may call `GET /api/group` and `GET /api/group/results` and gets 403 on every other group route and on the room routes.
+- `HUB_ORIGINS` (the game night hub, served from the Game Night site and from its first home on Odd One's site) is a second, narrower list.
+  Such an origin may read a group and its finished games (`GET /api/group`, `GET /api/group/results`, `GET /api/group/games`) and record a finished game of its own (`POST /api/group/games`, a game named in `HUB_GAMES`, never a TuneTeasers show).
+  It gets 403 on every other group route and on the room routes, so a fault on that site can add or replace hub game results and nothing else.
+  The list limits a site, not a person: anyone holding the invite can already write as a member.
   A route the hub needs later is added to `HUB_ROUTES` in `worker/src/group.js`, never by moving the origin into `ALLOWED_ORIGINS`.
   The public Saavn proxy routes keep `*`.
 - Rate limits (Workers rate limiting bindings in `worker/wrangler.jsonc`, approximate and per Cloudflare location): 120 group requests a minute per IP, 60 writes a minute per group, 5 new groups a minute per IP.
-- Input validation in `worker/src/group.js`: body size (16 KB, 64 KB for import), song key shape, id shape, name lengths (24, group 32), cast and member counts, score and round ranges, enums.
+- Input validation in `worker/src/group.js`: body size (16 KB, 64 KB for import), song key shape, id shape, name lengths (24, group 32), cast and member counts (a show's cast is at most 8, a hub game's 16), score and round ranges, enums.
 
 ## API
 
@@ -38,21 +42,25 @@ Everything is optional; with no group, or with the Worker unreachable, the game 
 | `GET /api/group/results?before=&limit=` | invite | `{ results, more }`, newest first, 20 per page |
 | `POST /api/group/results` `{ id, finishedAt, mode, difficulty, mix, rounds, songs, cast }` | invite | Records a finished show once; `mix` is the show's language ids as a comma list (`hindi,english`), and the one word older clients send (`bolly`, `telugu`, `both`) is still accepted |
 | `POST /api/group/import` `{ played, tired? }` | invite | One-time import of a phone's own history (at most 1,000 songs across both kinds) |
+| `GET /api/group/games?before=&limit=` | invite | `{ games: [{ id, game, mode, finishedAt, cast }], more }`: the group's shows (as `game: "tuneteasers"`) and its hub games together, newest first, 20 per page |
+| `POST /api/group/games` `{ id, game, mode, finishedAt, cast }` | invite | Records a finished hub game; `game` is one of `HUB_GAMES`, and the same `id` sent again replaces the row unless the copy is older |
 | `DELETE /api/group` | owner | Deletes the group and all its rows |
 
 Each round is an event with a client-made id; the server stamps the time.
 In one D1 batch the event is inserted once (`INSERT OR IGNORE`) and its song's time in `played` or `tired` (by kind) is upserted to `MAX(existing, event time)` from the stored event, so a retried request keeps its first timestamp and a late one cannot shorten the cooldown.
 An older client that sends no `kind` records plays, and one that reads only `played` still gets every played song.
 Results are idempotent by the game's id.
+A hub game has no end screen, so its row can be replaced: the hub saves the same game again after more turns, under the same id, and the newer finish time wins.
 The import is the one place client timestamps are accepted, clamped to the played window and never in the future.
 
 ## Data and retention
 
 Schema: `worker/migrations/` (D1 migrations, applied by CI).
-Tables: `groups`, `played` (group, song key, last played), `tired` (group, song key, last skipped as heard too much), `round_events` (idempotency log, with the kind), `results`.
+Tables: `groups`, `played` (group, song key, last played), `tired` (group, song key, last skipped as heard too much), `round_events` (idempotency log, with the kind), `results`, `game_results` (the hub's games).
 Migrations stay additive: `0002_tired.sql` added `tired` and `round_events.kind` (default `played`) without touching `played`, so a Worker from before it, mid-deploy or after a rollback, keeps recording plays.
+`0003_game_results.sql` gave the hub's games a table of their own instead of a column on `results`: the app renders every row of `results` as a show, and an installed copy of it can be weeks old.
 The client no longer sends `tired` (a skip records nothing); the table, the `kind` and the `tired` map in `GET /api/group/played` stay for old clients, and new clients ignore the map.
-Windows are Worker vars: `PLAYED_TTL_DAYS` (30, for `played`, `tired` and `round_events`; it must stay at least the longest client `COOLDOWN_DAYS`, the 30-day tired cooldown), `RESULT_TTL_DAYS` (365), `GROUP_IDLE_TTL_DAYS` (365 without writes).
+Windows are Worker vars: `PLAYED_TTL_DAYS` (30, for `played`, `tired` and `round_events`; it must stay at least the longest client `COOLDOWN_DAYS`, the 30-day tired cooldown), `RESULT_TTL_DAYS` (365, for `results` and `game_results`), `GROUP_IDLE_TTL_DAYS` (365 without writes).
 Reads filter by these windows, and authentication refuses an idle-expired group, so an expired row is never served.
 Deletion runs from group writes, at most hourly per Worker isolate, because this account's five free cron triggers are all taken; a group nobody writes to is still hidden by the read filters and swept on the next write from any group.
 

@@ -10,6 +10,7 @@
     // The game night hub, on the Game Night site and at its first home on Odd One's, where phones with an
     // older copy of that app still open it. These sites may only read a group and its results.
     "HUB_ORIGINS": "https://oddone.sathwik-katepally.workers.dev,https://gamenight.sathwik-katepally.workers.dev",
+    "HUB_GAMES": "charades,forehead",
     "RESULT_TTL_DAYS": "365",
     "PLAYED_TTL_DAYS": "30",
     "GROUP_IDLE_TTL_DAYS": "365"
@@ -41,6 +42,7 @@
       "vars": {
         "ALLOWED_ORIGINS": "https://sathwik-katepally.github.io",
         "HUB_ORIGINS": "https://oddone.sathwik-katepally.workers.dev,https://gamenight.sathwik-katepally.workers.dev",
+        "HUB_GAMES": "charades,forehead",
         "RESULT_TTL_DAYS": "365",
         "PLAYED_TTL_DAYS": "30",
         "GROUP_IDLE_TTL_DAYS": "365"
