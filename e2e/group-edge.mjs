@@ -6,8 +6,8 @@
    - one failed cooldown read must not stop the next crate from reading again;
    - an invite to a group idle past its expiry is refused, and a write
      cannot bring the group back;
-   - the game night hub's site can read a group and its results, and is
-     refused every write, every other read and the room routes;
+   - each site the game night hub is served from can read a group and its
+     results, and is refused every write, every other read and the room routes;
    - a malformed #join= link shows a clear message instead of throwing.
    node e2e/group-edge.mjs */
 import path from "node:path";
@@ -16,7 +16,7 @@ import { createServer } from "vite";
 import { localWorker, MUTE_ARGS } from "./harness.mjs";
 
 const WORKER_HOST = "tuneteasers-saavn.sathwik-katepally.workers.dev";
-const HUB_ORIGIN = "https://oddone.sathwik-katepally.workers.dev";
+const HUB_ORIGINS = ["https://gamenight.sathwik-katepally.workers.dev", "https://oddone.sathwik-katepally.workers.dev"];
 const worker = await localWorker();
 const vite = await createServer({ root: path.resolve(import.meta.dirname, ".."), server: { port: 0 }, logLevel: "silent" });
 await vite.listen();
@@ -107,20 +107,10 @@ try {
     expect(again.status === 403, "the write brought the expired group back");
   });
 
-  await check("the game night hub's site may read a group and nothing else", async () => {
+  await check("each site the game night hub is served from may read a group and nothing else", async () => {
+    // One group for every site: making more would run into the limit on new groups a minute.
     const made = await (await fetch(worker.origin + "/api/groups", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Edge hub" }) })).json();
     const from = (origin, p, init = {}) => fetch(worker.origin + "/api" + p, { ...init, headers: { origin, authorization: `Bearer ${made.invite}`, "content-type": "application/json", ...init.headers } });
-    for (const p of ["/group", "/group/results"]){
-      const read = await from(HUB_ORIGIN, p);
-      expect(read.status === 200, `hub read of ${p} answered ${read.status}`);
-      expect(read.headers.get("access-control-allow-origin") === HUB_ORIGIN, `hub read of ${p} came back without its CORS header`);
-      const preflight = await from(HUB_ORIGIN, p, { method: "OPTIONS", headers: { "access-control-request-method": "GET" } });
-      expect(preflight.status === 204, `hub preflight of ${p} answered ${preflight.status}`);
-      // A browser sends the read only if the preflight names its origin and lets the invite header through.
-      expect(preflight.headers.get("access-control-allow-origin") === HUB_ORIGIN, `hub preflight of ${p} did not name the hub's origin`);
-      expect(/\bauthorization\b/i.test(preflight.headers.get("access-control-allow-headers") || ""), `hub preflight of ${p} does not allow the invite header`);
-      expect(preflight.headers.get("access-control-allow-methods") === "GET", `hub preflight of ${p} offers ${preflight.headers.get("access-control-allow-methods")}`);
-    }
     const refused = [
       ["GET", "/group/played"],
       ["POST", "/group/rounds", { rounds: [{ id: "edgehubround1", key: "edge hub song" }] }],
@@ -130,11 +120,24 @@ try {
       ["POST", "/groups", { name: "Edge hub made" }],
       ["POST", "/rooms"],
     ];
-    for (const [method, p, body] of refused){
-      const res = await from(HUB_ORIGIN, p, { method, ...(body ? { body: JSON.stringify(body) } : {}) });
-      expect(res.status === 403, `hub ${method} ${p} answered ${res.status}`);
-      const preflight = await from(HUB_ORIGIN, p, { method: "OPTIONS", headers: { "access-control-request-method": method } });
-      expect(preflight.status === 403, `hub preflight for ${method} ${p} answered ${preflight.status}`);
+    for (const hub of HUB_ORIGINS){
+      for (const p of ["/group", "/group/results"]){
+        const read = await from(hub, p);
+        expect(read.status === 200, `${hub} read of ${p} answered ${read.status}`);
+        expect(read.headers.get("access-control-allow-origin") === hub, `${hub} read of ${p} came back without its CORS header`);
+        const preflight = await from(hub, p, { method: "OPTIONS", headers: { "access-control-request-method": "GET" } });
+        expect(preflight.status === 204, `${hub} preflight of ${p} answered ${preflight.status}`);
+        // A browser sends the read only if the preflight names its origin and lets the invite header through.
+        expect(preflight.headers.get("access-control-allow-origin") === hub, `${hub} preflight of ${p} did not name its origin`);
+        expect(/\bauthorization\b/i.test(preflight.headers.get("access-control-allow-headers") || ""), `${hub} preflight of ${p} does not allow the invite header`);
+        expect(preflight.headers.get("access-control-allow-methods") === "GET", `${hub} preflight of ${p} offers ${preflight.headers.get("access-control-allow-methods")}`);
+      }
+      for (const [method, p, body] of refused){
+        const res = await from(hub, p, { method, ...(body ? { body: JSON.stringify(body) } : {}) });
+        expect(res.status === 403, `${hub} ${method} ${p} answered ${res.status}`);
+        const preflight = await from(hub, p, { method: "OPTIONS", headers: { "access-control-request-method": method } });
+        expect(preflight.status === 403, `${hub} preflight for ${method} ${p} answered ${preflight.status}`);
+      }
     }
     const played = (await api(made.invite, "/group/played")).body.played;
     expect(!played["edge hub song"], "a refused hub write was stored");
