@@ -61,7 +61,7 @@ jobs:
           - name: group sync
             os: macos-latest
             worker: true
-            run: npm run e2e:group
+            run: npm run e2e:group && npm run e2e:group-games
           - name: landing and journeys
             os: macos-latest
             run: >-
