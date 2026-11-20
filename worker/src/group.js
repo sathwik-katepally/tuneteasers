@@ -68,11 +68,23 @@ function sameHash(a, hex){
   return a.byteLength === b.byteLength && crypto.subtle.timingSafeEqual(a, b);
 }
 
+const originList = v => String(v || "").split(",").map(s => s.trim()).filter(Boolean);
+
 export function allowedOrigin(origin, env){
   if (!origin) return null;
   if (LOCAL_ORIGIN_RX.test(origin)) return origin;
-  const list = String(env.ALLOWED_ORIGINS || "").split(",").map(s => s.trim()).filter(Boolean);
-  return list.includes(origin) ? origin : null;
+  return originList(env.ALLOWED_ORIGINS).includes(origin) ? origin : null;
+}
+
+/* The game night hub is another site (HUB_ORIGINS) that only shows a group's
+   standings. It gets these reads and nothing else, so a fault on that site
+   cannot write to a group, make one or open a room. */
+const HUB_ROUTES = ["GET /api/group", "GET /api/group/results"];
+
+function hubOrigin(origin, env, request, url){
+  if (!origin || !originList(env.HUB_ORIGINS).includes(origin)) return null;
+  const method = request.method === "OPTIONS" ? request.headers.get("access-control-request-method") : request.method;
+  return HUB_ROUTES.includes(`${method} ${url.pathname}`) ? origin : null;
 }
 
 function reply(body, status, origin){
@@ -314,12 +326,13 @@ export const isGroupPath = path => path === "/api/groups" || path === "/api/grou
 
 export async function group(request, env, url, ctx){
   const originHeader = request.headers.get("origin");
-  const origin = allowedOrigin(originHeader, env);
+  const full = allowedOrigin(originHeader, env);
+  const origin = full || hubOrigin(originHeader, env, request, url);
   if (originHeader && !origin) return reply({ success: false, message: "origin not allowed" }, 403, null);
   if (request.method === "OPTIONS"){
     return new Response(null, { status: 204, headers: {
       ...(origin ? { "access-control-allow-origin": origin } : {}),
-      "access-control-allow-methods": "GET, POST, DELETE",
+      "access-control-allow-methods": origin && !full ? "GET" : "GET, POST, DELETE",
       "access-control-allow-headers": "authorization, content-type",
       "access-control-max-age": "86400",
       vary: "Origin",
