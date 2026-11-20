@@ -6,7 +6,7 @@
 import { SAAVN_BASES, SAAVN_QUERIES, SAAVN_PAGES, SAAVN_MIN_PLAYS, CORPUS_DRAW, CORPUS_BATCH, EXCLUDE_RX, ERAS, eraOf, SNIP_ACCEPTED, SNIP_WINDOW_SEC, SNIP_MAX_AGE_MS } from "./constants.js";
 import { COOLDOWN_MIN_FRESH, DRAW_WEIGHT, popularCut } from "./config";
 import { isFilmLang, langOf } from "./languages";
-import { de, songKey, shuffle, safeUrl, displayTitle } from "./utils.js";
+import { de, songKey, shuffle, safeUrl, listedTitle } from "./utils.js";
 import { sanitizeTrack, loadHistory, cooldownOf, loadBlocked, normArtist, isBlocked, type Cooldown } from "./storage";
 import { log, ms } from "./log.js";
 import type { Category, Lang, Songs, Track } from "../types";
@@ -429,8 +429,6 @@ function filmOf(album: string, title = ""): string {
   const from = FROM.exec(album) || FROM.exec(title);
   return from ? from[1].trim() : album.replace(OST, "").replace(/\s+-\s+(?:Single|EP)$/i, "").trim();
 }
-// Credits and soundtrack notes in a title only make a suggestion longer; judging ignores brackets anyway.
-const CREDITS = /\s*[([](?:feat\.?|ft\.?|with|original|from)\b[^)\]]*[)\]]/gi;
 const isFilmAlbum = (album: string, title: string) => FROM.test(album) || FROM.test(title) || OST.test(album);
 const leadArtist = (artist: string) => artist.split(",")[0].trim();
 
@@ -446,7 +444,7 @@ export async function answerTitles(langs: Lang[]): Promise<AnswerEntry[]> {
   const [corpus, catalog] = await Promise.all([loadCorpus(), loadCatalog(langs)]);
   const songs = new Map<string, AnswerEntry>(), films = new Map<string, AnswerEntry>();
   const add = (title: string, film: string, year: number, isFilm: boolean, artist = false) => {
-    const d = displayTitle(title).replace(CREDITS, "").trim(), k = songKey(d), fk = songKey(film);
+    const d = listedTitle(title), k = songKey(d), fk = songKey(film);
     if (!k) return;
     let e = songs.get(k);
     if (!e) songs.set(k, e = { title: d, films: [], year: year || 0 });

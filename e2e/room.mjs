@@ -29,7 +29,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { chromium, webkit, devices } from "playwright";
 import { serve, args, localWorker, silence, skipLanding, moreSettings, pickLangs, wireWorker, MUTE_ARGS, roomFields, sentStrings } from "./harness.mjs";
-import { displayTitle } from "../src/lib/utils.js";
+import { displayTitle, listedTitle } from "../src/lib/utils.js";
 import { CATEGORIES, DIFFICULTY, LADDER, ROOM_ANSWER_SECS, ROOM_AUTO_SECS, ROOM_DEAD_CLIP_MS, ROOM_DEAD_CLIP_SKIPS, ROOM_FILM_SHARE, ROOM_WRONG_BEAT_MS } from "../src/lib/config.ts";
 import { songKey } from "../src/lib/utils.js";
 import { isCorrect, isFilm } from "../src/lib/answer.js";
@@ -473,10 +473,12 @@ try {
   await shot(first, "phone-07-locked-out");
   await shot(host, "host-06-wrong");
   const title1 = displayTitle(await currentTitle());
-  // The phone's suggestions come from the public list it loaded itself.
+  // The phone's suggestions come from the public list it loaded itself, which shows a title
+  // without its credits: "Chal Ghar Chalen (feat. Arijit Singh)" is listed as "Chal Ghar Chalen".
   if (publicTitles.some(t => songKey(t) === songKey(title1))){
-    await second.page.getByLabel("Your answer").fill(title1.slice(0, Math.max(4, Math.ceil(title1.length * 0.6))));
-    await second.page.getByRole("option", { name: optionName(title1) }).first().waitFor({ timeout: 5000 });
+    const listed = listedTitle(title1);
+    await second.page.getByLabel("Your answer").fill(listed.slice(0, Math.max(4, Math.ceil(listed.length * 0.6))));
+    await second.page.getByRole("option", { name: optionName(listed) }).first().waitFor({ timeout: 5000 });
     await shot(second, "phone-05b-suggestions");
   }
   await answer(second, title1);
