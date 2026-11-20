@@ -51,8 +51,8 @@ try {
         const allowed = preflight.headers.get("access-control-allow-headers") || "";
         expect(/\bauthorization\b/i.test(allowed) && /\bcontent-type\b/i.test(allowed), `${hub} preflight allows only ${allowed}`);
       }
-      // Forehead seats ten, more than a show's cast.
-      const game = { id: `hub-site-${i}-game`, game: "forehead", mode: "players", finishedAt: now - 60000 + i, cast: players(10) };
+      // Forehead seats ten, more than a show's cast. Odd One's site saves Odd One.
+      const game = { id: `hub-site-${i}-game`, game: i ? "oddone" : "forehead", mode: "players", finishedAt: now - 60000 + i, cast: players(10) };
       const saved = await save(hub, game);
       expect(saved.status === 200 && same(await saved.json(), { ok: true }), `${hub} save answered ${saved.status}`);
       expect(saved.headers.get("access-control-allow-origin") === hub, `${hub} save came back without its CORS header`);
@@ -120,7 +120,7 @@ try {
     expect(posted.status === 200, `the app's own show answered ${posted.status}`);
     const { games, more } = await read(GAMENIGHT);
     expect(!more, "one page should hold everything");
-    expect(same(games.map(g => [g.id, g.game]), [["charades-night-1", "charades"], ["show-between-1", "tuneteasers"], ["hub-site-1-game", "forehead"], ["hub-site-0-game", "forehead"]]), `read ${JSON.stringify(games.map(g => [g.id, g.game]))}`);
+    expect(same(games.map(g => [g.id, g.game]), [["charades-night-1", "charades"], ["show-between-1", "tuneteasers"], ["hub-site-1-game", "oddone"], ["hub-site-0-game", "forehead"]]), `read ${JSON.stringify(games.map(g => [g.id, g.game]))}`);
     expect(same(games[1], { id: show.id, game: "tuneteasers", mode: "teams", finishedAt: show.finishedAt, cast: show.cast }), `the show came back as ${JSON.stringify(games[1])}`);
     // In pages of one, each page starts where the one before stopped.
     const paged = [];
