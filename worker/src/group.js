@@ -275,6 +275,9 @@ function castOf(v, max){
 
 // A result queued offline keeps its own finish time, within reason.
 const finishTime = (v, now) => Number.isInteger(v) && v <= now && v > now - LIMITS.resultBackdateDays * DAY ? v : now;
+// A hub game's time also decides which copy of it is kept. One from outside the window is pulled to the
+// window's edge, where it still counts as the older or the newer copy, instead of being stamped as now.
+const gameTime = (v, now) => Number.isInteger(v) ? Math.min(now, Math.max(v, now - LIMITS.resultBackdateDays * DAY)) : now;
 
 async function postResult(request, env, auth){
   const body = await readJson(request, LIMITS.body);
@@ -313,7 +316,7 @@ async function postGame(request, env, auth){
     body.id,
     oneOf(body.game, originList(env.HUB_GAMES), "game"),
     oneOf(body.mode, ["players", "teams"], "mode"),
-    finishTime(body.finishedAt, now),
+    gameTime(body.finishedAt, now),
     JSON.stringify(castOf(body.cast, LIMITS.gameCast)),
   ];
   const gid = auth.group.id;

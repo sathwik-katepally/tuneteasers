@@ -79,6 +79,8 @@ try {
       game,
       later,
       { ...game, finishedAt: now - 40000, cast: [{ name: "Red", score: 9 }, { name: "Blue", score: 9 }] },
+      // A copy that waited on a phone for longer than a result may be backdated is still the older copy.
+      { ...game, finishedAt: now - 31 * 86400e3, cast: [{ name: "Red", score: 8 }, { name: "Blue", score: 8 }] },
       { ...later, game: "forehead", mode: "players", finishedAt: now - 10000, cast: players(3) },
     ]){
       const res = await save(GAMENIGHT, copy);

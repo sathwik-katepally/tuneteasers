@@ -43,7 +43,7 @@ Everything is optional; with no group, or with the Worker unreachable, the game 
 | `POST /api/group/results` `{ id, finishedAt, mode, difficulty, mix, rounds, songs, cast }` | invite | Records a finished show once; `mix` is the show's language ids as a comma list (`hindi,english`), and the one word older clients send (`bolly`, `telugu`, `both`) is still accepted |
 | `POST /api/group/import` `{ played, tired? }` | invite | One-time import of a phone's own history (at most 1,000 songs across both kinds) |
 | `GET /api/group/games?before=&limit=` | invite | `{ games: [{ id, game, mode, finishedAt, cast }], more }`: the group's shows (as `game: "tuneteasers"`) and its hub games together, newest first, 20 per page |
-| `POST /api/group/games` `{ id, game, mode, finishedAt, cast }` | invite | Records a finished hub game; `game` is one of `HUB_GAMES`, and the same `id` sent again replaces the row unless the copy is older |
+| `POST /api/group/games` `{ id, game, mode, finishedAt, cast }` | invite | Records a finished hub game; `game` is one of `HUB_GAMES`, and the same `id` sent again replaces the row unless the copy is older or names another game (so an id is never shared between games) |
 | `DELETE /api/group` | owner | Deletes the group and all its rows |
 
 Each round is an event with a client-made id; the server stamps the time.
@@ -51,7 +51,8 @@ In one D1 batch the event is inserted once (`INSERT OR IGNORE`) and its song's t
 An older client that sends no `kind` records plays, and one that reads only `played` still gets every played song.
 Results are idempotent by the game's id.
 A hub game has no end screen, so its row can be replaced: the hub saves the same game again after more turns, under the same id, and the newer finish time wins.
-The import is the one place client timestamps are accepted, clamped to the played window and never in the future.
+That finish time is the client's, as it is for a show: never in the future, and at most 30 days back (an older one is pulled to that edge, so it still loses to a newer copy).
+For plays, the import is the one place client timestamps are accepted, clamped to the played window and never in the future.
 
 ## Data and retention
 
