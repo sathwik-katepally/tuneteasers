@@ -31,3 +31,7 @@ export function displayTitle(s){
     .trim();
   return t || String(s||"");
 }
+// Credits and soundtrack notes in a title only make a suggestion longer; judging ignores brackets anyway.
+const CREDITS = /\s*[([](?:feat\.?|ft\.?|with|original|from)\b[^)\]]*[)\]]/gi;
+/* A title as a buzz-in phone's answer list shows it. */
+export const listedTitle = s => displayTitle(s).replace(CREDITS, "").trim();
