@@ -8,7 +8,8 @@
   "vars": {
     "ALLOWED_ORIGINS": "https://sathwik-katepally.github.io",
     // The game night hub, on the Game Night site and at its first home on Odd One's, where phones with an
-    // older copy of that app still open it. These sites may only read a group and its results.
+    // older copy of that app still open it. These sites may read a group and its finished games, and record
+    // a game of their own (HUB_GAMES), and nothing else.
     "HUB_ORIGINS": "https://oddone.sathwik-katepally.workers.dev,https://gamenight.sathwik-katepally.workers.dev",
     "HUB_GAMES": "charades,forehead",
     "RESULT_TTL_DAYS": "365",

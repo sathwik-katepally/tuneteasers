@@ -11,8 +11,8 @@
      or a malformed one;
    - shows and hub games read back together, newest first and in pages, while
      the app's own list of shows never contains a hub game;
-   - a game past the results window is not served, and deleting the group
-     deletes its games.
+   - a game past the results window is swept away with the first write, one
+     not yet swept is not served, and deleting the group deletes its games.
    node e2e/group-games.mjs */
 import { localWorker } from "./harness.mjs";
 
@@ -36,6 +36,9 @@ const [GAMENIGHT] = HUB_ORIGINS;
 const now = Date.now();
 const players = n => Array.from({ length: n }, (_, i) => ({ name: `Player ${i + 1}`, score: i }));
 
+// Put there by hand before anything is written, so the first write's sweep finds it.
+worker.sql(`INSERT INTO game_results (group_id, result_id, game, mode, finished_at, cast_json) VALUES ('${made.group.id}', 'swept-game-1', 'forehead', 'players', ${now - 366 * 86400e3}, '[]')`);
+
 try {
   await check("each hub site may record a game and read every finished game", async () => {
     for (const [i, hub] of HUB_ORIGINS.entries()){
@@ -57,6 +60,13 @@ try {
       expect(back, `${hub} does not read back the game it saved`);
       expect(same(back, { ...game, cast: game.cast.map(c => ({ ...c, members: [] })) }), `${hub} read back ${JSON.stringify(back)}`);
     }
+    // The sweep runs behind the first write's answer, so it is given a moment.
+    let left = 1;
+    for (let tries = 0; left && tries < 20; tries++){
+      await new Promise(r => setTimeout(r, 250));
+      left = worker.rows("SELECT COUNT(*) AS n FROM game_results WHERE result_id = 'swept-game-1'")[0].n;
+    }
+    expect(left === 0, "a hub game a year old was not swept away by the first write");
     const stranger = await save("https://example.com", { id: "stranger-game-1", game: "forehead", mode: "players", cast: players(3) });
     expect(stranger.status === 403, `an unlisted site's save answered ${stranger.status}`);
     expect((await from("https://example.com", "/group/games")).status === 403, "an unlisted site could read the games");
