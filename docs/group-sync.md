@@ -21,6 +21,8 @@ Everything is optional; with no group, or with the Worker unreachable, the game 
 - The owner secret is the only thing that can delete the group (`DELETE /api/group`); member invites cannot.
 - Group responses are `cache-control: no-store` and never go through the edge cache the Saavn proxy uses.
 - CORS on group routes allows only `ALLOWED_ORIGINS` (the Pages origin) and `http://localhost` / `http://127.0.0.1` on any port; a request with any other `Origin` gets 403.
+- `HUB_ORIGINS` (the game night hub, served from Odd One's site) is a second, read-only list: such an origin may call `GET /api/group` and `GET /api/group/results` and gets 403 on every other group route and on the room routes.
+  A route the hub needs later is added to `HUB_ROUTES` in `worker/src/group.js`, never by moving the origin into `ALLOWED_ORIGINS`.
   The public Saavn proxy routes keep `*`.
 - Rate limits (Workers rate limiting bindings in `worker/wrangler.jsonc`, approximate and per Cloudflare location): 120 group requests a minute per IP, 60 writes a minute per group, 5 new groups a minute per IP.
 - Input validation in `worker/src/group.js`: body size (16 KB, 64 KB for import), song key shape, id shape, name lengths (24, group 32), cast and member counts, score and round ranges, enums.
