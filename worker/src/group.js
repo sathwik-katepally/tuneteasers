@@ -18,6 +18,8 @@ const LIMITS = {
   groupName: 32,
   name: 24,
   cast: 8,
+  // A hub game seats more than a show does: Forehead takes ten.
+  gameCast: 16,
   members: 6,
   score: 100000,
   rounds: 20,
@@ -26,7 +28,6 @@ const LIMITS = {
   importSongs: 1000,
   songKey: 120,
   pageSize: 50,
-  // A result queued offline keeps its own finish time, within reason.
   resultBackdateDays: 30,
 };
 
@@ -76,10 +77,12 @@ export function allowedOrigin(origin, env){
   return originList(env.ALLOWED_ORIGINS).includes(origin) ? origin : null;
 }
 
-/* The game night hub is another site (HUB_ORIGINS) that only shows a group's
-   standings. It gets these reads and nothing else, so a fault on that site
-   cannot write to a group, make one or open a room. */
-const HUB_ROUTES = ["GET /api/group", "GET /api/group/results"];
+/* The game night hub is another site (HUB_ORIGINS). It shows a group's
+   standings and records the games played on it, and gets these routes and
+   nothing else, so a fault on that site cannot touch a group's songs or
+   shows, make a group or open a room. */
+const HUB_ROUTES = ["GET /api/group", "GET /api/group/results", "GET /api/group/games", "POST /api/group/games"];
+const hubMethods = path => HUB_ROUTES.filter(r => r.split(" ")[1] === path).map(r => r.split(" ")[0]).join(", ");
 
 function hubOrigin(origin, env, request, url){
   if (!origin || !originList(env.HUB_ORIGINS).includes(origin)) return null;
@@ -201,6 +204,27 @@ async function results(env, auth, url){
   return [{ results: list, more: rows.length > size }];
 }
 
+/* Every finished game of a group, newest first: its TuneTeasers shows and the
+   games recorded from the hub, each with the game it was. The hub's standings
+   read this; `results` above stays as it is for the TuneTeasers app. */
+async function games(env, auth, url){
+  const now = Date.now();
+  const before = Number(url.searchParams.get("before")) || now + 1;
+  const size = Math.min(LIMITS.pageSize, Math.max(1, parseInt(url.searchParams.get("limit")) || 20));
+  const { results: rows } = await env.DB.prepare(
+    `SELECT result_id, 'tuneteasers' AS game, mode, finished_at, cast_json FROM results
+     WHERE group_id = ?1 AND finished_at > ?2 AND finished_at < ?3
+     UNION ALL
+     SELECT result_id, game, mode, finished_at, cast_json FROM game_results
+     WHERE group_id = ?1 AND finished_at > ?2 AND finished_at < ?3
+     ORDER BY finished_at DESC LIMIT ?4`,
+  ).bind(auth.group.id, now - ttl(env).results, before, size + 1).all();
+  const list = rows.slice(0, size).map(r => ({
+    id: r.result_id, game: r.game, mode: r.mode, finishedAt: r.finished_at, cast: JSON.parse(r.cast_json),
+  }));
+  return [{ games: list, more: rows.length > size }];
+}
+
 /* Each round is an event with a client-made id and a server timestamp. A
    retried event keeps its first timestamp, and the cooldown only ever moves
    forward (MAX), so late or repeated requests cannot shorten it. */
@@ -235,12 +259,9 @@ async function postRounds(request, env, auth){
   return [{ ok: true, count: rounds.length }];
 }
 
-async function postResult(request, env, auth){
-  const body = await readJson(request, LIMITS.body);
-  if (typeof body.id !== "string" || !EVENT_ID_RX.test(body.id)) throw new HttpError(400, "result id is not valid");
-  if (!Array.isArray(body.cast) || !body.cast.length || body.cast.length > LIMITS.cast)
-    throw new HttpError(400, `cast must list 1 to ${LIMITS.cast} players or teams`);
-  const cast = body.cast.map(c => {
+function castOf(v, max){
+  if (!Array.isArray(v) || !v.length || v.length > max) throw new HttpError(400, `cast must list 1 to ${max} players or teams`);
+  return v.map(c => {
     if (!c || typeof c !== "object") throw new HttpError(400, "cast entry is not valid");
     const members = c.members === undefined ? [] : c.members;
     if (!Array.isArray(members) || members.length > LIMITS.members) throw new HttpError(400, `a team has at most ${LIMITS.members} members`);
@@ -250,11 +271,21 @@ async function postResult(request, env, auth){
       members: members.map(m => cleanText(m, LIMITS.name, "member name")),
     };
   });
+}
+
+// A result queued offline keeps its own finish time, within reason.
+const finishTime = (v, now) => Number.isInteger(v) && v <= now && v > now - LIMITS.resultBackdateDays * DAY ? v : now;
+// A hub game's time also decides which copy of it is kept. One from outside the window is pulled to the
+// window's edge, where it still counts as the older or the newer copy, instead of being stamped as now.
+const gameTime = (v, now) => Number.isInteger(v) ? Math.min(now, Math.max(v, now - LIMITS.resultBackdateDays * DAY)) : now;
+
+async function postResult(request, env, auth){
+  const body = await readJson(request, LIMITS.body);
+  if (typeof body.id !== "string" || !EVENT_ID_RX.test(body.id)) throw new HttpError(400, "result id is not valid");
+  const cast = castOf(body.cast, LIMITS.cast);
   const now = Date.now();
-  const finishedAt = Number.isInteger(body.finishedAt) && body.finishedAt <= now && body.finishedAt > now - LIMITS.resultBackdateDays * DAY
-    ? body.finishedAt : now;
   const row = [
-    body.id, finishedAt,
+    body.id, finishTime(body.finishedAt, now),
     oneOf(body.mode, ["players", "teams"], "mode"),
     oneOf(body.difficulty, ["easy", "medium", "hard"], "difficulty"),
     mixOf(body.mix),
@@ -267,6 +298,34 @@ async function postResult(request, env, auth){
     env.DB.prepare(
       `INSERT OR IGNORE INTO results (group_id, result_id, finished_at, mode, difficulty, mix, rounds, songs, cast_json)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(gid, ...row),
+    env.DB.prepare("UPDATE groups SET active_at = ? WHERE id = ?").bind(now, gid),
+  ]);
+  return [{ ok: true }];
+}
+
+/* A finished game from the game night hub: who played and what they scored.
+   Only the games in HUB_GAMES, never a TuneTeasers show. One game is one row:
+   the hub has no end screen, so the same game saved again after more turns
+   replaces its row, unless the copy that arrives is the older one. */
+async function postGame(request, env, auth){
+  const body = await readJson(request, LIMITS.body);
+  if (typeof body.id !== "string" || !EVENT_ID_RX.test(body.id)) throw new HttpError(400, "game id is not valid");
+  const now = Date.now();
+  const row = [
+    body.id,
+    oneOf(body.game, originList(env.HUB_GAMES), "game"),
+    oneOf(body.mode, ["players", "teams"], "mode"),
+    gameTime(body.finishedAt, now),
+    JSON.stringify(castOf(body.cast, LIMITS.gameCast)),
+  ];
+  const gid = auth.group.id;
+  await env.DB.batch([
+    env.DB.prepare(
+      `INSERT INTO game_results (group_id, result_id, game, mode, finished_at, cast_json) VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT (group_id, result_id) DO UPDATE
+       SET mode = excluded.mode, finished_at = excluded.finished_at, cast_json = excluded.cast_json
+       WHERE excluded.finished_at >= game_results.finished_at AND excluded.game = game_results.game`,
     ).bind(gid, ...row),
     env.DB.prepare("UPDATE groups SET active_at = ? WHERE id = ?").bind(now, gid),
   ]);
@@ -307,7 +366,7 @@ async function postImport(request, env, auth){
 async function deleteGroup(env, auth){
   if (auth.role !== "owner") throw new HttpError(403, "only the phone that made the group can delete it");
   const gid = auth.group.id;
-  await env.DB.batch(["round_events", "played", "tired", "results"].map(t => env.DB.prepare(`DELETE FROM ${t} WHERE group_id = ?`).bind(gid))
+  await env.DB.batch(["round_events", "played", "tired", "results", "game_results"].map(t => env.DB.prepare(`DELETE FROM ${t} WHERE group_id = ?`).bind(gid))
     .concat(env.DB.prepare("DELETE FROM groups WHERE id = ?").bind(gid)));
   return [null, 204];
 }
@@ -317,6 +376,8 @@ const ROUTES = {
   "DELETE /api/group": (req, env, auth) => deleteGroup(env, auth),
   "GET /api/group/played": (req, env, auth) => played(env, auth),
   "GET /api/group/results": (req, env, auth, url) => results(env, auth, url),
+  "GET /api/group/games": (req, env, auth, url) => games(env, auth, url),
+  "POST /api/group/games": (req, env, auth) => postGame(req, env, auth),
   "POST /api/group/rounds": (req, env, auth) => postRounds(req, env, auth),
   "POST /api/group/results": (req, env, auth) => postResult(req, env, auth),
   "POST /api/group/import": (req, env, auth) => postImport(req, env, auth),
@@ -332,7 +393,7 @@ export async function group(request, env, url, ctx){
   if (request.method === "OPTIONS"){
     return new Response(null, { status: 204, headers: {
       ...(origin ? { "access-control-allow-origin": origin } : {}),
-      "access-control-allow-methods": origin && !full ? "GET" : "GET, POST, DELETE",
+      "access-control-allow-methods": origin && !full ? hubMethods(url.pathname) : "GET, POST, DELETE",
       "access-control-allow-headers": "authorization, content-type",
       "access-control-max-age": "86400",
       vary: "Origin",
@@ -380,6 +441,7 @@ async function purgeExpired(env){
   const t = ttl(env);
   await env.DB.batch([
     env.DB.prepare("DELETE FROM results WHERE finished_at < ?").bind(now - t.results),
+    env.DB.prepare("DELETE FROM game_results WHERE finished_at < ?").bind(now - t.results),
     env.DB.prepare("DELETE FROM round_events WHERE played_at < ?").bind(now - t.played),
     env.DB.prepare("DELETE FROM played WHERE last_played_at < ?").bind(now - t.played),
     env.DB.prepare("DELETE FROM tired WHERE last_tired_at < ?").bind(now - t.played),

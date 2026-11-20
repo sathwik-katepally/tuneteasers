@@ -78,7 +78,8 @@ export async function localWorker(){
     proc.on("exit", code => reject(new Error(`wrangler dev exited ${code}:\n${out.slice(-800)}`)));
   });
   const sql = command => execFileSync("npx", ["wrangler", "d1", "execute", "DB", "--local", "--persist-to", persist, "--command", command], { cwd: WORKER_DIR, stdio: "ignore" });
-  return { origin: `http://localhost:${port}`, sql, stop: () => { proc.kill(); fs.rmSync(persist, { recursive: true, force: true }); } };
+  const rows = command => JSON.parse(execFileSync("npx", ["wrangler", "d1", "execute", "DB", "--local", "--persist-to", persist, "--json", "--command", command], { cwd: WORKER_DIR, stdio: ["ignore", "pipe", "ignore"] }))[0].results;
+  return { origin: `http://localhost:${port}`, sql, rows, stop: () => { proc.kill(); fs.rmSync(persist, { recursive: true, force: true }); } };
 }
 
 /* Test browsers must never make a sound on the machine running them.

@@ -7,7 +7,8 @@
    - an invite to a group idle past its expiry is refused, and a write
      cannot bring the group back;
    - each site the game night hub is served from can read a group and its
-     results, and is refused every write, every other read and the room routes;
+     results, and is refused the app's writes, every other read and the room
+     routes (the games it records itself are in group-games.mjs);
    - a malformed #join= link shows a clear message instead of throwing.
    node e2e/group-edge.mjs */
 import path from "node:path";
@@ -107,7 +108,7 @@ try {
     expect(again.status === 403, "the write brought the expired group back");
   });
 
-  await check("each site the game night hub is served from may read a group and nothing else", async () => {
+  await check("each site the game night hub is served from may read a group and write nothing of the app's", async () => {
     // One group for every site: making more would run into the limit on new groups a minute.
     const made = await (await fetch(worker.origin + "/api/groups", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Edge hub" }) })).json();
     const from = (origin, p, init = {}) => fetch(worker.origin + "/api" + p, { ...init, headers: { origin, authorization: `Bearer ${made.invite}`, "content-type": "application/json", ...init.headers } });
