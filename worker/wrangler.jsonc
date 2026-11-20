@@ -11,7 +11,7 @@
     // older copy of that app still open it. These sites may read a group and its finished games, and record
     // a game of their own (HUB_GAMES), and nothing else.
     "HUB_ORIGINS": "https://oddone.sathwik-katepally.workers.dev,https://gamenight.sathwik-katepally.workers.dev",
-    "HUB_GAMES": "charades,forehead",
+    "HUB_GAMES": "charades,forehead,oddone",
     "RESULT_TTL_DAYS": "365",
     "PLAYED_TTL_DAYS": "30",
     "GROUP_IDLE_TTL_DAYS": "365"
@@ -43,7 +43,7 @@
       "vars": {
         "ALLOWED_ORIGINS": "https://sathwik-katepally.github.io",
         "HUB_ORIGINS": "https://oddone.sathwik-katepally.workers.dev,https://gamenight.sathwik-katepally.workers.dev",
-        "HUB_GAMES": "charades,forehead",
+        "HUB_GAMES": "charades,forehead,oddone",
         "RESULT_TTL_DAYS": "365",
         "PLAYED_TTL_DAYS": "30",
         "GROUP_IDLE_TTL_DAYS": "365"
